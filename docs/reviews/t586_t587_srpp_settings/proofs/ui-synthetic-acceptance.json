@@ -1,0 +1,70 @@
+{
+  "result": "PASS",
+  "syntheticRadarData": true,
+  "realPythonAndBffResultFixture": true,
+  "fixturePath": "/tmp/srpp-life-cashflow-fields-review/ui-fixtures/center-actual-bff-presentation.json",
+  "resultSha256": "9933c2442a0dc31d38d58f54aba27632bfdb7f0b783b0c88a9eed2b538b43c7f",
+  "runId": "22222222-2222-4222-8222-222222222222",
+  "rootFetchCount": 2,
+  "runDetailCalls": [
+    "22222222-2222-4222-8222-222222222222",
+    "22222222-2222-4222-8222-222222222222"
+  ],
+  "shortListCalls": [
+    {
+      "draftId": null,
+      "revision": null
+    },
+    {
+      "draftId": "draft-synthetic-1",
+      "revision": "1"
+    },
+    {
+      "draftId": null,
+      "revision": null
+    },
+    {
+      "draftId": "draft-synthetic-1",
+      "revision": "1"
+    }
+  ],
+  "shortDetailCalls": [
+    {
+      "stockCode": "0050",
+      "market": "台股"
+    }
+  ],
+  "observations": {
+    "weightTotals": [
+      "99%",
+      "100%",
+      "101%"
+    ],
+    "moneyKeyboardAppend": "100,000 → 1,000,000",
+    "moneyBoundDisplayedWithComma": true,
+    "baseline": {
+      "birthDate": "1970-10-15",
+      "monthlySalaryNominalTwd": "127000.00"
+    },
+    "scenario": {
+      "birthDate": "1971-10-15",
+      "monthlySalaryNominalTwd": "128000.00"
+    },
+    "savedMoneyPayload": {
+      "key": "homeRepairCost",
+      "value": 1000000,
+      "type": "number"
+    },
+    "shortDetailPriceReference": "121.123456",
+    "postReloadSavedValue": "1,000,000"
+  },
+  "savedPayloadFieldCount": 76,
+  "pageErrors": [],
+  "screenshots": [
+    "/tmp/srpp-settings-acceptance/t586-t587-desktop-settings.png",
+    "/tmp/srpp-settings-acceptance/t586-t587-desktop-results.png",
+    "/tmp/srpp-settings-acceptance/t586-t587-desktop-short.png",
+    "/tmp/srpp-settings-acceptance/t586-t587-mobile.png",
+    "/tmp/srpp-settings-acceptance/t586-t587-mobile-radar.png"
+  ]
+}

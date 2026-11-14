@@ -87,7 +87,7 @@
               另存新草稿
             </el-button>
             <el-button type="primary" :icon="DocumentChecked" :loading="savingDraft"
-              :disabled="!activeDraft || !draftDirty || simulating || draftBaseChanged" @click="saveDraft">
+              :disabled="!activeDraft || !draftDirty || simulating || draftBaseChanged || moneyInputErrorKeys.length || shortStrategyErrors.length || pairedOverrideErrors.length" @click="saveDraft">
               儲存修改
             </el-button>
             <el-button :icon="RefreshLeft" :disabled="!draftDirty || savingDraft || simulating || draftBaseChanged" @click="resetDraft">
@@ -117,12 +117,16 @@
           <span v-if="activeDraft?.baseBundleSha256">建立於{{ activeDraft.baseBundleSha256 === catalog?.baseBundleSha256 ? '目前版本' : '舊版本' }}</span>
           <span v-else>目前顯示尚未另存的設定</span>
         </div>
+        <el-alert v-if="moneyInputErrorKeys.length" type="warning" show-icon :closable="false" class="operation-alert"
+          title="有金額欄位尚未完成輸入" description="請修正金額格式或完成小數輸入後，再建立或儲存草稿；暫時輸入不會被當成零。" />
+        <el-alert v-if="pairedOverrideErrors.length" type="warning" show-icon :closable="false" class="operation-alert"
+          title="勞保／勞退指定值需要成對輸入" :description="pairedOverrideErrors.join(' ')" />
 
         <el-alert v-if="!fields.length" type="warning" show-icon :closable="false"
           title="目前沒有可編輯欄位" description="目錄資料未提供欄位清單；請重新整理，設定不會以本機預設值代替。" />
 
-        <el-tabs v-else v-model="activeFieldGroup" class="field-groups">
-          <el-tab-pane v-for="group in fieldGroups" :key="group.name" :label="group.name" :name="group.name">
+        <el-tabs v-else-if="visibleFieldGroups.length" v-model="activeFieldGroup" class="field-groups">
+          <el-tab-pane v-for="group in visibleFieldGroups" :key="group.name" :label="group.name" :name="group.name">
             <div class="field-grid">
               <article v-for="field in group.fields" :key="field.id" class="field-card">
                 <div class="field-heading">
@@ -132,6 +136,7 @@
                     <el-tag v-else type="warning" size="small" effect="plain">僅供情境模擬</el-tag>
                   </div>
                 </div>
+                <p v-if="field.help" class="field-help">{{ field.help }}</p>
                 <p v-if="field.reason" class="field-reason">{{ fieldReason(field) }}</p>
                 <p v-else-if="field.retirementImpact === 'NOT_MODELED'" class="field-reason">
                   此欄位不納入退休現金流情境模型。
@@ -142,7 +147,7 @@
 
                 <el-date-picker v-if="field.type === 'date'" :id="fieldInputId(field)"
                   :model-value="values[field.id] ?? null" type="date" value-format="YYYY-MM-DD"
-                  format="YYYY年MM月DD日" placeholder="選擇日期" :disabled="!field.editable || savingDraft || draftBaseChanged"
+                  format="YYYY年MM月DD日" placeholder="選擇日期" :disabled="fieldDisabled(field)"
                   class="field-control" @update:model-value="setFieldValue(field.id, $event)" />
 
                 <div v-else-if="field.type === 'weights'" class="weights-grid">
@@ -150,25 +155,148 @@
                     <div v-for="assetKey in field.assetKeys" :key="assetKey" class="weight-field">
                       <label :for="weightInputId(field, assetKey)">{{ field.assetLabels?.[assetKey] || assetKey }}</label>
                       <el-input :id="weightInputId(field, assetKey)" type="number" inputmode="decimal" step="any"
-                        min="0" max="100" :model-value="fractionInputValue(values[field.id]?.[assetKey])"
-                        :disabled="!field.editable || savingDraft || draftBaseChanged"
+                        min="0" max="100" :model-value="weightInputDisplayValue(values[field.id]?.[assetKey])"
+                        :disabled="fieldDisabled(field)"
                         @update:model-value="setWeightValue(field.id, assetKey, $event)">
                         <template #append>%</template>
                       </el-input>
                     </div>
                   </template>
                   <div v-else class="catalog-warning">目錄未提供配置標的清單，避免自行增刪標的，暫不開放編輯。</div>
+                  <div v-if="field.assetKeys?.length" class="weight-total" :class="`weight-total-${weightTotal(field).status}`" aria-live="polite">
+                    <strong>合計：{{ weightTotalLabel(field) }}</strong>
+                    <span>{{ weightTotalMessage(field) }}</span>
+                  </div>
                 </div>
 
-                <el-input v-else :id="fieldInputId(field)" type="number" inputmode="decimal"
-                  :step="field.type === 'integer' ? 1 : 'any'"
-                  :min="displayBound(field.min, field)" :max="displayBound(field.max, field)"
-                  :model-value="isFractionField(field) ? fractionInputValue(values[field.id]) : values[field.id] ?? null"
-                  :disabled="!field.editable || savingDraft || draftBaseChanged"
-                  class="field-control" @update:model-value="setFieldValue(field.id, $event)">
-                  <template v-if="isFractionField(field)" #append>%</template>
-                  <template v-else-if="field.unit" #append>{{ field.unit }}</template>
-                </el-input>
+                <div v-else-if="field.type === 'boolean'" class="boolean-editor">
+                  <el-switch :id="fieldInputId(field)" :model-value="values[field.id] === true"
+                    :disabled="fieldDisabled(field)" active-text="啟用" inactive-text="關閉"
+                    @update:model-value="setBooleanValue(field.id, $event)" />
+                </div>
+
+                <div v-else-if="field.type === 'events'" class="typed-list-editor">
+                  <div v-if="!arrayFieldValue(field).length" class="typed-list-empty">目前沒有大額支出事件。</div>
+                  <div v-for="(row, index) in arrayFieldValue(field)" :key="`${field.id}-${index}`" class="typed-editor-row event-editor-row">
+                    <el-date-picker :model-value="row.date || null" type="date" value-format="YYYY-MM-DD"
+                      format="YYYY年MM月DD日" placeholder="支出日期" :disabled="fieldDisabled(field)"
+                      @update:model-value="updateArrayField(field.id, index, 'date', $event || '')" />
+                    <el-input :model-value="row.name ?? ''" placeholder="用途（如：買車）" maxlength="100"
+                      :disabled="fieldDisabled(field)" @update:model-value="updateArrayField(field.id, index, 'name', $event)" />
+                    <el-input :model-value="arrayMoneyValue(field.id, index, 'amount', row.amount)" type="text" inputmode="decimal"
+                      placeholder="實質新臺幣元" :disabled="fieldDisabled(field)"
+                      @focus="focusArrayMoney(field.id, index, 'amount', row.amount)"
+                      @update:model-value="updateArrayMoney(field.id, index, 'amount', $event)"
+                      @blur="commitArrayMoney(field.id, index, 'amount')" />
+                    <el-button link type="danger" :icon="Delete" :disabled="fieldDisabled(field)" @click="removeArrayRow(field.id, index)">刪除</el-button>
+                  </div>
+                  <el-button text :icon="Plus" :disabled="fieldDisabled(field) || arrayFieldValue(field).length >= 100"
+                    @click="addArrayRow(field)">新增大額支出</el-button>
+                  <p class="typed-list-note">金額以 2026 年 8 月實質新臺幣計；同日多筆會由系統合併計算。原購車日期不會隨生日或給付日期移動。</p>
+                </div>
+
+                <div v-else-if="field.type === 'datedBonuses'" class="typed-list-editor">
+                  <div class="typed-list-note bonus-priority">指定日期表優先；未列同名該年度時才使用每年規則。月數代表發放日月薪倍數，並非固定金額或保證給付。</div>
+                  <div v-if="!arrayFieldValue(field).length" class="typed-list-empty">目前沒有指定日期獎金。</div>
+                  <div v-for="(row, index) in arrayFieldValue(field)" :key="`${field.id}-${index}`" class="typed-editor-row dated-bonus-row">
+                    <el-input :model-value="row.name ?? ''" placeholder="年終／績效／節慶獎金名稱" maxlength="100"
+                      :disabled="fieldDisabled(field)" @update:model-value="updateArrayField(field.id, index, 'name', $event)" />
+                    <el-date-picker :model-value="row.pay_date || null" type="date" value-format="YYYY-MM-DD"
+                      format="YYYY年MM月DD日" placeholder="發放日期" :disabled="fieldDisabled(field)"
+                      @update:model-value="updateArrayField(field.id, index, 'pay_date', $event || '')" />
+                    <el-input-number :model-value="row.months ?? null" :min="0" :max="24" :step="0.1" :precision="4"
+                      controls-position="right" placeholder="月薪倍數" :disabled="fieldDisabled(field)"
+                      @update:model-value="updateArrayField(field.id, index, 'months', $event)" />
+                    <el-date-picker :model-value="row.festival_date || null" type="date" value-format="YYYY-MM-DD"
+                      format="YYYY年MM月DD日" placeholder="節日日期（選填）" clearable :disabled="fieldDisabled(field)"
+                      @update:model-value="updateOptionalArrayField(field.id, index, 'festival_date', $event)" />
+                    <el-button link type="danger" :icon="Delete" :disabled="fieldDisabled(field)" @click="removeArrayRow(field.id, index)">刪除</el-button>
+                  </div>
+                  <el-button text :icon="Plus" :disabled="fieldDisabled(field) || arrayFieldValue(field).length >= 100"
+                    @click="addArrayRow(field)">新增指定日期獎金</el-button>
+                </div>
+
+                <div v-else-if="field.type === 'recurringBonuses'" class="typed-list-editor">
+                  <div class="typed-list-note bonus-priority">指定日期表優先；未列同名該年度時才使用每年規則。月份例外只影響指定年份，既有指定日期不會被改動。</div>
+                  <div v-if="!arrayFieldValue(field).length" class="typed-list-empty">目前沒有每年獎金規則。</div>
+                  <div v-for="(row, index) in arrayFieldValue(field)" :key="`${field.id}-${index}`" class="recurring-bonus-card">
+                    <div class="typed-editor-row recurring-bonus-row">
+                      <el-input :model-value="row.name ?? ''" placeholder="年終／績效／節慶獎金名稱" maxlength="100"
+                        :disabled="fieldDisabled(field)" @update:model-value="updateArrayField(field.id, index, 'name', $event)" />
+                      <el-input-number :model-value="row.months ?? null" :min="0" :max="24" :step="0.1" :precision="4"
+                        controls-position="right" placeholder="月薪倍數" :disabled="fieldDisabled(field)"
+                        @update:model-value="updateArrayField(field.id, index, 'months', $event)" />
+                      <el-select :model-value="row.month ?? null" placeholder="每年月份" :disabled="fieldDisabled(field)"
+                        @update:model-value="updateArrayField(field.id, index, 'month', $event)">
+                        <el-option v-for="month in 12" :key="month" :label="`${month} 月`" :value="month" />
+                      </el-select>
+                      <el-button link type="danger" :icon="Delete" :disabled="fieldDisabled(field)" @click="removeArrayRow(field.id, index)">刪除</el-button>
+                    </div>
+                    <details class="month-exceptions">
+                      <summary>指定年份月份例外（{{ Object.keys(row.month_by_year || {}).length }}）</summary>
+                      <div v-if="Object.keys(row.month_by_year || {}).length" class="exception-list">
+                        <div v-for="year in sortedExceptionYears(row)" :key="year" class="month-exception-row">
+                          <span>{{ year }} 年</span>
+                          <el-select :model-value="row.month_by_year[year]" :disabled="fieldDisabled(field)"
+                            @update:model-value="setMonthException(field.id, index, year, $event)">
+                            <el-option v-for="month in 12" :key="month" :label="`${month} 月`" :value="month" />
+                          </el-select>
+                          <el-button link type="danger" :disabled="fieldDisabled(field)"
+                            @click="removeMonthException(field.id, index, year)">移除例外</el-button>
+                        </div>
+                      </div>
+                      <div class="month-exception-add">
+                        <el-input-number v-model="exceptionYearDrafts[`${field.id}:${index}`]" :min="1900" :max="2200" :step="1"
+                          controls-position="right" placeholder="年份" :disabled="fieldDisabled(field)" />
+                        <el-select v-model="exceptionMonthDrafts[`${field.id}:${index}`]" :disabled="fieldDisabled(field)">
+                          <el-option v-for="month in 12" :key="month" :label="`${month} 月`" :value="month" />
+                        </el-select>
+                        <el-button size="small" :disabled="fieldDisabled(field) || !canAddMonthException(field, index)"
+                          @click="addMonthException(field.id, index)">新增月份例外</el-button>
+                      </div>
+                    </details>
+                  </div>
+                  <el-button text :icon="Plus" :disabled="fieldDisabled(field) || arrayFieldValue(field).length >= 32"
+                    @click="addArrayRow(field)">新增每年獎金規則</el-button>
+                </div>
+
+                <div v-else-if="field.type === 'bearLadder' || field.type === 'bullLadder'" class="readonly-ladder">
+                  <p class="field-reason">來源五批規則唯讀展示；月頻情境不是每日雷達或下單授權。</p>
+                  <el-table :data="arrayFieldValue(field)" size="small" stripe empty-text="來源未提供梯級資料">
+                    <template v-if="field.type === 'bearLadder'">
+                      <el-table-column label="回撤門檻" min-width="110"><template #default="{ row }">{{ formatFraction(row.drawdown) }}</template></el-table-column>
+                      <el-table-column label="窗口預算比例" min-width="130"><template #default="{ row }">{{ formatFraction(row.share_of_window_budget) }}</template></el-table-column>
+                    </template>
+                    <template v-else>
+                      <el-table-column label="高於錨點" min-width="110"><template #default="{ row }">{{ formatFraction(row.gain_above_anchor) }}</template></el-table-column>
+                      <el-table-column label="高水位拉回" min-width="110"><template #default="{ row }">{{ formatFraction(row.pullback_from_high_watermark) }}</template></el-table-column>
+                      <el-table-column label="窗口預算比例" min-width="130"><template #default="{ row }">{{ formatFraction(row.share_of_window_budget) }}</template></el-table-column>
+                    </template>
+                  </el-table>
+                </div>
+
+                <div v-else-if="field.type === 'number' || field.type === 'integer'" class="field-control-wrap">
+                  <el-input v-if="isMoneyField(field)" :id="fieldInputId(field)" type="text" inputmode="decimal"
+                    :model-value="fieldMoneyValue(field)" :disabled="fieldDisabled(field)"
+                    :class="{ 'money-input-invalid': moneyInputInvalid(fieldMoneyKey(field)) }"
+                    class="field-control" @focus="focusFieldMoney(field)"
+                    @update:model-value="updateFieldMoney(field, $event)" @blur="commitFieldMoney(field)">
+                    <template v-if="field.unit" #append>{{ field.unit }}</template>
+                  </el-input>
+                  <el-input v-else :id="fieldInputId(field)" type="number" inputmode="decimal"
+                    :step="field.type === 'integer' ? 1 : 'any'"
+                    :min="displayBound(field.min, field)" :max="displayBound(field.max, field)"
+                    :model-value="isFractionField(field) ? fractionInputValue(values[field.id]) : values[field.id] ?? null"
+                    :disabled="fieldDisabled(field)" class="field-control"
+                    @update:model-value="setFieldValue(field.id, $event)">
+                    <template v-if="isFractionField(field)" #append>%</template>
+                    <template v-else-if="field.unit" #append>{{ field.unit }}</template>
+                  </el-input>
+                </div>
+
+                <div v-else class="catalog-warning">
+                  目錄型別「{{ field.type }}」未提供可安全編輯的表單；原值會保留，請勿以自由格式覆寫。
+                </div>
 
                 <div class="field-bounds">
                   <span v-if="field.min != null || field.max != null">
@@ -181,6 +309,12 @@
             </div>
           </el-tab-pane>
         </el-tabs>
+
+        <SrppShortTermOpportunities v-if="shortTermFields.length"
+          :fields="shortTermFields" :values="values" :disabled="savingDraft || draftBaseChanged"
+          :draft-id="activeDraft?.id || null" :draft-revision="activeDraft?.revision ?? null"
+          :draft-is-current="!draftBaseChanged" :draft-is-saved="draftIsSaved"
+          :owner-key="ownerIdentity" @field-change="updateShortSetting" />
 
         <div v-if="activeDraft?.changes?.length" class="change-preview">
           <div class="subsection-heading">已儲存草稿的設定差異</div>
@@ -248,7 +382,7 @@
               <span class="control-hint">100–100,000；預設 1,000</span>
             </div>
             <el-button type="primary" :icon="VideoPlay" :loading="simulating"
-              :disabled="!activeDraft || draftDirty || draftBaseChanged || !draftName.trim() || runMode === 'AI' && !rootData.aiAvailable || simulationProcessing"
+            :disabled="!activeDraft || draftDirty || draftBaseChanged || moneyInputErrorKeys.length || shortStrategyErrors.length || pairedOverrideErrors.length || !draftName.trim() || runMode === 'AI' && !rootData.aiAvailable || simulationProcessing"
               @click="simulate">
               {{ simulationProcessing ? '模擬執行中…' : '開始模擬' }}
             </el-button>
@@ -266,6 +400,8 @@
             title="暫時無法更新模擬狀態" :description="pollError" />
           <el-alert v-if="simulationError" type="error" show-icon :closable="false" class="operation-alert"
             title="模擬請求失敗" :description="simulationError" />
+          <el-alert v-if="loadingSelectedRun" type="info" show-icon :closable="false" class="operation-alert"
+            title="正在載入單筆完整模擬結果" description="歷史清單只傳送摘要；完整時程會在選取後讀取。" />
 
           <div v-if="runs.length" class="run-history-picker">
             <label class="control-label" for="srpp-run-picker">最近的模擬</label>
@@ -389,7 +525,7 @@
           </el-table>
 
           <div class="subsection-heading path-heading">
-            <span>情境路徑分位數</span>
+            <span>結果版本與路徑分位數</span>
             <el-radio-group v-model="pathSide" size="small">
               <el-radio-button value="scenario">情境</el-radio-button>
               <el-radio-button value="baseline">基準</el-radio-button>
@@ -456,9 +592,147 @@
               </template>
             </dl>
           </div>
+          <section class="typed-result-section" aria-label="退休現金流與策略設定">
+            <div class="typed-result-heading">
+              <div>
+                <div class="subsection-heading">{{ pathSide === 'baseline' ? '基準' : '情境' }}：退休現金流與策略結果</div>
+                <p>日期、金額與狀態直接呈現服務回傳的 typed 結果；前端不推算給付或金融差異。</p>
+              </div>
+            </div>
+            <el-alert v-if="!cashflowSchedule" type="info" show-icon :closable="false"
+              title="此為舊版歷史結果，未提供新增時程" description="歷史結果可繼續檢視；畫面不補造生日、薪資、給付或支出資料。" />
+            <template v-else>
+              <el-alert type="warning" show-icon :closable="false" class="operation-alert"
+                title="月頻情境預估，不代表已核定的勞保或勞退給付"
+                description="薪資保費與未公告年度級距採規劃代理，沒有完整年度所得稅結算；此結果不含逐檔配置容量、交易成本與交割，也不是雷達訊號、正式報告或下單授權。" />
+
+              <div class="subsection-heading">生日、給付與定期支出時程</div>
+              <el-table :data="cashflowScheduleRows" size="small" stripe>
+                <el-table-column prop="category" label="項目" width="130" />
+                <el-table-column prop="label" label="欄位" min-width="180" />
+                <el-table-column label="系統結果" min-width="190">
+                  <template #default="{ row }">{{ formatScheduleValue(row.value, row.kind) }}</template>
+                </el-table-column>
+                <el-table-column prop="note" label="說明" min-width="200" show-overflow-tooltip />
+              </el-table>
+
+              <template v-if="cashflowSchedule.majorExpenses?.length">
+                <div class="subsection-heading">大額事件（2026 年 8 月實質新臺幣）</div>
+                <el-table :data="cashflowSchedule.majorExpenses" size="small" stripe>
+                  <el-table-column prop="date" label="日期" width="120" />
+                  <el-table-column prop="name" label="用途" min-width="150" />
+                  <el-table-column label="金額" min-width="150"><template #default="{ row }">{{ formatCurrency(row.amountRealTwd) }}</template></el-table-column>
+                  <el-table-column label="結果狀態" min-width="140"><template #default="{ row }">{{ row.included ? '已列入時程' : '未列入時程' }}</template></el-table-column>
+                  <el-table-column label="排除原因" min-width="170"><template #default="{ row }">{{ exclusionReasonLabel(row.exclusionReason) }}</template></el-table-column>
+                </el-table>
+              </template>
+
+              <template v-if="cashflowSchedule.payroll">
+                <div class="subsection-heading">退休前薪資設定與收付合計</div>
+                <el-table :data="payrollScheduleRows" size="small" stripe>
+                  <el-table-column prop="label" label="欄位" min-width="210" />
+                  <el-table-column label="系統結果" min-width="210"><template #default="{ row }">{{ formatScheduleValue(row.value, row.kind) }}</template></el-table-column>
+                  <el-table-column prop="note" label="說明" min-width="200" show-overflow-tooltip />
+                </el-table>
+
+                <template v-if="cashflowSchedule.payroll.bonusEvents?.length">
+                  <div class="subsection-heading">指定日期年終／績效／節慶獎金</div>
+                  <el-table :data="cashflowSchedule.payroll.bonusEvents" size="small" stripe>
+                    <el-table-column prop="name" label="獎金名稱" min-width="160" />
+                    <el-table-column prop="pay_date" label="發放日期" width="120" />
+                    <el-table-column label="月薪倍數" width="120"><template #default="{ row }">{{ formatMonths(row.months) }}</template></el-table-column>
+                    <el-table-column prop="festival_date" label="節日日期" width="120"><template #default="{ row }">{{ row.festival_date || '未指定' }}</template></el-table-column>
+                  </el-table>
+                </template>
+
+                <template v-if="cashflowSchedule.payroll.recurringBonuses?.length">
+                  <div class="subsection-heading">每年年終／績效／節慶獎金規則</div>
+                  <el-table :data="cashflowSchedule.payroll.recurringBonuses" size="small" stripe>
+                    <el-table-column prop="name" label="獎金名稱" min-width="160" />
+                    <el-table-column label="月薪倍數" width="120"><template #default="{ row }">{{ formatMonths(row.months) }}</template></el-table-column>
+                    <el-table-column label="一般月份" width="120"><template #default="{ row }">{{ row.month }} 月</template></el-table-column>
+                    <el-table-column label="年份例外" min-width="220"><template #default="{ row }">{{ formatMonthExceptions(row.month_by_year) }}</template></el-table-column>
+                  </el-table>
+                </template>
+
+                <template v-if="cashflowSchedule.payroll.ledger?.length">
+                  <div class="subsection-heading">薪資與獎金收付明細</div>
+                  <el-table :data="cashflowSchedule.payroll.ledger" size="small" stripe max-height="460" class="typed-wide-table">
+                    <el-table-column prop="payDate" label="發薪日" width="112" fixed="left" />
+                    <el-table-column label="約定月薪" min-width="130"><template #default="{ row }">{{ formatCurrency(row.contractualMonthlySalaryNominalTwd) }}</template></el-table-column>
+                    <el-table-column label="一般薪資" min-width="130"><template #default="{ row }">{{ formatCurrency(row.regularSalaryNominalTwd) }}</template></el-table-column>
+                    <el-table-column label="獎金" min-width="120"><template #default="{ row }">{{ formatCurrency(row.bonusNominalTwd) }}</template></el-table-column>
+                    <el-table-column label="稅前總額" min-width="130"><template #default="{ row }">{{ formatCurrency(row.grossPayNominalTwd) }}</template></el-table-column>
+                    <el-table-column label="勞就保" min-width="120"><template #default="{ row }">{{ formatCurrency(row.laborInsuranceNominalTwd) }}</template></el-table-column>
+                    <el-table-column label="健保" min-width="120"><template #default="{ row }">{{ formatCurrency(row.healthInsuranceNominalTwd) }}</template></el-table-column>
+                    <el-table-column label="勞退自提" min-width="120"><template #default="{ row }">{{ formatCurrency(row.selfPensionNominalTwd) }}</template></el-table-column>
+                    <el-table-column label="所得稅扣繳" min-width="130"><template #default="{ row }">{{ formatCurrency(row.withholdingNominalTwd) }}</template></el-table-column>
+                    <el-table-column label="補充健保" min-width="120"><template #default="{ row }">{{ formatCurrency(row.supplementalHealthNominalTwd) }}</template></el-table-column>
+                    <el-table-column label="實收淨額" min-width="130"><template #default="{ row }">{{ formatCurrency(row.netCashNominalTwd) }}</template></el-table-column>
+                    <el-table-column label="退休日後發放" min-width="130"><template #default="{ row }">{{ row.paymentAfterRetirement ? '是' : '否' }}</template></el-table-column>
+                    <el-table-column label="納入退休當日資產" min-width="160"><template #default="{ row }">{{ row.includedAtRetirement ? '是' : '否' }}</template></el-table-column>
+                    <el-table-column prop="yearRuleStatus" label="年度級距狀態" min-width="300" show-overflow-tooltip />
+                    <el-table-column label="獎金明細" min-width="220"><template #default="{ row }">{{ formatLedgerBonuses(row.bonusEvents) }}</template></el-table-column>
+                  </el-table>
+                </template>
+                <p class="typed-result-note">已收／待發放合計只涵蓋本輪 ledger；所得稅為現金扣繳代理，並非完整年度最終稅額。</p>
+              </template>
+
+              <template v-if="selectedResult?.assumptions?.reserveStrategy">
+                <div class="subsection-heading">準備金與牛熊策略設定</div>
+                <el-table :data="reserveStrategyRows" size="small" stripe>
+                  <el-table-column prop="label" label="欄位" min-width="230" />
+                  <el-table-column label="系統設定" min-width="190"><template #default="{ row }">{{ formatScheduleValue(row.value, row.kind) }}</template></el-table-column>
+                  <el-table-column prop="note" label="說明" min-width="220" show-overflow-tooltip />
+                </el-table>
+                <template v-if="selectedResult.assumptions.reserveStrategy.bearLadder?.length">
+                  <div class="subsection-heading">熊市五批來源規則（唯讀）</div>
+                  <el-table :data="selectedResult.assumptions.reserveStrategy.bearLadder" size="small" stripe>
+                    <el-table-column label="回撤門檻" min-width="120"><template #default="{ row }">{{ formatFraction(row.drawdown) }}</template></el-table-column>
+                    <el-table-column label="窗口預算比例" min-width="150"><template #default="{ row }">{{ formatFraction(row.shareOfWindowBudget) }}</template></el-table-column>
+                  </el-table>
+                </template>
+                <template v-if="selectedResult.assumptions.reserveStrategy.bullLadder?.length">
+                  <div class="subsection-heading">牛市五批來源規則（唯讀）</div>
+                  <el-table :data="selectedResult.assumptions.reserveStrategy.bullLadder" size="small" stripe>
+                    <el-table-column label="高於錨點" min-width="120"><template #default="{ row }">{{ formatFraction(row.gainAboveAnchor) }}</template></el-table-column>
+                    <el-table-column label="高水位拉回" min-width="130"><template #default="{ row }">{{ formatFraction(row.pullbackFromHighWatermark) }}</template></el-table-column>
+                    <el-table-column label="窗口預算比例" min-width="150"><template #default="{ row }">{{ formatFraction(row.shareOfWindowBudget) }}</template></el-table-column>
+                  </el-table>
+                </template>
+              </template>
+
+              <template v-if="selectedResult?.reserveStrategyAudit">
+                <div class="subsection-heading">準備金、流動性與戰術策略稽核</div>
+                <el-table :data="reserveAuditRows" size="small" stripe>
+                  <el-table-column prop="label" label="稽核項目" min-width="250" />
+                  <el-table-column label="結果" min-width="280"><template #default="{ row }">{{ row.kind === 'moneyQuantiles' ? formatMoneyQuantiles(row.value) : formatScheduleValue(row.value, row.kind) }}</template></el-table-column>
+                </el-table>
+                <template v-if="selectedResult.reserveStrategyAudit.monthlyAudit?.length">
+                  <div class="subsection-heading">月頻稽核（每完成月最多一列）</div>
+                  <p class="typed-result-note">金額欄為路徑分位數；P10、P50、P90 是路徑分布摘要，不是跨路徑加總。</p>
+                  <el-table :data="selectedResult.reserveStrategyAudit.monthlyAudit" size="small" stripe max-height="460" class="typed-wide-table">
+                    <el-table-column prop="date" label="完成月份" width="120" fixed="left" />
+                    <el-table-column prop="bullSignalPathCount" label="牛訊號路徑數" width="130" />
+                    <el-table-column prop="bearSignalPathCount" label="熊訊號路徑數" width="130" />
+                    <el-table-column prop="bullFillPathCount" label="牛市成交批次路徑數" width="160" />
+                    <el-table-column prop="bearFillPathCount" label="熊市成交批次路徑數" width="160" />
+                    <el-table-column label="牛市售股金額 P10／P50／P90" min-width="260"><template #default="{ row }">{{ formatMoneyQuantiles(row.bullEquitySoldRealTwd) }}</template></el-table-column>
+                    <el-table-column label="熊市現金投入 P10／P50／P90" min-width="260"><template #default="{ row }">{{ formatMoneyQuantiles(row.bearCashDeployedRealTwd) }}</template></el-table-column>
+                    <el-table-column label="熊市售債金額 P10／P50／P90" min-width="260"><template #default="{ row }">{{ formatMoneyQuantiles(row.bearBondsSoldRealTwd) }}</template></el-table-column>
+                    <el-table-column label="生活費回補 P10／P50／P90" min-width="260"><template #default="{ row }">{{ formatMoneyQuantiles(row.livingRefillRealTwd) }}</template></el-table-column>
+                    <el-table-column label="生活費短缺 P10／P50／P90" min-width="260"><template #default="{ row }">{{ formatMoneyQuantiles(row.livingShortfallRealTwd) }}</template></el-table-column>
+                  </el-table>
+                </template>
+              </template>
+              <ul v-if="selectedApproximationNotes.length" class="result-limitations">
+                <li v-for="(note, index) in selectedApproximationNotes" :key="`approx-${index}`">{{ note }}</li>
+              </ul>
+            </template>
+          </section>
         </template>
         <el-alert v-else-if="selectedRun.status === 'SUCCEEDED'" type="warning" show-icon :closable="false"
-          title="模擬已完成，但目前沒有數值結果" description="請重新查詢此模擬，或稍後重新執行。" />
+          title="單筆回應未提供完整結果" description="此歷史摘要沒有可呈現的數值；請重新查詢單筆結果，畫面不會補造模型資料。" />
       </el-card>
 
       <el-card v-if="releases.length" shadow="never" class="center-section history-section">
@@ -494,13 +768,24 @@
 </template>
 
 <script setup>
-import { Download, DocumentChecked, Plus, Promotion, Refresh, RefreshLeft, VideoPlay } from '@element-plus/icons-vue'
+import { Delete, Download, DocumentChecked, Plus, Promotion, Refresh, RefreshLeft, VideoPlay } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { bffApi, apiErrorMessage } from '@/api'
 import { useAuthStore } from '@/stores/authStore'
+import SrppShortTermOpportunities from '@/components/SrppShortTermOpportunities.vue'
 import { canPublishSrppRun, hasSrppDraftChanges, isCurrentSrppRun } from '@/utils/srppSettingsCenterState'
+import {
+  formatMoneyText,
+  formatPreciseDecimal,
+  inspectWeightTotal,
+  parseMoneyText,
+  validatePensionOverridePairs,
+  validateMoneyText,
+  validateShortStrategyValues
+} from '@/utils/srppSettingsCenterFormatting'
 
 const auth = useAuthStore()
+const ownerIdentity = computed(() => `${auth.effectiveUserId ?? ''}|${auth.me?.email || ''}`)
 const loadingRoot = ref(false)
 const rootData = ref(null)
 const rootError = ref('')
@@ -510,10 +795,15 @@ const draftName = ref('SRPP 設定草稿')
 const savedDraftName = ref('')
 const values = ref({})
 const savedValues = ref({})
+const moneyInputValues = ref({})
+const moneyInputMetadata = ref({})
+const exceptionYearDrafts = ref({})
+const exceptionMonthDrafts = ref({})
 const savingDraft = ref(false)
 const casConflict = ref(false)
 const selectedRun = ref(null)
 const selectedRunOption = ref('')
+const loadingSelectedRun = ref(false)
 const simulating = ref(false)
 const simulationError = ref('')
 const runMode = ref('LOCAL')
@@ -530,6 +820,9 @@ let pollTimer = null
 let pollStartedAt = 0
 let runRequestSequence = 0
 let rootRequestSequence = 0
+let draftRequestSequence = 0
+let publishRequestSequence = 0
+let downloadRequestSequence = 0
 let disposed = false
 let initialized = false
 
@@ -539,23 +832,55 @@ const drafts = computed(() => Array.isArray(rootData.value?.drafts) ? rootData.v
 const runs = computed(() => Array.isArray(rootData.value?.simulations) ? rootData.value.simulations : [])
 const releases = computed(() => Array.isArray(rootData.value?.releases) ? rootData.value.releases : [])
 const currentVersionLabel = computed(() => rootData.value?.current?.policyVersion || '版本資訊未提供')
-const draftDirty = computed(() => hasSrppDraftChanges(values.value, savedValues.value) || draftName.value !== savedDraftName.value)
-const draftBaseChanged = computed(() => !!activeDraft.value && !!catalog.value?.baseBundleSha256 &&
-  activeDraft.value.baseBundleSha256 !== catalog.value.baseBundleSha256)
+const draftDirty = computed(() => hasSrppDraftChanges(values.value, savedValues.value) ||
+  draftName.value !== savedDraftName.value || moneyInputErrorKeys.value.length > 0)
+const draftBaseChanged = computed(() => {
+  if (!activeDraft.value) return false
+  if (!catalog.value || !activeDraft.value.values || typeof activeDraft.value.values !== 'object') return true
+  return activeDraft.value.baseBundleSha256 !== catalog.value.baseBundleSha256 ||
+    activeDraft.value.modelInputsSha256 !== catalog.value.modelInputsSha256 ||
+    activeDraft.value.catalogSha256 !== catalog.value.catalogSha256 ||
+    activeDraft.value.catalogVersion !== catalog.value.catalogVersion
+})
+const pairedOverrideErrors = computed(() => validatePensionOverridePairs(values.value))
 const canCreateDraft = computed(() => !!catalog.value?.baseBundleSha256 && !!draftName.value.trim() &&
-  !savingDraft.value && !simulating.value && !draftBaseChanged.value)
+  !savingDraft.value && !simulating.value && !draftBaseChanged.value && !moneyInputErrorKeys.value.length &&
+  !shortStrategyErrors.value.length && !pairedOverrideErrors.value.length)
 const simulationProcessing = computed(() => selectedRun.value?.status === 'PROCESSING')
 const fieldById = computed(() => new Map(fields.value.map(field => [field.id, field])))
 const activeFieldGroup = ref('')
 const runMatchesDraft = computed(() => isCurrentSrppRun(selectedRun.value, activeDraft.value))
+const moneyInputErrorKeys = computed(() => Object.keys(moneyInputValues.value)
+  .filter(key => !validateMoneyText(moneyInputValues.value[key], moneyInputMetadata.value[key] || {})))
 
 const fieldGroups = computed(() => rootData.value?.fieldGroups || [])
+const shortSettingIds = new Set([
+  'shortEquitySymbols', 'shortEquityReboundPct', 'shortEquityNetRewardRisk', 'shortEquitySleeveCap',
+  'shortEquityPositionCap', 'shortEquityMaxHoldingSessions', 'shortBondSymbols', 'shortBondReboundPct',
+  'shortBondNetRewardRisk', 'shortBondSleeveCap', 'shortBondPositionCap', 'shortBondMaxHoldingSessions',
+  'usTacticalNetUpsidePct', 'usTacticalBatchCap', 'usTacticalCompanyCap', 'usTacticalSleeveCap'
+])
+const shortTermFields = computed(() => fields.value.filter(field => shortSettingIds.has(field.id)))
+const shortStrategyErrors = computed(() => validateShortStrategyValues(values.value,
+  fields.value.filter(field => shortSettingIds.has(field.id))))
+const visibleFieldGroups = computed(() => fieldGroups.value
+  .map(group => ({ ...group, fields: (group.fields || []).filter(field => !shortSettingIds.has(field.id)) }))
+  .filter(group => group.fields.length))
+const draftIsCurrent = computed(() => !!activeDraft.value && !draftBaseChanged.value)
+const draftIsSaved = computed(() => draftIsCurrent.value && !draftDirty.value)
 
 const result = computed(() => selectedRun.value?.deterministicResult?.result || null)
 const baseline = computed(() => result.value?.baseline || null)
 const scenario = computed(() => result.value?.scenario || null)
-const resultPresentation = computed(() => selectedRun.value?.presentation?.scenario || null)
+const selectedResult = computed(() => pathSide.value === 'baseline' ? baseline.value : scenario.value)
+const resultPresentation = computed(() => selectedRun.value?.presentation?.[pathSide.value] || null)
 const selectedPaths = computed(() => (pathSide.value === 'baseline' ? baseline.value : scenario.value)?.percentilePaths || [])
+const cashflowSchedule = computed(() => selectedResult.value?.assumptions?.cashflowSchedule || null)
+const cashflowScheduleRows = computed(() => buildCashflowScheduleRows(selectedResult.value))
+const payrollScheduleRows = computed(() => buildPayrollScheduleRows(cashflowSchedule.value?.payroll))
+const reserveStrategyRows = computed(() => buildReserveStrategyRows(selectedResult.value?.assumptions?.reserveStrategy))
+const reserveAuditRows = computed(() => buildReserveAuditRows(selectedResult.value?.reserveStrategyAudit))
+const selectedApproximationNotes = computed(() => selectedResult.value?.assumptions?.approximationNotes || [])
 const runChanges = computed(() => {
   if (Array.isArray(selectedRun.value?.changes)) return selectedRun.value.changes
   return Array.isArray(result.value?.changes) ? result.value.changes : []
@@ -622,14 +947,46 @@ const resultComparisonRows = computed(() => {
 
 const visibleAssumptions = computed(() => resultPresentation.value?.assumptions || [])
 
-watch(() => fieldGroups.value.map(group => group.name).join('|'), () => {
-  if (!fieldGroups.value.some(group => group.name === activeFieldGroup.value)) {
-    activeFieldGroup.value = fieldGroups.value[0]?.name || ''
+watch(() => visibleFieldGroups.value.map(group => group.name).join('|'), () => {
+  if (!visibleFieldGroups.value.some(group => group.name === activeFieldGroup.value)) {
+    activeFieldGroup.value = visibleFieldGroups.value[0]?.name || ''
   }
 })
 watch(() => selectedRun.value?.status, status => {
   if (status === 'PROCESSING') startPolling()
   else stopPolling()
+})
+watch(ownerIdentity, (next, previous) => {
+  if (previous == null || next === previous) return
+  rootRequestSequence += 1
+  runRequestSequence += 1
+  draftRequestSequence += 1
+  publishRequestSequence += 1
+  downloadRequestSequence += 1
+  stopPolling()
+  initialized = false
+  rootData.value = null
+  rootError.value = ''
+  activeDraft.value = null
+  selectedDraftOption.value = ''
+  draftName.value = 'SRPP 設定草稿'
+  savedDraftName.value = draftName.value
+  values.value = {}
+  savedValues.value = {}
+  clearLocalEditors()
+  selectedRun.value = null
+  selectedRunOption.value = ''
+  loadingSelectedRun.value = false
+  simulating.value = false
+  simulationError.value = ''
+  pollError.value = ''
+  pollTimedOut.value = false
+  selectedRelease.value = null
+  savingDraft.value = false
+  publishing.value = false
+  downloadingReleaseId.value = ''
+  casConflict.value = false
+  void loadRoot()
 })
 
 function copyJson(value) {
@@ -658,6 +1015,267 @@ function setFieldValue(fieldId, rawValue) {
   values.value = { ...values.value, [fieldId]: storedValue }
 }
 
+function clearLocalEditors() {
+  moneyInputValues.value = {}
+  moneyInputMetadata.value = {}
+  exceptionYearDrafts.value = {}
+  exceptionMonthDrafts.value = {}
+}
+
+function fieldDisabled(field) {
+  return !field?.editable || savingDraft.value || draftBaseChanged.value
+}
+
+const MONEY_FIELD_IDS = new Set([
+  'livingExpense', 'laterLivingExpense', 'careExpense', 'monthlySalary', 'annualRaiseAmount',
+  'preRetirementMonthlyExpense', 'laborPensionReceiptAmount', 'laborInsuranceMonthlyAmount',
+  'homeRepairCost', 'applianceCost', 'emergencyDepositReserve', 'emergencyEtfReserve',
+  'livingReserveCeiling', 'livingReserveFloor', 'bearLivingDeploymentCap', 'marketSpendingAdjustment'
+])
+
+function isMoneyField(field) {
+  return field?.displayFormat === 'money' || MONEY_FIELD_IDS.has(field?.id) ||
+    /(?:新臺幣|名目元|實質元|TWD|NTD|貨幣)/i.test(String(field?.unit || ''))
+}
+
+function fieldMoneyKey(field) {
+  return `field:${field.id}`
+}
+
+function arrayMoneyKey(fieldId, index, property) {
+  return `array:${fieldId}:${index}:${property}`
+}
+
+function fieldMoneyValue(field) {
+  const key = fieldMoneyKey(field)
+  return Object.hasOwn(moneyInputValues.value, key)
+    ? moneyInputValues.value[key]
+    : formatMoneyText(values.value[field.id])
+}
+
+function arrayMoneyValue(fieldId, index, property, value) {
+  const key = arrayMoneyKey(fieldId, index, property)
+  return Object.hasOwn(moneyInputValues.value, key) ? moneyInputValues.value[key] : formatMoneyText(value)
+}
+
+function setMoneyBuffer(key, rawValue, metadata, applyValue) {
+  const text = String(rawValue ?? '')
+  moneyInputValues.value = { ...moneyInputValues.value, [key]: text }
+  moneyInputMetadata.value = { ...moneyInputMetadata.value, [key]: metadata }
+  const parsed = parseMoneyText(text)
+  if (validateMoneyText(text, metadata) && parsed.complete) applyValue(parsed.value)
+}
+
+function rawMoneyText(value) {
+  if (value == null || value === '') return ''
+  return typeof value === 'number' && Number.isFinite(value) ? String(value) : String(value).replaceAll(',', '')
+}
+
+function focusFieldMoney(field) {
+  const key = fieldMoneyKey(field)
+  const metadata = { min: field.min, max: field.max, integer: field.type === 'integer', nullable: field.nullable === true }
+  moneyInputValues.value = { ...moneyInputValues.value, [key]: rawMoneyText(values.value[field.id]) }
+  moneyInputMetadata.value = { ...moneyInputMetadata.value, [key]: metadata }
+}
+
+function focusArrayMoney(fieldId, index, property, value) {
+  const key = arrayMoneyKey(fieldId, index, property)
+  moneyInputValues.value = { ...moneyInputValues.value, [key]: rawMoneyText(value) }
+  moneyInputMetadata.value = { ...moneyInputMetadata.value, [key]: { min: 0, max: 100000000, nullable: false } }
+}
+
+function finishMoneyBuffer(key, metadata, getCurrentValue, applyValue) {
+  const rawValue = moneyInputValues.value[key]
+  if (rawValue == null) return
+  const parsed = parseMoneyText(rawValue)
+  if (validateMoneyText(rawValue, metadata) && parsed.complete) {
+    applyValue(parsed.value)
+    moneyInputValues.value = { ...moneyInputValues.value, [key]: formatMoneyText(parsed.value) }
+  } else {
+    moneyInputValues.value = { ...moneyInputValues.value, [key]: formatMoneyText(getCurrentValue()) }
+    ElMessage.warning('金額格式或範圍不正確，已保留原設定值。')
+  }
+  const nextMeta = { ...moneyInputMetadata.value }
+  delete nextMeta[key]
+  moneyInputMetadata.value = nextMeta
+}
+
+function moneyInputInvalid(key) {
+  return Object.hasOwn(moneyInputValues.value, key) &&
+    !validateMoneyText(moneyInputValues.value[key], moneyInputMetadata.value[key] || {})
+}
+
+function updateFieldMoney(field, rawValue) {
+  const metadata = {
+    min: field.min,
+    max: field.max,
+    integer: field.type === 'integer',
+    nullable: field.nullable === true
+  }
+  setMoneyBuffer(fieldMoneyKey(field), rawValue, metadata, value => {
+    values.value = { ...values.value, [field.id]: value }
+  })
+}
+
+function commitFieldMoney(field) {
+  const key = fieldMoneyKey(field)
+  finishMoneyBuffer(key, {
+    min: field.min,
+    max: field.max,
+    integer: field.type === 'integer',
+    nullable: field.nullable === true
+  }, () => values.value[field.id], value => {
+    values.value = { ...values.value, [field.id]: value }
+  })
+}
+
+function updateArrayMoney(fieldId, index, property, rawValue) {
+  setMoneyBuffer(arrayMoneyKey(fieldId, index, property), rawValue,
+    { min: 0, max: 100000000, nullable: false }, value => updateArrayField(fieldId, index, property, value))
+}
+
+function commitArrayMoney(fieldId, index, property) {
+  finishMoneyBuffer(arrayMoneyKey(fieldId, index, property), { min: 0, max: 100000000, nullable: false },
+    () => arrayFieldValue({ id: fieldId })[index]?.[property],
+    value => updateArrayField(fieldId, index, property, value))
+}
+
+function setBooleanValue(fieldId, value) {
+  if (typeof value !== 'boolean') return
+  values.value = { ...values.value, [fieldId]: value }
+}
+
+function updateShortSetting(fieldId, value) {
+  const field = fieldById.value.get(fieldId)
+  if (!field || !shortSettingIds.has(fieldId) || !field.editable || draftBaseChanged.value || savingDraft.value) return
+  if (field.type === 'symbols') {
+    const allowed = Array.isArray(field.allowedSymbols) ? new Set(field.allowedSymbols) : new Set()
+    if (!Array.isArray(value) || value.some(symbol => typeof symbol !== 'string' || !symbol.trim() || !allowed.has(symbol)) ||
+      new Set(value).size !== value.length) return
+    values.value = { ...values.value, [fieldId]: [...value] }
+    return
+  }
+  if (field.type !== 'number' && field.type !== 'integer') return
+  if (value == null) {
+    values.value = { ...values.value, [fieldId]: null }
+    return
+  }
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric) || (field.type === 'integer' && !Number.isInteger(numeric)) ||
+    field.min != null && numeric < field.min || field.max != null && numeric > field.max) return
+  values.value = { ...values.value, [fieldId]: numeric }
+}
+
+function arrayFieldValue(field) {
+  const list = values.value[field?.id]
+  return Array.isArray(list) ? list : []
+}
+
+function updateArrayField(fieldId, index, property, value) {
+  const list = Array.isArray(values.value[fieldId]) ? [...values.value[fieldId]] : []
+  if (!list[index] || typeof list[index] !== 'object' || Array.isArray(list[index])) return
+  list[index] = { ...list[index], [property]: value }
+  values.value = { ...values.value, [fieldId]: list }
+}
+
+function updateOptionalArrayField(fieldId, index, property, value) {
+  const list = Array.isArray(values.value[fieldId]) ? [...values.value[fieldId]] : []
+  if (!list[index] || typeof list[index] !== 'object' || Array.isArray(list[index])) return
+  const next = { ...list[index] }
+  if (value == null || value === '') delete next[property]
+  else next[property] = value
+  list[index] = next
+  values.value = { ...values.value, [fieldId]: list }
+}
+
+function addArrayRow(field) {
+  const type = field?.type
+  const list = Array.isArray(values.value[field.id]) ? [...values.value[field.id]] : []
+  if (type === 'events' && list.length < 100) list.push({ date: '', name: '', amount: null })
+  else if (type === 'datedBonuses' && list.length < 100) list.push({ name: '', pay_date: '', months: 0 })
+  else if (type === 'recurringBonuses' && list.length < 32) list.push({ name: '', months: 0, month: 1 })
+  else return
+  values.value = { ...values.value, [field.id]: list }
+}
+
+function clearArrayEditorBuffers(fieldId) {
+  const prefix = `array:${fieldId}:`
+  const nextValues = { ...moneyInputValues.value }
+  const nextMetadata = { ...moneyInputMetadata.value }
+  for (const key of Object.keys(nextValues)) if (key.startsWith(prefix)) delete nextValues[key]
+  for (const key of Object.keys(nextMetadata)) if (key.startsWith(prefix)) delete nextMetadata[key]
+  moneyInputValues.value = nextValues
+  moneyInputMetadata.value = nextMetadata
+}
+
+function removeArrayRow(fieldId, index) {
+  const list = Array.isArray(values.value[fieldId]) ? [...values.value[fieldId]] : []
+  list.splice(index, 1)
+  values.value = { ...values.value, [fieldId]: list }
+  clearArrayEditorBuffers(fieldId)
+  const exceptionKeyPrefix = `${fieldId}:`
+  exceptionYearDrafts.value = Object.fromEntries(Object.entries(exceptionYearDrafts.value).filter(([key]) => !key.startsWith(exceptionKeyPrefix)))
+  exceptionMonthDrafts.value = Object.fromEntries(Object.entries(exceptionMonthDrafts.value).filter(([key]) => !key.startsWith(exceptionKeyPrefix)))
+}
+
+function sortedExceptionYears(row) {
+  return Object.keys(row?.month_by_year || {}).sort((left, right) => Number(left) - Number(right))
+}
+
+function setMonthException(fieldId, index, year, month) {
+  const row = arrayFieldValue({ id: fieldId })[index]
+  if (!row || !Number.isInteger(Number(month)) || Number(month) < 1 || Number(month) > 12) return
+  const exceptions = { ...(row.month_by_year || {}), [String(year)]: Number(month) }
+  updateArrayField(fieldId, index, 'month_by_year', exceptions)
+}
+
+function removeMonthException(fieldId, index, year) {
+  const row = arrayFieldValue({ id: fieldId })[index]
+  if (!row || !row.month_by_year || !Object.hasOwn(row.month_by_year, String(year))) return
+  const exceptions = { ...row.month_by_year }
+  delete exceptions[String(year)]
+  updateArrayField(fieldId, index, 'month_by_year', exceptions)
+}
+
+function exceptionDraftKey(fieldId, index) {
+  return `${fieldId}:${index}`
+}
+
+function canAddMonthException(field, index) {
+  const key = exceptionDraftKey(field.id, index)
+  const year = Number(exceptionYearDrafts.value[key])
+  const month = Number(exceptionMonthDrafts.value[key] ?? 1)
+  const row = arrayFieldValue(field)[index]
+  return Number.isInteger(year) && year >= 1900 && year <= 2200 &&
+    Number.isInteger(month) && month >= 1 && month <= 12 &&
+    !Object.hasOwn(row?.month_by_year || {}, String(year))
+}
+
+function addMonthException(fieldId, index) {
+  if (!canAddMonthException({ id: fieldId }, index)) return
+  const key = exceptionDraftKey(fieldId, index)
+  setMonthException(fieldId, index, exceptionYearDrafts.value[key], exceptionMonthDrafts.value[key] ?? 1)
+  exceptionYearDrafts.value = { ...exceptionYearDrafts.value, [key]: undefined }
+}
+
+function weightTotal(field) {
+  return inspectWeightTotal(values.value[field.id], field.assetKeys)
+}
+
+function weightTotalLabel(field) {
+  const result = weightTotal(field)
+  return result.totalPercent == null ? '—' : `${formatPreciseDecimal(result.totalPercent)}%`
+}
+
+function weightTotalMessage(field) {
+  const result = weightTotal(field)
+  if (result.status === 'valid') return '配置合計符合 100%'
+  if (result.status === 'incomplete') return '配置尚未填寫完整'
+  if (result.status === 'invalid') return '比例不合法'
+  const points = formatPreciseDecimal(result.differencePoints)
+  return result.status === 'under' ? `尚差${points}個百分點` : `超出${points}個百分點`
+}
+
 function setWeightValue(fieldId, assetKey, rawValue) {
   const next = { ...(values.value[fieldId] || {}) }
   if (rawValue == null || rawValue === '') next[assetKey] = null
@@ -679,13 +1297,19 @@ function fractionInputValue(value) {
   return Number.isFinite(fraction) ? fraction * 100 : null
 }
 
+function weightInputDisplayValue(value) {
+  const percent = fractionInputValue(value)
+  return percent == null ? '' : formatPreciseDecimal(percent)
+}
+
 function displayBound(value, field) {
   return value == null ? undefined : isFractionField(field) ? fractionInputValue(value) : value
 }
 
 function formatBound(value, field) {
   if (value == null) return '不限'
-  return isFractionField(field) ? String(fractionInputValue(value)) : String(value)
+  if (isFractionField(field)) return formatPreciseDecimal(fractionInputValue(value))
+  return isMoneyField(field) ? formatMoneyText(value) : String(value)
 }
 
 function fieldReason(field) {
@@ -721,10 +1345,11 @@ function setActiveDraft(draft) {
     stopPolling()
   }
   activeDraft.value = copyJson(draft)
+  clearLocalEditors()
   selectedDraftOption.value = draft?.id || ''
   draftName.value = draft?.name || 'SRPP 設定草稿'
   savedDraftName.value = draftName.value
-  values.value = copyJson(draft?.values || catalog.value?.currentValues || {})
+  values.value = draft?.values && typeof draft.values === 'object' ? copyJson(draft.values) : {}
   savedValues.value = copyJson(values.value)
   casConflict.value = false
   if (selectedRun.value && selectedRun.value.draftId !== draft?.id) {
@@ -741,8 +1366,9 @@ function addDraftToRoot(draft) {
 
 function updateRunInRoot(run) {
   if (!rootData.value || !run?.id) return
+  const summary = { ...run, deterministicResult: null, presentation: null }
   const existing = runs.value.filter(item => item.id !== run.id)
-  rootData.value = { ...rootData.value, simulations: [run, ...existing].slice(0, 20) }
+  rootData.value = { ...rootData.value, simulations: [summary, ...existing].slice(0, 20) }
 }
 
 function setActiveRun(run) {
@@ -750,6 +1376,7 @@ function setActiveRun(run) {
   const previousStatus = selectedRun.value?.status
   selectedRun.value = copyJson(run)
   selectedRunOption.value = run?.id || ''
+  loadingSelectedRun.value = false
   simulationError.value = ''
   pollError.value = ''
   pollTimedOut.value = false
@@ -762,11 +1389,12 @@ function setActiveRun(run) {
 
 async function loadRoot() {
   const requestSequence = ++rootRequestSequence
+  const ownerAtRequest = ownerIdentity.value
   loadingRoot.value = true
   rootError.value = ''
   try {
     const response = await bffApi.portfolioAdvice.srpp.root()
-    if (disposed || requestSequence !== rootRequestSequence) return
+    if (disposed || ownerAtRequest !== ownerIdentity.value || requestSequence !== rootRequestSequence) return
     if (!response || typeof response !== 'object' || !response.catalog || !Array.isArray(response.catalog.fields) || !Array.isArray(response.fieldGroups) ||
       !response.catalog.currentValues || typeof response.catalog.currentValues !== 'object') {
       throw new Error('SRPP 設定目錄回應格式不完整，已停止載入編輯器。')
@@ -776,20 +1404,21 @@ async function loadRoot() {
       const currentValues = response.catalog.currentValues
       values.value = copyJson(currentValues && typeof currentValues === 'object' ? currentValues : {})
       savedValues.value = copyJson(values.value)
+      clearLocalEditors()
       savedDraftName.value = draftName.value
-      activeFieldGroup.value = fieldGroups.value[0]?.name || ''
+      activeFieldGroup.value = visibleFieldGroups.value[0]?.name || ''
       initialized = true
-      const processing = (response.simulations || []).find(item => item?.status === 'PROCESSING')
-      if (processing?.id) await selectRun(processing.id)
+      const selected = (response.simulations || []).find(item => item?.status === 'PROCESSING') || response.simulations?.[0]
+      if (selected?.id) await selectRun(selected.id)
     } else if (selectedRun.value) {
       const latestSummary = (response.simulations || []).find(item => item?.id === selectedRun.value.id)
       if (latestSummary?.status === 'PROCESSING') startPolling()
     }
   } catch (error) {
-    if (disposed || requestSequence !== rootRequestSequence) return
+    if (disposed || ownerAtRequest !== ownerIdentity.value || requestSequence !== rootRequestSequence) return
     rootError.value = apiErrorMessage(error, '無法讀取 SRPP 設定目錄。')
   } finally {
-    if (requestSequence === rootRequestSequence) loadingRoot.value = false
+    if (ownerAtRequest === ownerIdentity.value && requestSequence === rootRequestSequence) loadingRoot.value = false
   }
 }
 
@@ -803,6 +1432,7 @@ async function selectDraft(id) {
     savedDraftName.value = draftName.value
     values.value = copyJson(catalog.value?.currentValues || {})
     savedValues.value = copyJson(values.value)
+    clearLocalEditors()
     casConflict.value = false
     if (selectedRun.value) {
       selectedRun.value = null
@@ -821,6 +1451,18 @@ async function selectDraft(id) {
 
 async function createDraft() {
   if (draftBaseChanged.value) return
+  if (pairedOverrideErrors.value.length) {
+    ElMessage.warning(pairedOverrideErrors.value[0])
+    return
+  }
+  if (moneyInputErrorKeys.value.length) {
+    ElMessage.warning('請先完成或修正所有金額欄位。')
+    return
+  }
+  if (shortStrategyErrors.value.length) {
+    ElMessage.warning('請修正短線策略的白名單、欄位範圍或配置上限。')
+    return
+  }
   const name = draftName.value.trim()
   if (!name) {
     ElMessage.warning('請先填寫草稿名稱。')
@@ -828,24 +1470,40 @@ async function createDraft() {
   }
   savingDraft.value = true
   casConflict.value = false
+  const ownerAtRequest = ownerIdentity.value
+  const requestSequence = ++draftRequestSequence
   try {
     const created = await bffApi.portfolioAdvice.srpp.createDraft({
       name,
       baseBundleSha256: catalog.value.baseBundleSha256,
       values: copyJson(values.value)
     })
+    if (disposed || ownerAtRequest !== ownerIdentity.value || requestSequence !== draftRequestSequence) return
     addDraftToRoot(created)
     setActiveDraft(created)
     ElMessage.success('已建立 SRPP 設定草稿。')
   } catch (error) {
+    if (disposed || ownerAtRequest !== ownerIdentity.value || requestSequence !== draftRequestSequence) return
     ElMessage.error(apiErrorMessage(error, '建立草稿失敗。'))
   } finally {
-    savingDraft.value = false
+    if (requestSequence === draftRequestSequence) savingDraft.value = false
   }
 }
 
 async function saveDraft() {
   if (!activeDraft.value || !draftDirty.value || draftBaseChanged.value) return
+  if (pairedOverrideErrors.value.length) {
+    ElMessage.warning(pairedOverrideErrors.value[0])
+    return
+  }
+  if (moneyInputErrorKeys.value.length) {
+    ElMessage.warning('請先完成或修正所有金額欄位。')
+    return
+  }
+  if (shortStrategyErrors.value.length) {
+    ElMessage.warning('請修正短線策略的白名單、欄位範圍或配置上限。')
+    return
+  }
   const name = draftName.value.trim()
   if (!name) {
     ElMessage.warning('請先填寫草稿名稱。')
@@ -853,16 +1511,20 @@ async function saveDraft() {
   }
   savingDraft.value = true
   casConflict.value = false
+  const ownerAtRequest = ownerIdentity.value
+  const requestSequence = ++draftRequestSequence
   try {
     const saved = await bffApi.portfolioAdvice.srpp.updateDraft(activeDraft.value.id, {
       revision: activeDraft.value.revision,
       name,
       values: copyJson(values.value)
     })
+    if (disposed || ownerAtRequest !== ownerIdentity.value || requestSequence !== draftRequestSequence) return
     addDraftToRoot(saved)
     setActiveDraft(saved)
     ElMessage.success(`草稿已儲存為版本 ${saved.revision}。`)
   } catch (error) {
+    if (disposed || ownerAtRequest !== ownerIdentity.value || requestSequence !== draftRequestSequence) return
     if (error?.response?.status === 409) {
       casConflict.value = true
       ElMessage.warning('草稿版本已過期，請重新載入伺服器版本；目前修改未被覆蓋。')
@@ -870,11 +1532,12 @@ async function saveDraft() {
       ElMessage.error(apiErrorMessage(error, '儲存草稿失敗。'))
     }
   } finally {
-    savingDraft.value = false
+    if (requestSequence === draftRequestSequence) savingDraft.value = false
   }
 }
 
 function resetDraft() {
+  clearLocalEditors()
   if (activeDraft.value) {
     values.value = copyJson(savedValues.value)
     draftName.value = savedDraftName.value
@@ -902,6 +1565,7 @@ function startCurrentBaseDraft() {
   simulationError.value = ''
   values.value = copyJson(currentValues)
   savedValues.value = copyJson(currentValues)
+  clearLocalEditors()
   draftName.value = 'SRPP 設定草稿'
   savedDraftName.value = draftName.value
   casConflict.value = false
@@ -911,7 +1575,9 @@ function startCurrentBaseDraft() {
 async function reloadConflictedDraft() {
   const id = activeDraft.value?.id
   if (!id) return
+  const ownerAtRequest = ownerIdentity.value
   await loadRoot()
+  if (ownerAtRequest !== ownerIdentity.value) return
   if (rootError.value) {
     ElMessage.warning('目前無法載入最新草稿，請重新整理後再試。')
     return
@@ -927,8 +1593,21 @@ async function reloadConflictedDraft() {
 
 async function simulate() {
   if (!activeDraft.value || draftDirty.value || draftBaseChanged.value || simulationProcessing.value) return
+  if (pairedOverrideErrors.value.length) {
+    ElMessage.warning(pairedOverrideErrors.value[0])
+    return
+  }
+  if (moneyInputErrorKeys.value.length) {
+    ElMessage.warning('請先完成或修正所有金額欄位。')
+    return
+  }
+  if (shortStrategyErrors.value.length) {
+    ElMessage.warning('請修正短線策略的白名單、欄位範圍或配置上限。')
+    return
+  }
   runRequestSequence += 1
   const requestSequence = runRequestSequence
+  const ownerAtRequest = ownerIdentity.value
   stopPolling()
   simulationError.value = ''
   pollTimedOut.value = false
@@ -940,21 +1619,21 @@ async function simulate() {
       seed: Number(seed.value),
       simulations: Number(simulationCount.value)
     })
-    if (disposed || requestSequence !== runRequestSequence) return
+    if (disposed || ownerAtRequest !== ownerIdentity.value || requestSequence !== runRequestSequence) return
     setActiveRun(run)
     updateRunInRoot(run)
     if (run.status === 'PROCESSING') ElMessage.success('模擬已送出，完成後畫面會自動更新。')
     else if (run.status === 'SUCCEEDED') ElMessage.success('情境模擬已完成。')
     else if (run.status === 'FAILED') ElMessage.warning('情境模擬未完成，請稍後重新執行。')
   } catch (error) {
-    if (disposed || requestSequence !== runRequestSequence) return
+    if (disposed || ownerAtRequest !== ownerIdentity.value || requestSequence !== runRequestSequence) return
     if (error?.response?.status === 409) {
       simulationError.value = apiErrorMessage(error, '草稿版本已變更，請重新載入後再模擬。')
     } else {
       simulationError.value = apiErrorMessage(error, '情境模擬請求失敗。')
     }
   } finally {
-    simulating.value = false
+    if (ownerAtRequest === ownerIdentity.value && requestSequence === runRequestSequence) simulating.value = false
   }
 }
 
@@ -964,22 +1643,31 @@ async function selectRun(id) {
     stopPolling()
     selectedRun.value = null
     selectedRunOption.value = ''
+    loadingSelectedRun.value = false
     return
   }
   runRequestSequence += 1
   const requestSequence = runRequestSequence
+  const ownerAtRequest = ownerIdentity.value
   stopPolling()
   selectedRunOption.value = id
+  selectedRun.value = null
+  loadingSelectedRun.value = true
   simulationError.value = ''
   pollStartedAt = Date.now()
   try {
     const run = await bffApi.portfolioAdvice.srpp.getSimulation(id)
-    if (disposed || requestSequence !== runRequestSequence) return
+    if (disposed || ownerAtRequest !== ownerIdentity.value || requestSequence !== runRequestSequence) return
+    if (!run || run.id !== id || (run.status === 'SUCCEEDED' && !run.deterministicResult)) {
+      throw new Error('單筆模擬回應未包含完整結果。')
+    }
     setActiveRun(run)
     updateRunInRoot(run)
   } catch (error) {
-    if (disposed || requestSequence !== runRequestSequence) return
+    if (disposed || ownerAtRequest !== ownerIdentity.value || requestSequence !== runRequestSequence) return
     simulationError.value = apiErrorMessage(error, '無法載入這筆模擬。')
+    selectedRun.value = null
+    loadingSelectedRun.value = false
   }
 }
 
@@ -999,20 +1687,21 @@ async function pollSelectedRun() {
   if (disposed || selectedRun.value?.status !== 'PROCESSING') return
   const runId = selectedRun.value.id
   const requestSequence = runRequestSequence
+  const ownerAtRequest = ownerIdentity.value
   if (Date.now() - pollStartedAt >= 180000) {
     pollTimedOut.value = true
     return
   }
   try {
     const run = await bffApi.portfolioAdvice.srpp.getSimulation(runId)
-    if (disposed || requestSequence !== runRequestSequence || selectedRun.value?.id !== runId) return
+    if (disposed || ownerAtRequest !== ownerIdentity.value || requestSequence !== runRequestSequence || selectedRun.value?.id !== runId) return
     setActiveRun(run)
     updateRunInRoot(run)
     pollError.value = ''
     if (run.status === 'PROCESSING') startPolling()
     else await loadRoot()
   } catch (error) {
-    if (disposed || requestSequence !== runRequestSequence) return
+    if (disposed || ownerAtRequest !== ownerIdentity.value || requestSequence !== runRequestSequence) return
     pollError.value = apiErrorMessage(error, '暫時無法更新模擬狀態。')
     if (!disposed && selectedRun.value?.status === 'PROCESSING') startPolling()
   }
@@ -1022,28 +1711,33 @@ async function refreshSelectedRun() {
   if (!selectedRun.value?.id) return
   runRequestSequence += 1
   const requestSequence = runRequestSequence
+  const ownerAtRequest = ownerIdentity.value
+  const runId = selectedRun.value.id
   pollTimedOut.value = false
   pollError.value = ''
   pollStartedAt = Date.now()
   try {
-    const run = await bffApi.portfolioAdvice.srpp.getSimulation(selectedRun.value.id)
-    if (disposed || requestSequence !== runRequestSequence) return
+    const run = await bffApi.portfolioAdvice.srpp.getSimulation(runId)
+    if (disposed || ownerAtRequest !== ownerIdentity.value || requestSequence !== runRequestSequence || selectedRun.value?.id !== runId) return
     setActiveRun(run)
     updateRunInRoot(run)
   } catch (error) {
-    if (disposed || requestSequence !== runRequestSequence) return
+    if (disposed || ownerAtRequest !== ownerIdentity.value || requestSequence !== runRequestSequence) return
     pollError.value = apiErrorMessage(error, '重新查詢模擬失敗。')
   }
 }
 
 async function publish() {
   if (!canPublishNow.value || !activeDraft.value || !selectedRun.value) return
+  const ownerAtRequest = ownerIdentity.value
+  const requestSequence = ++publishRequestSequence
   publishing.value = true
   try {
     const created = await bffApi.portfolioAdvice.srpp.publishDraft(activeDraft.value.id, {
       revision: activeDraft.value.revision,
       simulationId: selectedRun.value.id
     })
+    if (disposed || ownerAtRequest !== ownerIdentity.value || requestSequence !== publishRequestSequence) return
     selectedRelease.value = created
     rootData.value = {
       ...rootData.value,
@@ -1051,20 +1745,25 @@ async function publish() {
     }
     ElMessage.success('已建立待發布請求；正式版本尚未切換。')
     await loadRoot()
+    if (disposed || ownerAtRequest !== ownerIdentity.value || requestSequence !== publishRequestSequence) return
     const refreshed = releases.value.find(item => item.id === created.id)
     if (refreshed) selectedRelease.value = refreshed
   } catch (error) {
+    if (disposed || ownerAtRequest !== ownerIdentity.value || requestSequence !== publishRequestSequence) return
     ElMessage.error(apiErrorMessage(error, '無法建立待發布請求。'))
   } finally {
-    publishing.value = false
+    if (ownerAtRequest === ownerIdentity.value && requestSequence === publishRequestSequence) publishing.value = false
   }
 }
 
 async function downloadPayload(release) {
   if (!release?.id) return
+  const ownerAtRequest = ownerIdentity.value
+  const requestSequence = ++downloadRequestSequence
   downloadingReleaseId.value = release.id
   try {
     const payload = await bffApi.portfolioAdvice.srpp.releasePayload(release.id)
+    if (disposed || ownerAtRequest !== ownerIdentity.value || requestSequence !== downloadRequestSequence) return
     const blob = payload instanceof Blob
       ? payload
       : new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' })
@@ -1077,16 +1776,152 @@ async function downloadPayload(release) {
     anchor.remove()
     URL.revokeObjectURL(url)
   } catch (error) {
+    if (disposed || ownerAtRequest !== ownerIdentity.value || requestSequence !== downloadRequestSequence) return
     ElMessage.error(apiErrorMessage(error, '下載發布設定檔案失敗。'))
   } finally {
-    downloadingReleaseId.value = ''
+    if (ownerAtRequest === ownerIdentity.value && requestSequence === downloadRequestSequence) downloadingReleaseId.value = ''
   }
 }
 
 function formatMoney(value) {
+  return formatCurrency(value)
+}
+
+function formatCurrency(value) {
   if (value == null || value === '') return '—'
-  const number = Number(value)
-  return Number.isFinite(number) ? `NT$ ${new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 0 }).format(number)}` : '—'
+  const text = formatMoneyText(value, { minimumFractionDigits: 2 })
+  return text ? `NT$ ${text}` : '—'
+}
+
+function formatFraction(value) {
+  if (value == null || typeof value !== 'number' || !Number.isFinite(value)) return '—'
+  return `${formatPreciseDecimal(value * 100)}%`
+}
+
+function formatMonths(value) {
+  if (value == null || typeof value !== 'number' || !Number.isFinite(value)) return '—'
+  return formatPreciseDecimal(value, 4)
+}
+
+function formatMonthExceptions(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return '無'
+  const entries = Object.entries(value).sort(([left], [right]) => Number(left) - Number(right))
+  return entries.length ? entries.map(([year, month]) => `${year} 年 ${month} 月`).join('、') : '無'
+}
+
+function formatLedgerBonuses(value) {
+  if (!Array.isArray(value) || !value.length) return '無'
+  return value.map(item => `${item.name} × ${formatMonths(item.months)} 月薪（${formatCurrency(item.amountNominalTwd)}）${item.festivalDate ? `，節日 ${item.festivalDate}` : ''}`).join('；')
+}
+
+function formatMoneyQuantiles(value) {
+  if (!value || typeof value !== 'object') return '—'
+  return ['p10', 'p50', 'p90'].map(key => `${key.toUpperCase()} ${formatCurrency(value[key])}`).join('；')
+}
+
+function formatScheduleValue(value, kind = 'text') {
+  if (value == null || value === '') return '—'
+  if (kind === 'money') return formatCurrency(value)
+  if (kind === 'fraction') return formatFraction(value)
+  if (kind === 'boolean') return value === true ? '是' : value === false ? '否' : '—'
+  if (kind === 'mode') return value === 'MANUAL' ? '手動輸入' : value === 'AUTO' ? '依目前模型自動估算' : String(value)
+  if (kind === 'indexation') {
+    if (value === 'REFERENCE_INFLATION_HISTORY_PROXY') return '固定基準通膨歷史價格代理；非真實官方歷史 CPI 或核定給付'
+    if (value === 'SCENARIO_CPI') return '依本輪情境 CPI'
+  }
+  if (kind === 'status') return exclusionReasonLabel(value)
+  if (kind === 'integer' || kind === 'months') return String(value)
+  return String(value)
+}
+
+function exclusionReasonLabel(value) {
+  if (value == null || value === '') return '—'
+  return ({
+    AT_OR_BEFORE_AS_OF: '估值日當日或以前，視為已反映',
+    AFTER_HORIZON: '晚於規劃終點'
+  })[value] || String(value)
+}
+
+function buildCashflowScheduleRows(resultSide) {
+  const schedule = resultSide?.assumptions?.cashflowSchedule
+  if (!schedule) return []
+  const rows = [{ category: '退休規劃', label: '生日', value: resultSide.assumptions?.birthDate, kind: 'text', note: '生日影響模型時程，不代表給付資格已核准。' }]
+  const pension = schedule.laborPension
+  if (pension) {
+    rows.push({ category: '勞退一次領', label: '來源模式', value: pension.mode, kind: 'mode', note: pension.mode === 'MANUAL' ? '名目實收金額，依回傳時程入帳。' : '依目前模型估算。' })
+    rows.push({ category: '勞退一次領', label: '預計實收日期', value: pension.receiptDate, kind: 'text', note: pension.included ? '系統標示已納入本輪時程。' : '系統未標示納入本輪時程。' })
+    rows.push({ category: '勞退一次領', label: '預計實收金額', value: pension.amountNominalTwd, kind: 'money', note: '名目新臺幣；非核定給付。' })
+  }
+  const insurance = schedule.laborInsurance
+  if (insurance) {
+    rows.push({ category: '勞保月領', label: '來源模式', value: insurance.mode, kind: 'mode', note: '不代表法定資格已核驗。' })
+    rows.push({ category: '勞保月領', label: '起領日期', value: insurance.startDate, kind: 'text', note: '依系統回傳的有效日期呈現。' })
+    rows.push({ category: '勞保月領', label: '起領時名目月額', value: insurance.monthlyNominalTwd, kind: 'money', note: '起領時名目金額，不是固定實質額。' })
+    rows.push({ category: '勞保月領', label: '本輪期初有效名目月額', value: insurance.asOfMonthlyNominalTwd, kind: 'money', note: '系統回傳的估值日有效額。' })
+    rows.push({ category: '勞保月領', label: '指數化來源', value: insurance.indexationBasis, kind: 'indexation', note: insurance.indexationBasis === 'REFERENCE_INFLATION_HISTORY_PROXY' ? '缺少真實歷史 CPI，採固定基準通膨代理。' : '依本輪情境 CPI。' })
+  }
+  for (const [key, label] of [['homeRepair', '房屋修繕'], ['appliance', '家電汰換']]) {
+    const item = schedule[key]
+    if (!item) continue
+    rows.push({ category: label, label: '首次年份', value: item.firstYear, kind: 'integer', note: '依結果來源時程。' })
+    rows.push({ category: label, label: '固定支出日', value: item.eventMonthDay, kind: 'text', note: '每次於該年 8 月 31 日支出。' })
+    rows.push({ category: label, label: '重複間隔', value: item.intervalYears, kind: 'integer', note: '年。' })
+    rows.push({ category: label, label: '每次實質金額', value: item.amountRealTwd, kind: 'money', note: '2026 年 8 月實質新臺幣，不再通膨。' })
+  }
+  return rows
+}
+
+function buildPayrollScheduleRows(payroll) {
+  if (!payroll) return []
+  return [
+    { label: '調薪前基準月薪', value: payroll.monthlySalaryNominalTwd, kind: 'money', note: '名目薪資。' },
+    { label: '每月發薪日', value: payroll.payday, kind: 'integer', note: '每月日期。' },
+    { label: '每年調薪金額', value: payroll.annualRaiseAmountNominalTwd, kind: 'money', note: '名目新臺幣。' },
+    { label: '首次調薪日期', value: payroll.annualRaiseFirstDate, kind: 'text', note: '之後依薪資帳務規約。' },
+    { label: '所得稅現金扣繳率', value: payroll.withholdingRate, kind: 'fraction', note: '扣繳代理，不是最終稅率。' },
+    { label: '勞退自提率', value: payroll.selfPensionRate, kind: 'fraction', note: '自提款不列入可支用現金。' },
+    { label: '健保眷屬人數', value: payroll.nhiDependents, kind: 'integer', note: '人。' },
+    { label: '退休前每月實質生活費', value: payroll.monthlyExpenseRealTwd, kind: 'money', note: '2026 年 8 月實質新臺幣。' },
+    { label: '本輪 ledger 已於退休日前收付淨額', value: payroll.receivedByRetirementNominalTwd, kind: 'money', note: '只含本輪 ledger 範圍。' },
+    { label: '本輪 ledger 退休日後應收淨額', value: payroll.receivableAfterRetirementNominalTwd, kind: 'money', note: '按實際發薪日列為待收，不提前入帳。' }
+  ]
+}
+
+function buildReserveStrategyRows(strategy) {
+  if (!strategy) return []
+  return [
+    { label: '緊急備用金：定存', value: strategy.emergencyDepositReserveRealTwd, kind: 'money', note: '來自既有資產，鎖定實質代理。' },
+    { label: '緊急備用金：ETF', value: strategy.emergencyEtfReserveRealTwd, kind: 'money', note: '未模擬00865B專屬收益、急難提款與補回。' },
+    { label: '鎖定準備金合計', value: strategy.protectedReserveRealTwd, kind: 'money', note: '不另加新錢。' },
+    { label: '生活費準備目標', value: strategy.livingReserveCeilingRealTwd, kind: 'money', note: '由既有可用資產切分。' },
+    { label: '生活費現金底線', value: strategy.livingReserveFloorRealTwd, kind: 'money', note: '投資與再平衡不得侵蝕。' },
+    { label: '熊市生活費動用上限', value: strategy.bearLivingDeploymentCapRealTwd, kind: 'money', note: '資金不足時不創造資產。' },
+    { label: '牛市配置戰術', value: strategy.bullStrategyEnabled, kind: 'boolean', note: '獨立於基準牛市補足生活費分支。' },
+    { label: '熊市配置戰術', value: strategy.bearStrategyEnabled, kind: 'boolean', note: '獨立於退休後市況生活費分支。' },
+    { label: '配置戰術等待月數', value: strategy.tacticalWaitMonths, kind: 'integer', note: '只調整可選戰術的等待。' },
+    { label: '熊市全窗口可售債券比例', value: strategy.bearBondSaleMaxShare, kind: 'fraction', note: '比例。' },
+    { label: '熊市債券權重底線', value: strategy.minimumBondWeight, kind: 'fraction', note: '比例。' },
+    { label: '熊市股票上限', value: strategy.bearEquityCap, kind: 'fraction', note: '比例。' },
+    { label: '牛市售股保留下限', value: strategy.bullEquityFloor, kind: 'fraction', note: '比例。' },
+    { label: '市況年生活費調整額', value: strategy.marketSpendingAdjustmentRealTwd, kind: 'money', note: '退休後市況分支使用；不是短線報酬。' },
+    { label: '市況訊號來源', value: strategy.signalBasis, kind: 'text', note: '月頻合成總報酬代理，非每日雷達。' },
+    { label: '基準流動性分支', value: strategy.liquidityBranchesEnabled, kind: 'boolean', note: '與可選配置戰術開關分開。' }
+  ]
+}
+
+function buildReserveAuditRows(audit) {
+  if (!audit) return []
+  return [
+    { label: '期初現金轉入生活準備金', value: audit.openingCashTransferRealTwd, kind: 'moneyQuantiles' },
+    { label: '期初生活準備金短缺', value: audit.openingLivingShortfallRealTwd, kind: 'moneyQuantiles' },
+    { label: '完成月更新次數', value: audit.monthUpdateCount, kind: 'integer' },
+    { label: '熊市實際成交批次總數', value: audit.bearFillCount, kind: 'integer' },
+    { label: '牛市實際成交批次總數', value: audit.bullFillCount, kind: 'integer' },
+    { label: '熊市窗口最多批次', value: audit.bearMaximumWindowFills, kind: 'integer' },
+    { label: '牛市窗口最多批次', value: audit.bullMaximumWindowFills, kind: 'integer' },
+    { label: '熊市首批最大占比', value: audit.bearMaximumFirstBatchShare, kind: 'fraction' },
+    { label: '牛市首批最大占比', value: audit.bullMaximumFirstBatchShare, kind: 'fraction' }
+  ]
 }
 
 function formatProbability(value) {
@@ -1125,13 +1960,25 @@ function formatFieldChange(fieldId, value) {
     const labels = field.assetLabels || {}
     return (field.assetKeys || Object.keys(value)).map(key => `${labels[key] || key} ${formatFieldScalar(value[key], field)}`).join('、')
   }
+  if (field?.type === 'symbols' && Array.isArray(value)) return value.join('、') || '未選取'
+  if (field?.type === 'events' && Array.isArray(value)) {
+    return value.map(item => `${item.date || '未填日期'} ${item.name || '未填用途'} ${formatCurrency(item.amount)}`).join('；') || '無大額支出'
+  }
+  if (field?.type === 'datedBonuses' && Array.isArray(value)) {
+    return value.map(item => `${item.name || '未命名獎金'} ${item.pay_date || '未填發放日'} × ${formatMonths(item.months)} 月薪`).join('；') || '無指定日期獎金'
+  }
+  if (field?.type === 'recurringBonuses' && Array.isArray(value)) {
+    return value.map(item => `${item.name || '未命名獎金'} 每年 ${item.month || '—'} 月 × ${formatMonths(item.months)} 月薪（例外：${formatMonthExceptions(item.month_by_year)}）`).join('；') || '無每年獎金規則'
+  }
+  if ((field?.type === 'bearLadder' || field?.type === 'bullLadder') && Array.isArray(value)) return `來源唯讀五批（${value.length} 批）`
   return formatFieldScalar(value, field)
 }
 
 function formatFieldScalar(value, field) {
   if (value == null) return '—'
   if (field?.type === 'date') return String(value)
-  if (isFractionField(field)) return `${fractionInputValue(value)}%`
+  if (isFractionField(field)) return `${formatPreciseDecimal(fractionInputValue(value))}%`
+  if (isMoneyField(field)) return formatMoneyText(value)
   return `${value}${field?.unit ? ` ${field.unit}` : ''}`
 }
 
@@ -1143,7 +1990,7 @@ function fieldListLabel(ids) {
 function formatAssumption(key, value, unit) {
   if (key === 'baseCurrency') return '2026 年 8 月實質新臺幣'
   if (key === 'targetPriceComplete') return value ? '完整' : '不完整'
-  if (key === 'protectedReserveRealTwd') return formatMoney(value)
+  if (key === 'protectedReserveRealTwd' || /Twd$/.test(key) || /(?:TWD|新臺幣.*元|實質元|名目元)/i.test(String(unit || ''))) return formatCurrency(value)
   if (unit === 'fraction' || ['referenceInflation', 'equityVolatility', 'bondVolatility'].includes(key)) return `${fractionInputValue(value)}%`
   if (key === 'scenarioInflationBounds' && value && value.low != null && value.high != null) {
     return `${fractionInputValue(value.low)}% 至 ${fractionInputValue(value.high)}%`
@@ -1266,6 +2113,10 @@ onUnmounted(() => {
 .weight-field label { display: block; margin-bottom: 4px; color: #64748b; font-size: 11px; }
 .weight-field :deep(.el-input__wrapper) { min-width: 0; }
 .weight-field :deep(.el-input-group__append) { padding: 0 6px; color: #64748b; font-size: 10px; }
+.weight-total { grid-column: 1 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 6px 16px; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 7px; background: #f8fafc; color: #475569; font-size: 12px; }
+.weight-total strong { font-size: 14px; }
+.weight-total-valid { border-color: #a7f3d0; background: #ecfdf5; color: #047857; }
+.weight-total-under, .weight-total-over, .weight-total-invalid { border-color: #fed7aa; background: #fff7ed; color: #9a3412; }
 .change-preview { margin-top: 18px; }
 .subsection-heading { margin: 14px 0 8px; color: #334155; font-size: 13px; font-weight: 700; }
 .lower-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr); gap: 16px; align-items: start; }

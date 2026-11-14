@@ -1,0 +1,20 @@
+{
+  "bundle": "fc31e0979d7279cc3f1237e9ea91500d8a48958ed67f9b1d66f9e420ff996bda",
+  "catalogFields": 76,
+  "engineVersion": "SRPP_SCENARIO_CASHFLOW_V2",
+  "sourceBytes": {
+    "assumptions/model_inputs.json": {
+      "unchanged": true,
+      "sha256": "6d26483bcb530e26d8686bbaa565e805bfe137efa1d6db7a8671cedb796620aa"
+    },
+    "assumptions/pre_retirement_payroll.json": {
+      "unchanged": true,
+      "sha256": "c146cb1f0fb9c19778075a376bb7e08a7f501e4e5839da594c19e5c3948637e5"
+    }
+  },
+  "resultSha256": "e9a96995e3142f5403281cf3dd2d858843cc6b94419d820170a719917a9ed5f8",
+  "wireBytes": 796753,
+  "elapsedSeconds": 0.202,
+  "runtimeFileCount": 20,
+  "payrollMirrorSha256": "c146cb1f0fb9c19778075a376bb7e08a7f501e4e5839da594c19e5c3948637e5"
+}

@@ -1,0 +1,10 @@
+{
+  "backend/src/test/resources/srpp/settings-result-wire.json": {
+    "bytesUnchangedFromMain": true,
+    "canonicalSha256": "79d17b6863696707c5c0733c7c214fcbb7136aa78d8a25592697c5f7a3288f9f"
+  },
+  "bff/src/test/resources/srpp/settings-result-wire.json": {
+    "bytesUnchangedFromMain": true,
+    "canonicalSha256": "79d17b6863696707c5c0733c7c214fcbb7136aa78d8a25592697c5f7a3288f9f"
+  }
+}

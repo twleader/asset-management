@@ -1,0 +1,16 @@
+{
+  "containerId": "c4643572cf9b1b289dc8ba39f082c308612d58d0ac1bb38f7ddaf74e38151bee",
+  "imageId": "sha256:c98ded27fba4cad67082da6148759a9fae29df8bb3b8817aa37d48f76301d76e",
+  "imageTag": "codex-srpp-simulator-preflight:t586-t587-fc31e097-20261114",
+  "user": "simulator",
+  "networkMode": "none",
+  "readOnlyRootfs": true,
+  "portBindings": {},
+  "mounts": [],
+  "capDrop": [
+    "ALL"
+  ],
+  "securityOptions": [
+    "no-new-privileges"
+  ]
+}

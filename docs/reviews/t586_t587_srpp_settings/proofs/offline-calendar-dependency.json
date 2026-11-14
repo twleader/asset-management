@@ -1,0 +1,7 @@
+{
+  "source": "/Users/steven/Project/SRPP/data/input/交易日曆_2026.json",
+  "destination": "/Users/steven/.codex/worktrees/srpp-life-cashflow-fields/SRPP/data/input/交易日曆_2026.json",
+  "sha256": "67cd7ed9fdb1ade6d7a0bb0061e4cdf39bb5ee1a56dde800baae7595d7716279",
+  "rows": 365,
+  "purpose": "Offline original golden generator dependency; reused existing local calendar without refresh"
+}

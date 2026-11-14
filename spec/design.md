@@ -13835,3 +13835,168 @@ Draft存changes_json為當初baseline差異稽核snapshot（fieldId/label/before
 期初即時名目資產除 `reference_price_level(asOfDate,refInfl)` 轉 2026-08-31 實質元，此期初換算兩情境相同，不因修改未來通膨重寫過去物價。其後 price level 逐期依情境 CPI 複利；名目薪資／年金／勞退入帳時只除該期 price level 一次；政策標為 2026-08 實質的生活費／大額支出不重複膨脹。
 創新值沿 CalendarMarketPath 依 seed/曆年/月份固定，每月同一 draw 以 log interpolation 分配月內事件，修改退休或入帳日期不重抽整條市場路徑。
 固定 innovation golden 應核對漂移、t 正規化、CPI/FX 各一次；zero-volatility 測試核對同一路徑逐期精確現金流，並證明波動改變重算 a_e。
+
+
+## Task 586：SRPP 生命時程與大額支出編輯
+
+本節為 Task 585 的增量契約。catalog 升 `SRPP_SETTINGS_CATALOG_V2`，原 27 欄不刪除，新增三十三欄至 60 欄；其中31欄 `editable=true`、兩個來源ladder `editable=false`，全部新增欄 `simulationSupported=true`、`formalSupported=false`、`retirementImpact=MODELED`。既有 formal compiler 仍拒絕 simulation-only 差異，不能用新增 UI 改寫正式個人資料或交易規則。
+
+| id | type／nullable | source／預設 | 顯示與驗證 |
+|---|---|---|---|
+| birthDate | date／false | `/labor_insurance/birth_date` | 生日；canonical `YYYY-MM-DD`，不晚於台北當日；模擬再依 frozen capturedAt 的台北日期查驗 |
+| laborPensionReceiptDate | date／true | `pointer:null,defaultAssumption:null` | 勞退一次領實收日期；與 amount 同 null 或同填 |
+| laborPensionReceiptAmount | number／true | `pointer:null,defaultAssumption:null` | 未來實收名目新臺幣 0..100000000、至多兩位小數 |
+| laborInsuranceStartDate | date／true | `pointer:null,defaultAssumption:null` | 勞保起領日；與 monthlyAmount 同 null 或同填 |
+| laborInsuranceMonthlyAmount | number／true | `pointer:null,defaultAssumption:null` | 未來實收名目月額 0..1000000、至多兩位小數 |
+| homeRepairFirstYear | integer／false | `/spending/home_repair_first_event_year` | 首次修繕年 1900..2200，沿既有 8/31 日期規約 |
+| applianceFirstYear | integer／false | `/spending/appliance_first_event_year` | 首次家電汰換年 1900..2200，沿既有 8/31 日期規約 |
+| majorExpenseEvents | events／false | `/major_expense_events/events` | 0..100 筆封閉 `{date,name,amount}`；初始含現行五筆，編輯整份陣列 |
+
+| monthlySalary | integer／false | payroll `/employee_profile/monthly_salary` | 調薪前基準月薪，名目新臺幣 0..10000000 元 |
+| salaryPayday | integer／false | payroll `/payday_day_of_month` | 每月發薪日 1..28 |
+| annualRaiseAmount | integer／false | payroll `/employee_profile/annual_salary_increase/amount` | 每年調薪金額，名目新臺幣 0..1000000 元 |
+| annualRaiseFirstDate | date／false | payroll `/employee_profile/annual_salary_increase/first_increase_date` | 首次調薪日期，之後按同月日年度規約，沿canonical salary_on |
+| withholdingRate | number／false | payroll `/employee_profile/income_tax_withholding/rate` | 所得稅現金扣繳率 fraction 0..1，不是最終稅率 |
+| selfPensionRate | number／false | payroll `/employee_profile/voluntary_labor_pension/employee_rate` | 勞退自提率 fraction 0..0.06 |
+| nhiDependents | integer／false | payroll `/employee_profile/nhi_dependents` | 健保眷屬數 0..5 |
+| preRetirementMonthlyExpense | number／false | payroll `/planned_living_costs/monthly_living_expense` | 2026-08-31 實質月生活費 0..1000000 元、至多2位小數 |
+| bonusEvents | datedBonuses／false | payroll `/bonus_events` | 0..100 筆指定日期獎金 `{name,pay_date,months,festival_date?}` |
+| recurringBonuses | recurringBonuses／false | payroll `/recurring_bonuses` | 0..32 筆年度獎金 `{name,months,month,month_by_year?}` |
+
+
+Java `authorityValues` 只有在 catalog 明定 `nullable:true` 且來源為明確 `defaultAssumption:null` 時接受 null；missing／非nullable null 仍拒絕，不把所有權威缺值放行。Python current extraction、normalize、config hash、changes 與 Java current-values 比對使用相同完整 values。events 的每列日期必為 canonical ISO、trim 名稱長 1..100、非負有限金額至多兩位小數且至多一億元，不接受額外 key、bool、NaN／Infinity／重複 JSON member。保留列順序及重複同日的不同事件，hash 仍按完整 normalized JSON 計算。分組包括退休規劃、退休前收入、退休給付、大額支出、準備金與生活費、牛熊策略及原配置／買賣條件，新增欄依 group order 編排；`events` 使用逐列日期／名稱／金額 editor 及新增刪除按鈕，不能落入數字 input。
+
+### 薪資來源與封閉清單
+
+十個薪資欄 metadata 明定 `source:"payroll"` 與上表唯一 pointer；未標source的既有欄沿model來源，未知source不得退回model猜值。Python SettingsContext載入同版 `assumptions/pre_retirement_payroll.json` 並以白名單id→pointer抽current/default值。Java以 `settings/pre_retirement_payroll.json` classpath mirror讀取（完整resource路徑 `srpp/settings/pre_retirement_payroll.json`），先比對完整bytes SHA-256等於同版authority manifest的 `files["assumptions/pre_retirement_payroll.json"]`，再抽白名單值，拒絕缺檔／錯hash／未知source或pointer。mirror由 `export_settings_runtime.py` 除既有runtime同步外一併產生，export --check也核bytes，不另建立第二份手填薪資權威；原payroll JSON保持不變。
+
+獎金是月薪倍數，`months`為有限JSON number 0..24、至多4位小數；name trim後1..100字。datedBonuses每列exact required name/pay_date/months及optional festival_date（若存在為canonical ISO日期），pay_date必ISO整日；拒絕重複 `(pay_date,name)` 防canonical map靜默覆蓋。recurringBonuses每列exact required name/months/month(整數1..12)、optional month_by_year，名稱唯一；month_by_year為至多100個key之object，key須四位1900..2200年份字串，value為整數1..12，空object合法。兩型皆array且數量有界，不接受額外欄／bool數字／NaN／Infinity。指定日期及循環兩份陣列均整份取代scenario-local原config，不與原清單暗合併；依canonical bonus_calendar同名＋同年explicit覆蓋recurring；同名不同pay_date可保存為明確兩次給付，同日不同name合併入同日現金流。兩個editor清楚標示「指定日期表優先；未列該名稱／年度才使用每年規則」，編輯recurring不能暗中修改既存explicit或宣稱今年實付已改。兩表label直接含「年終／績效／節慶獎金」，不是只有難找的通用獎金文字。既有四類只作來源初始值，UI可新增年終／績效／節慶等名稱，保留原festival_date與月份例外；改名後不可留隱藏原列，仍存在的不同名循環規則必完整可見。沒有固定amount欄，不能宣稱支持固定現金獎金。
+
+### 薪資時程與退休當日估值
+
+scenario-local payroll copy先套全部十個values，再交canonical payroll.scenario／calculate；auto勞退projection使用同一copy，因此月薪、調薪、自提與發薪時程一致。原正式JSON、model與canonical輸出不因草稿更新。年度調薪沿salary_on既有算法；給付實際按當日contractual salary×months計算，再沿原整元ROUND_HALF_UP帳務規約。扣繳只表示現金預扣，不能當最終年度所得稅。
+
+支援指定獎金離開一般發薪日：向後相容擴充canonical calculate，日期網格取確有薪資權利的monthly pay dates與合格bonus dates聯集，按日期排序；同日salary及多筆bonus合併成一列，不在同日重複薪水。offcycle bonus-only row 的regular_salary=0、earned_month_fraction=0、insurance_month_fraction=0、employer_nhi_due=false，一般勞就保／健保及自提為0；仍以該日有效contractual salary算bonus、按gross做withholding，依該年累積已領bonus及既有四個月投保薪資門檻計supplemental_nhi。跨年各自重置；期初年前已領事件僅初始化當年bonus累積，不重加可支用資產。同日bonus合併後算一次稅款及門檻；非薪資日不得增加一個月生活費、一般保費、自提或capex預算。若retire>asof但沒有任何待發薪／獎金，允許空ledger，不回no-paydates錯誤；只有實際已賺取且按原規約未支付的最後月薪保留為未來應收，不能因補日期而多造薪資。
+
+退休日為最後在職日，退休資產snapshot只包含pay_date<=retirementDate實際入帳流（包含退休日當天），晚於該日的末月已賺取薪資在ledger以payment_after_retirement=true分列並於真發放日才入cashflow，不提前納retirementAssets。自提已從net_cash扣除，不能加回可支用資產；它只進勞退帳戶的既有projection。生活費annual_spend與AnnualTaxBudget皆由已套設定的同份monthly_living_expense產生；helper ledger的planned_living_and_capex_cost／tax_included_in_living_budget／investable_surplus是帳務揭露，情境只沿既有net_cash_after_payroll＋budget.cover入帳，不再把surplus或攤提費重加扣。大額支出仍獨立按日期扣，不能又扣helper的年度平均房修／家電。
+
+保費與未公告年度級距沿既有insurance_rule規劃代理，不因本輪查網路改官方表；原wage_brackets_115並非完整低薪級距表，低月薪時同樣明示代理限制，不稱法定最新或精確保費。未納完整年度綜所稅結算；畫面稱「假設下退休當日可支用資產預估」，不能稱真正確定資產或把扣繳直接視為final tax。
+
+### 情境收付的唯一來源
+
+`scenario_cashflow` 先建立該 scenario 的有效收付時程，再以其統一建立日期網格與現金流。生日影響顯示年齡、規劃終點、分齡生活費切換，以及自動勞保／勞退。自動勞退在 scenario-local config 複本以生日加 `labor_retirement.age` 重算 eligible_date（2/29 到齡年無該日則2/28），沿原提撥／收益／退休翌日申請／30天估計入帳；原模型的300萬元為2026-08-31餘額，不能標成未來實收額。手動勞退一次領只使用輸入日期及實收名目金額一次，不先呼叫不適用的自動投影再疊加；該次入帳除實際 scenario price level 一次轉為實質可支用金額。
+
+自動勞保沿 `labor_insurance_claim_terms` 與既有 `PensionIndexation`，將 scenario 生日與退休最後在職日傳入。手動模式以所填起領日及名目月額初始化年金，月額已是使用者指定實收值，不再按年齡折減；仍沿既有起領首月 eligible days 比例與 CPI 指數化規約，明示未核驗法定資格。月額是起領時名目額，實收時只除當期物價一次。所有 manual 日期可早於目前日期：過往一次領不重加到期初資產，已起領勞保於本輪後月份繼續依規約領取；當日及更早的單次事件視為期初估值已反映，不能重播。規劃終點外事件不入帳，結果保留 excluded reason。
+
+
+過往／部分起領年度的年金CPI初始狀態採明示代理，不直接用空anchor開始：令 `claimYearStart=YYYY-01-01`（有效起領日所屬年）。若 `claimYearStart < asOfDate`，由同版固定 `referenceInflation`（global_equity_wrapper_assumptions.forward_return_assumptions.inflation_assumption.midpoint）及 `reference_price_level(date,referenceInflation)` 在該年1/1至asOf的缺口建立無亂數的歷史價格曲線，暖機一個路徑的 `PensionIndexation`。歷史observe區間依每月月末／跨年與asOf切開，按相同helper建立起領年度年平均anchor、歷年已達門檻的調整、最後調整基準與當年度尚未完成的積分／日數；歷史調整日期依既有payment規約（6/30）在不晚於asOf的日期更新狀態。該過程只呼叫CPI狀態observe／adjustment，不建立任何資產現金流或補付歷史年金；給付輸入仍是起領時名目月額，不能把它默認為目前月額。warmup完成後，monthly、anchor、previous_average、calendar_year、integral、days等必要狀態broadcast到本輪simulations，讓asOf之後可接續完整年度與未來調整；不得以100000條路徑重跑歷史。於asOf當日已適用的調整在初始化完成，後續只處理晚於asOf的收付，避免重複調整。
+
+上述代理的價格曲線於asOf接到同一reference_price_level的期初價格；baseline與scenario同一ref與asOf、歷史狀態一致，不得用values.inflationRate、future InflationPath、seed或未來隨機路徑回推歷史。`indexationBasis=REFERENCE_INFLATION_HISTORY_PROXY`，`monthlyNominalTwd`保留起領月額，另提供 `asOfMonthlyNominalTwd`（asOf有效月額；尚未起領時等於起領月額）與限制「缺少真實歷史CPI，以固定基準通膨代理；並非官方指數化或核定給付」。若claimYearStart>=asOf，無缺漏歷史，整個起領年度可由本輪scenario CPI觀察，採 `indexationBasis=SCENARIO_CPI`，不暖機、不造過往anchor。即使起領日在asOf之後、但起領年度1/1已早於asOf，也使用前述部分年度暖機以避免完整起領年度永遠無法建立。這是情境專用初始化，不修改共用正式PensionIndexation或宣稱取得官方歷史CPI；未來仍沿原scenario CPI及同一adjustment helper。
+
+房修／家電使用各自首次年份、費用及週期建立每年8/31的 events，沿既有實質金額直接扣款而不再通膨；大額支出只取 values.majorExpenseEvents，不再額外遍歷 model 的原 events 或 `labor_retirement.new_car_purchase_*` aliases。車款是清單既存一列，明示可依60歲購車規劃修改；已儲存事件日期不隨生日或給付日期暗中移動。同日所有實質支出合計一次；不把平均攤銷費再加進生活費。本輪保持原房修／家電baseline8/31，與其他文件的6/30差異於畫面明示8/31，不默改正式來源。
+
+### 結果契約與相容
+
+`assumptions` 新增 `birthDate` 與 `cashflowSchedule`。schedule另含 `payroll:{monthlySalaryNominalTwd,payday,annualRaiseAmountNominalTwd,annualRaiseFirstDate,withholdingRate,selfPensionRate,nhiDependents,monthlyExpenseRealTwd,bonusEvents,recurringBonuses,ledger,receivedByRetirementNominalTwd,receivableAfterRetirementNominalTwd}`；兩個retirement totals為本輪ledger範圍的net_cash_after_payroll按pay_date分組加總，不冒稱終身已領薪資。ledger為封閉typed列 `{payDate,contractualMonthlySalaryNominalTwd,regularSalaryNominalTwd,bonusNominalTwd,grossPayNominalTwd,laborInsuranceNominalTwd,healthInsuranceNominalTwd,selfPensionNominalTwd,withholdingNominalTwd,supplementalHealthNominalTwd,netCashNominalTwd,paymentAfterRetirement,includedAtRetirement,yearRuleStatus,bonusEvents}`，各money皆兩位小數字串，payDate為ISO，paymentAfterRetirement=(payDate>retirementDate)、includedAtRetirement=(asOfDate<payDate<=retirementDate)，flags boolean。bonusEvents為typed `[{name,months,amountNominalTwd,festivalDate,timingStatus}]`，months數字、amountNominalTwd money字串，festivalDate可null。worker把canonical ledger既有regular_salary／bonus／gross_pay／labor_and_employment_insurance／health_insurance／voluntary_labor_pension／income_tax_withholding／supplemental_nhi_high_bonus／net_cash_after_payroll逐欄映射到對應typed欄；原canonical ledger保留為計算與回歸來源，不將任意JSON原樣穿透。所有money為名目收入／扣款，不把helper的實質生活預算攤提混標名目收入。BFF presentation提供已收／待發放時程、來源及代理／稅務限制，兩側typed DTO及canonical roundtrip完整保留，Vue只render。schedule 至少保留 `laborPension:{mode,receiptDate,amountNominalTwd,included}`、`laborInsurance:{mode,startDate,monthlyNominalTwd,asOfMonthlyNominalTwd,indexationBasis}`、`homeRepair`／`appliance` 各 `{firstYear,eventMonthDay,intervalYears,amountRealTwd}`、`majorExpenses:[{date,name,amountRealTwd,included,exclusionReason}]`；mode 為 `AUTO|MANUAL`，日期 ISO，金額一律既有兩位小數字串。exclusionReason 使用 `AT_OR_BEFORE_AS_OF|AFTER_HORIZON|null`（納入時 null）；給付來源與幣值標示由 BFF presentation 提供台灣繁體中文。baseline 和 scenario 分別呈現有效時程，不能以畫面值取代伺服器結果。兩側 Java DTO／wire fixture／canonical roundtrip 驗完整金額與新增欄；舊歷史結果新增 optional 欄缺省為 null，不能因新欄缺失使歷史頁整頁失敗，也不能偽造舊結果收付。
+
+catalog V2 與 catalog hash／bundle 任一不符時，舊草稿／run僅讀，不允許儲存／模擬／發布；UI 與 server 一致依版本身分守門。建立新草稿只能明確取目前 currentValues，不能無聲遷移舊草稿。引擎升SRPP_SCENARIO_CASHFLOW_V2；baseline與scenario同V2，補入準備金／流動性／市況支出及月末再平衡會刻意修正V1金融結果，本節取代先前整體金融結果不得漂移要求。仍須同seed共享月頻創新值、不因事件網格重抽市場；canonical payroll／budget未變分支保留局部逐欄回歸。舊V1歷史仍能讀，不能補造新策略稽核。需另以確定性測試驗跨年度已起領、起領當年asOf位於年中、當年尚未起領但起領年度有歷史缺口、asOf恰逢調整日及未來通膨變更不改asOf有效月額；確認後續anchor能建立並可繼續調整、歷史現金流不重播。
+
+### 來源與發布
+
+只在 SRPP canonical source 改 catalog／adapter／測試，再由 `export_settings_runtime.py` 逐位元匯出 asset `srpp-simulator/runtime` 與 backend catalog mirror；不直接修改 export 產物當來源。model_inputs、pre_retirement_payroll JSON 與正式投資數值保持原 bytes。catalog 與純計算原始碼為 manifest 受保護來源，須重建新 bundle、同步 authority/golden、準備受追蹤 insert-only SQL；按本專案規範完成兩專案 no-ff merge／push、registry exact row 與實際容器／API 驗收。不新增9090路由、Swagger schema、DB欄或排程；既有草稿 JSON／run JSON 可容納新增設定而無 migration。正式日報採用仍受既有日曆／時窗限制。
+
+Task586薪資回歸需額外驗：原預設payroll完整ledger每欄及未變帳務函式局部輸出不變（V2整體金融baseline可因本節新增準備金／市況策略而變）；月薪／年終／績效及發薪日確實改變現金流；同名同年explicit只覆蓋一份recurring、刪除／改名後無隱藏舊bonus、same-day合併一次、offcycle bonus無regular salary／一般保費／自提且同年度補充保費累積正確、跨年重置與期初已領不重播；retire在發薪日前後及當天、末月比例、退休當日不加未收薪／自提、無給付空ledger；living expense不雙扣、扣繳與tax budget不重複；monthlySalary=0及低薪時代理限制明示。Python/Java current extraction與新增payroll mirror hash錯誤需failclosed，不可默回舊固定薪資；所有陣列無效型別／重複key與各bounds需拒絕。
+
+
+### Task586增補：準備金與牛熊策略參數（catalog總計60欄）
+
+新增13個editable simulation-only欄與2個唯讀來源ladder；source均為model，除tacticalWaitMonths外以以下唯一pointer抽值，皆simulationSupported=true、formalSupported=false、retirementImpact=MODELED。money為2026-08-31實質新臺幣、有限且最多2小數，rate為fraction。
+
+| id | type／bounds | pointer／預設 |
+|---|---|---|
+| emergencyDepositReserve | number 0..100000000 | /execution_policy/emergency_reserve_policy_d193/term_deposit_target_twd_2026_real |
+| emergencyEtfReserve | number 0..100000000 | /execution_policy/emergency_reserve_policy_d193/reserve_etf_target_twd_2026_real |
+| livingReserveCeiling | number 0..100000000 | /execution_policy/living_runway_policy_d145/living_reserve_ceiling_twd |
+| livingReserveFloor | number 0..100000000 | /execution_policy/living_runway_policy_d145/living_reserve_floor_twd |
+| bearLivingDeploymentCap | number 0..100000000 | /execution_policy/stock_purchase_funding_policy_d150/bear_max_living_reserve_deployment_twd |
+| bullStrategyEnabled | boolean | /simulation_contract/base_bull_timing，原值false |
+| bearStrategyEnabled | boolean | /simulation_contract/base_bear_timing，原值false |
+| tacticalWaitMonths | integer 1..24 | pointer:null、defaultAssumption:6，明示規劃假設 |
+| bearBondSaleMaxShare | number 0..1 | /execution_policy/dynamic_allocation_policy_d141/bear_bond_sale_max_share |
+| minimumBondWeight | number 0..1 | /execution_policy/dynamic_allocation_policy_d141/total_bond_floor |
+| bearEquityCap | number 0..1 | /execution_policy/dynamic_allocation_policy_d141/bear_equity_cap |
+| bullEquityFloor | number 0..1 | /execution_policy/dynamic_allocation_policy_d141/monthly_bull_first_equity_target |
+| marketSpendingAdjustment | number 0..1000000 | /simulation_contract/market_conditioned_spending_adjustment_twd_2026_real |
+| bearLadder | bearLadder、editable:false | /execution_policy/dynamic_allocation_policy_d141/bear_ladder_d141 |
+| bullLadder | bullLadder、editable:false | /execution_policy/dynamic_allocation_policy_d141/bull_ladder_d156 |
+
+boolean只接受JSON true/false，不接受0/1或文字；bearLadder為來源完整五列 `{drawdown,share_of_window_budget}`，bullLadder為來源完整五列 `{gain_above_anchor,pullback_from_high_watermark,share_of_window_budget}`，render成唯讀表，normalize只接受與defaults canonical完全相同的值，client改任何欄／列均拒絕。合計60欄：原27＋生日給付支出8＋薪資10＋準備金與策略15；新增31可編及2唯讀，沒有因UI升級變成正式可發布欄。
+
+Cross checks為0<=livingReserveFloor<=livingReserveCeiling、0<=bearLivingDeploymentCap<=livingReserveCeiling−livingReserveFloor、bullEquityFloor<=equityCap、bearEquityCap>=equityFloor、minimumBondWeight+bearEquityCap<=1；既有配置合計與股權帶檢查保留。模擬時緊急兩袖套合計若大於已核對的opening real assets，回422 RESERVE_EXCEEDS_ASSETS，不默默min截斷；所有funding／refill只能動已有非負資產，保護準備金與cash優先，equity floor不是強制買入命令。
+
+### V2資金守恆與生活費流動性
+
+引擎版本SRPP_SCENARIO_CASHFLOW_V2，金融輸出scope仍MONTHLY_SCENARIO_NOT_FORMAL_MODEL；舊V1 run可讀，新run只能用同V2 baseline與scenario。緊急定存與ETF設定加總為期初既有總資產內的固定實質鎖定額，先排除可支用資產與成功判準，不各加一筆新錢；ETF袖套仍只做aggregate locked real proxy，不模擬其專屬收益／急難提款與六個月補回，不能用於日常支出或投資，相關原用途與未建模限制保留。
+
+生活cash earmark亦從剩餘既有資產切出；期初既有cash不足livingReserveCeiling時只由可用股／債同比例轉cash補足，金額不夠則記shortfall、保持總資產守恆，不能再加225萬元或借用緊急額。每筆收入入cash；每筆一般生活／大額支出先扣cash，不足部分才同比例變現可用股債，沒有交易費用／交割／逐檔限制的部分明示aggregate近似。生活支出可用livingReserveFloor；投資、ordinary rebalancing、熊市加股不得使cash低於floor。月末由股債同比例補floor，合格bull liquidity signal時補ceiling；資產不足只補可補額並記shortfall，不能負資產或強制購股。成功仍依可支用總資產存續，reserve不足／living shortfall另外揭露，不以補現金循環造出成功。
+
+### V2完成月份、基準市況分支與可選戰術
+
+以不含資金流的合成股票總報酬指數觀察MonthlySignals：每段市場return可更新指數，但每個完整觀察的completed calendar month只呼叫一次signals.update（開帳當月不完整則不冒充完整月），至少11個已觀察月暖機、10月移動均線／高點／anchor為來源helper月頻proxy。事件網格新增薪資／給付／支出日期不得增加signals、ordinary rebalance或ladder執行次數。先用前個月已知signal決定本期退休後年生活費，再於完成月末更新signal供後續期間；不能回頭更改已發生支出。退休前年生活費不加減，退休後`max(0,ageTier+market_spending_adjustment(previousBear,previousBull,marketSpendingAdjustment))`；來源base_living_runway_market_branches=true時保留合格bull補cash及bear/bull生活費分支，與兩個配置戰術開關分開，開關false不把基準分支關掉。基準生活費signal沿來源固定6月等待，tacticalWaitMonths只改可選配置戰術signal的等待，避免意外改寫基準分支；熊訊號優先。AnnualTaxBudget相同按期調整稅款包含的生活預算，不重複加扣。
+
+策略開關false時不進對應allocation ladder；true時使用source BearLadder／BullLadder並套本輪bearBondSaleMaxShare／minimumBondWeight／bearEquityCap／bullEquityFloor。熊市從cash可動量`min(max(cash−floor,0),bearLivingDeploymentCap)`及可用債券決定window budget；債券整window累計不超過初始eligible bonds×bearBondSaleMaxShare（原2/3），每次仍留至少minimumBondWeight×含reserve總資產之可用債券，equity不得超bearEquityCap×同一總資產。window鎖定後不因新收入擴張，原五批8/12/20/25/35%且first<=10%，每完成月最多一批，以20 synthetic sessions/month映射原bear cooldown5（只是月頻近似，不冒稱真交易日）；partial consumes batch，未用款留cash，下一實際金額必須大於前批，容量不足等候。
+
+牛市達gain rung只arm及提高HWM，需高水位拉回達來源門檻才proposal／record；售股最多equity−bullEquityFloor×含reserve總資產，現金收益先補living ceiling，其餘到債券，不能立即見新高就賣。每月最多一批、partial與growing-fill原規約不變，corrected後依來源close_window處理。資金保護優先，ordinary rebalance只在月末且不能同月反向沖掉剛執行的tactical transfer或侵蝕living floor；active window預算不被normal rebalance刷新。此模型只移動aggregate equity/bond/cash，沒有VOO:0050逐檔容量、12月報酬排名售債、精確broker split、daily MA200、實際雷達同向／交易成本／交割／日頻硬閘，NOT_MODELED清楚列出；不是報告或下單授權。
+
+### V2準備金與策略結果稽核
+
+assumptions增加typed `reserveStrategy`：`{emergencyDepositReserveRealTwd,emergencyEtfReserveRealTwd,protectedReserveRealTwd,livingReserveCeilingRealTwd,livingReserveFloorRealTwd,bearLivingDeploymentCapRealTwd,bullStrategyEnabled,bearStrategyEnabled,tacticalWaitMonths,bearBondSaleMaxShare,minimumBondWeight,bearEquityCap,bullEquityFloor,marketSpendingAdjustmentRealTwd,bearLadder,bullLadder,signalBasis,liquidityBranchesEnabled}`；money兩位字串、rate數字、flags boolean、signalBasis固定MONTHLY_SYNTHETIC_TOTAL_RETURN_PROXY。scenario新增typed `reserveStrategyAudit`：`openingCashTransferRealTwd`／`openingLivingShortfallRealTwd`、`monthUpdateCount`、`bearFillCount`／`bullFillCount`、`bearMaximumWindowFills`／`bullMaximumWindowFills`、`bearMaximumFirstBatchShare`／`bullMaximumFirstBatchShare`，及有界monthlyAudit（每完成月最多一列，不輸出100000條path明細）。各monthly row至少 `{date,bullSignalPathCount,bearSignalPathCount,bullFillPathCount,bearFillPathCount,bullEquitySoldRealTwd,bearCashDeployedRealTwd,bearBondsSoldRealTwd,livingRefillRealTwd,livingShortfallRealTwd}`；金額欄用既有money-quantiles `{p10,p50,p90}`兩位字串，count整數，dateISO。opening audit兩金額同用money-quantiles以固定typed規約；BFF明示分位數不是跨路徑加總。baseline／scenario都保留實際設定與稽核，Java兩側DTO／strict結果驗證／wire fixture及BFF完整傳遞，Vue只展示。
+
+V2測試必含資產守恆、緊急總額超資產拒絕、零備用金、living floor/ceiling初始轉移與不足、不把三年生活費另加一次、生活支出可花floor但投資不可、月末回補不足不造錢；合格bull refill與bear/bull退休生活費即使戰術false仍作用，退休前不動、下限0及bear優先；no signal before11 completed month、只有月末update／rebalance／一批、同月多日期不增加執行或重抽shocks；bear bond window allowance／bond floor／equity cap／cash cap、locked budget不膨脹、partial與growing fill，bull HWM arm不賣／拉回才賣／equity floor／收益先living再bond；readOnly ladder篡改與cross-fields拒絕，typed audit不遺失／NaN、money encoding與舊V1歷史相容。此新增正確資金流會改V1整體baseline，局部原薪資／預算函式與market innovations才是保持不變的回歸範圍。
+
+
+### 金額千分位顯示
+
+所有金額scalar editor、events amount、獎金ledger金額、給付、房修家電、準備金及生活費，含顯示上下限，一律千分位逗點且保留可編最多2位小數；100000→100,000、10000000→10,000,000。以欄位的金額語意辨識，不把rate／獎金months／年齡／年份／日期／interval加comma。formatter/parser只改顯示，state與request始終原number，null清空維持null；結果money字串保持原canonical內容，只render格式化，不能送出逗點字串／NaN或藉格式化重算金額。驗收先輸入帶／不帶comma與小數、清空nullable，再儲存重新載入，檢查輸入及bounds與JSON精確原值。
+
+### 目標配置合計顯示（使用者追加）
+
+權重editor提供固定可見的「合計：N%」與符合100%的狀態；未達時顯示「尚差N個百分點」、超額時「超出N個百分點」。明確的使用者授權僅允許對目前載入／編輯的catalog.assetKeys值作client暫時性加總、容許範圍與缺值檢查及格式化，以免輸入過程反覆呼叫API；worker仍為儲存／模擬的權威validator。所有assetKeys皆需存在且為有限number 0..1、無額外key，才可判斷有效；abs(sum−1)<=1e-9沿現有worker規約視為100%。若缺值／非法則顯示「配置尚未填寫完整」或「比例不合法」，不因空值轉0而誤標有效。百分比顯示避免16.400000000000002等binary尾數，保持原state精度不回寫捨入值；不合格差額不可被顯示捨入成0，必要時增加小數位數。原多小數比例不為了排版被截短後另存，不自動正規化、不改當前配置。這是純編輯合計提示，不授權Vue推算退休資產、給付、策略或正式配置。
+
+
+## Task 587：短線策略設定與目前標的／進出時機
+
+使用者明確確認同時需要可調短線策略與依最新雷達顯示標的／買賣時機。本增量擴充尚未發布的catalog V2至76欄，退休情境引擎仍V2。新增16欄均editable=true、simulationSupported=false、formalSupported=false、retirementImpact=NOT_MODELED；設定會保存於既有owner草稿，但不計入月頻退休回報、不修改正式雷達，也不因保存草稿成為正式採用。畫面必須在設定與目前清單旁直接揭露「草稿參數尚未套用正式雷達；短線報酬未納入退休試算」。本輪不承諾尚無獨立證據的短線成功率／價格／股數。
+
+六個台股股票欄以 `/execution_policy/short_term_opportunity_d171` 為prefix；六個台股債券欄以 `/execution_policy/bond_short_term_opportunity_d185` 為prefix：
+
+| 股票id／債券id | type / bounds | prefix後pointer |
+|---|---|---|
+| shortEquitySymbols／shortBondSymbols | symbols，來源白名單subset，0..來源數量 | /symbols |
+| shortEquityReboundPct／shortBondReboundPct | number，0..100百分點，至多4小數 | /minimum_rebound_pct |
+| shortEquityNetRewardRisk／shortBondNetRewardRisk | number，0.1..100，至多4小數 | /minimum_net_reward_risk |
+| shortEquitySleeveCap／shortBondSleeveCap | number，fraction 0..1 | /limits/sleeve |
+| shortEquityPositionCap／shortBondPositionCap | number，fraction 0..1 | /limits/per_position |
+| shortEquityMaxHoldingSessions／shortBondMaxHoldingSessions | integer，1..260交易日 | /limits/max_holding_sessions |
+
+symbols只接受不重複的原始非空string，均屬該field以同版model原symbols設定的allowedSymbols；保持使用者順序、空陣列合法，不允許自行加新股票或市場。兩組positionCap各不高於sleeveCap。default source維持原陣列與原值（股票7檔、債券3檔），不是跨帳號持股清單。四個美股欄prefix `/execution_policy/us_megacap_tactical_policy_d133`：usTacticalNetUpsidePct number 0..100百分點、至多4小數，pointer `/minimum_profit_space_d185/minimum_pct`；usTacticalBatchCap／usTacticalCompanyCap／usTacticalSleeveCap fraction 0..1，pointer各為 `/order_check_d186/batch_cap`、`/order_check_d186/company_cap`、`/order_check_d186/tactical_total_cap`，batch<=company<=sleeve。全部source=model，未知key/type/nonfinite/bool與其他既有閉合檢查不變。既有模型與payroll JSON bytes不變；由原export與manifest/authority發布工具同步。新增symbols renderer用catalog白名單，原60欄契約不變。
+
+新增owner登入後純讀business GET `/api/portfolio-advice/srpp/short-opportunities` 與 `/api/portfolio-advice/srpp/short-opportunities/stock?stockCode=&market=`；本頁BFF exact同suffix在 `/api/bff/portfolio-advice/srpp`。Controller僅委派專用service。service在任何雷達查詢前確認CurrentUserContext有owner；BFF沿既有tenant傳遞。不新增DB／9090／Swagger／外部行情或refresh端點。只重用TradingRadarService.getList()與既有純讀getStockEvaluation().stock()相同owner純讀來源，禁止get()/export快照、refresh、排程、producer、worker、AI、券商或來源寫入。按刷新鈕只重讀GET。
+
+清單可選成對draftId(UUID)+revision正整數；未帶沿正式值，只有一個400；帶入須owner一致、revision一致、base/model/catalog hash與version皆當下相符，異owner404、stale409，不fallback。草稿只有symbols subset用於縮小觀察集合，其他數值只顯示正式與草稿差異，固定thresholdsAppliedToRadar=false、configurationStatus=FORMAL或DRAFT_PARAMETER_PREVIEW_ONLY，不能假稱已按自訂RR/反彈/容量重新計算。保留原shortAction作「雷達短線觀察」，不等於D173/D185/US的ledger、資金、對帳、深度、基本面及全部SRPP採用閘門通過。原FormalSupported=false更動仍擋正式發布，不新增旁路。
+
+台股股票與債券以來源symbols分組；不在目前owner雷達宇宙的configured代號回missingSymbols（只標等待資料，不臆造name/price/action）。美股primary集合只取本輪owner雷達美股列，不擅加固定科技名單或推測fallback資格。清單依shortAction區分買進觀察／減碼退出觀察／等待：BUY_CANDIDATE、ADD_CANDIDATE、TRIAL_BUY屬買進觀察，REDUCE_CANDIDATE、EXIT_CANDIDATE屬減碼退出觀察，其餘等待；未知code、缺score、market stale/dataComplete不全、缺必要來源時只能等待資料，不能以高score推導買賣。排序按組／觀察分類／source shortScore降冪／market+symbol穩定tie break，null最後。shortAction與label仍原樣保留並標狀態；不從中長線action/reasons生成SHORT方向。
+
+新response以immutable typed records回傳，lists List.copyOf、null money保留null、decimal price用字串toPlainString保原精度。ListEnvelope至少含configurationStatus、thresholdsAppliedToRadar(false)、policyBundleSha256、modelInputsSha256、ruleVersion、actionPolicyVersion、generatedAt、markets、policies、rows、missingSymbols、limitations。markets各含market、stale、dataComplete、asOfDate、quoteStatus；policies三組含group(TW_EQUITY/TW_BOND/US)、label、formalValues、draftValues（typed SixPolicy或UsPolicy）、entryRule、exitRule、retirementImpact(NOT_MODELED)。formal/draft值只投影上述16欄；rules從同版model rule/exit_rule等文字採既有source，不自行發明新時機。rows各exact `{stockCode,stockName,market,group,held,shortAction,shortActionLabel,shortScore,observationType,status,price,quoteStatus,priceUpdatedAt,dailyCandleAsOfDate,horizonConflict}`，observationType BUY_WATCH/SELL_WATCH/WAIT，status RADAR_OBSERVATION/WAITING_DATA；price是原source字串不捏造限價，全部actionable/tradeAuthorization概念固定false（可用頂層tradeAuthorization:false表達）。
+
+stock detail須是目前owner雷達宇宙且在相同source政策/US集合，否則404；不必先查全部詳細內容，只針對當次展開symbol/market一次getStockEvaluation，禁止逐列N+1。DetailEnvelope含ruleVersion/actionPolicyVersion/generatedAt、相同身份與status、dataComplete、source shortAction/shortActionLabel/shortScore、shortReasons/shortRisks、shortEvidenceConfidence/shortDownsideRisk/shortRiskCoverage、horizonConflict、原quote價格/狀態/時間、dailyCandle.asOfDate、原priceReference exact `{buyLower,buyUpper,sellLower,sellUpper,asOfDate,applicableSide}`（money皆保原decimal string/null）及limitations、tradeAuthorization:false。missing/null不補0；舊資料無新detail欄仍等待。不把general actionGateReasons或medium reasons當SHORT利多；若保留audit需分開明示。PriceReference只能標「完成日布林參考區間」及其自身asOfDate/applicableSide，不標可成交限價、停損或報酬目標。沒有SHORT賣出觀察時不從持股或shortScore低自行造SELL。
+
+UI新增獨立child短線區，可調策略欄仍沿原草稿保存／dirty／CAS，symbols用source白名單複選；目前買進/賣出/等待清單顯示來源與時點，展開後顯示SHORT原因風險、參考區間及原策略進出場文字。參數預覽與正式方向清楚分開，預設不在背景重複poll/外呼；舊run不因缺short設定毀損，不把NOT_MODELED改成退休效益。對讀取失敗具名保留錯誤，不用前一owner或前一symbol代替。
+
+純讀來源已查證：不可呼叫舊getStockDetail，該路會走可刷新calendar、DividendEventEvidencePipeline.resolve/projectOne(DB writer)、technical resolver寫cache。使用既有TradingRadarService.getStockEvaluation(String,String).stock()，其ownerTargets先驗owner與自有holding/watchlist，buildPanelMarket/compactInputs使用cached-only日曆、非null batch Entry、Dividend.resolveBatch projection-free及technical.resolveReadOnly。共用同決策核心與完整StockDecision，不複製assembler、不改舊detail行為。既有TradingRadarPanelServiceTest的oneEvaluationRunsCoreOnceAndAllCompactScalarsMatchTheSameFullDecision及verifyNoExternalOrWrites提供底層證據；本輪再驗新service只委派getList/getStockEvaluation，never getStockDetail/get()/refresh/export，冷／過期／跨年度快取缺失維持等待、不發holiday proxy/vendor/DB writer/cache writer。
+
+### V2歷史摘要有界傳輸
+
+新V2的單筆結果可有數百月audit與薪資明細；root center仍最多20筆simulations，但每筆只回metadata，deterministicResult/presentation為null，不於root帶20份完整結果。原DB result_json/resultSha256及GET simulations/{id}完整內容不變；center summary不重算／改result identity。frontend載入/選取run須GET單筆完整結果，含request序號/owner/draft切換防遲到回應，PROCESSING polling仍沿現有流程。root DTO與BFF不可把summary null補成空模型。這是本輪大結果必要的傳輸界線，避免root超BFF16MB；不以刪除worker audit或捨棄歷史修容量。
+
+驗證需涵蓋16欄defaults精確來源與symbols/跨欄/invalid/type/readonly設定、全差異NOT_MODELED不改月頻數字；owner/other-owner/stale/missing集合與資料時點；列表只一次getList/detail懶載一次，無vendor/writer/refresh/export；原SHORT方向/理由未被medium/candidate覆蓋，stale/unknown等待、草稿參數不解除BLOCKED；typed nullable價格精度、布林label非訂單；root20筆metadata無完整結果且單筆GET仍原hash、舊V1相容；node UI/前端build、實際草稿保存與雷達清單/展開操作。所有金額延續逗點顯示。最終與Task586一次整體arch review／雙repoGit／registry／部署，來源新bundle仍必精確回讀，無寄信或交易。

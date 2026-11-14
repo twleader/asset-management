@@ -7,7 +7,7 @@ import org.springframework.core.annotation.Order;
 import org.springframework.web.bind.annotation.*;
 import com.steven.assets.dto.SrppSettingsDto.ProblemResponse;
 
-@RestControllerAdvice(assignableTypes=SrppSettingsController.class)
+@RestControllerAdvice(assignableTypes={SrppSettingsController.class,SrppShortTermController.class})
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class SrppSettingsExceptionAdvice {
     @ExceptionHandler(SrppSettingsProblem.class)

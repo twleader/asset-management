@@ -1,0 +1,40 @@
+{
+  "scope": "OFFLINE_BFF_CONTROLLER_AND_LOOPBACK_HTTP_TESTS_NOT_FORMAL_SERVE",
+  "classes": [
+    {
+      "tests": 3,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "name": "SrppSettingsBffTest"
+    },
+    {
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "name": "SrppSettingsSecurityTest"
+    },
+    {
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "name": "SrppShortTermBffTest"
+    }
+  ],
+  "total": {
+    "tests": 8,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "sourceHttpMethod": "SrppShortTermBffTest.actualHttpListAddsPageBucketsWithoutChangingTheSourceEnvelope",
+  "checks": [
+    "BFF adds three observationBuckets",
+    "Source envelope unchanged after removing added bucket projection",
+    "Source row order, nullable prices and immutable lists retained",
+    "Unknown/null observations retained in WAIT bucket",
+    "Owner errors preserve original error status"
+  ]
+}

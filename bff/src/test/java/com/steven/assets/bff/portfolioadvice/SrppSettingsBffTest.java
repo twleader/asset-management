@@ -54,6 +54,29 @@ class SrppSettingsBffTest {
         }finally{server.stop(0);}
     }
 
+    @Test void fullPythonV2SingleRunRoundTripsAndPresentationExposesDatedMoneyWithoutChangingEvidence()throws Exception {
+        var json=SrppSettingsPresentation.JSON;var original=json.readTree(getClass().getResourceAsStream("/srpp/settings-result-wire-v2.json"));
+        var run=json.createObjectNode().put("id","11111111-1111-4111-8111-111111111111").put("draftId","22222222-2222-4222-8222-222222222222")
+                .put("draftRevision",1).put("mode","LOCAL").put("status","SUCCEEDED").put("configSha256",original.path("configSha256").asText())
+                .put("inputSha256",original.path("inputSha256").asText()).put("resultSha256","source-fixture-hash").put("aiStatus","NOT_REQUESTED").put("publishEligible",false);
+        run.set("deterministicResult",original);run.putArray("changes");run.putArray("blockedReasons");
+        HttpServer server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);
+        server.createContext("/api/portfolio-advice/srpp/simulations/",exchange->{byte[] bytes=json.writeValueAsBytes(run);exchange.getResponseHeaders().add("Content-Type","application/json");exchange.sendResponseHeaders(200,bytes.length);exchange.getResponseBody().write(bytes);exchange.close();});server.start();
+        try {
+            // Match the production business client policy; full monthly evidence exceeds the framework's 256 KiB default.
+            WebClient backend=WebClient.builder().codecs(c->c.defaultCodecs().maxInMemorySize(16*1024*1024)).baseUrl("http://127.0.0.1:"+server.getAddress().getPort()).build();
+            WebTestClient client=WebTestClient.bindToController(new SrppSettingsBffController(backend)).configureClient().codecs(c->c.defaultCodecs().maxInMemorySize(16*1024*1024)).build();
+            byte[] response=client.get().uri("/api/bff/portfolio-advice/srpp/simulations/11111111-1111-4111-8111-111111111111").exchange().expectStatus().isOk().expectBody().returnResult().getResponseBody();
+            var body=json.readTree(response);sameJson(original,body.path("deterministicResult"),"V2 evidence");
+            java.util.Map<String,com.fasterxml.jackson.databind.JsonNode> rows=new java.util.HashMap<>();body.path("presentation").path("scenario").path("assumptions").forEach(row->rows.put(row.path("key").asText(),row));
+            assertThat(rows.get("laborInsurance.monthlyNominalTwd").path("value").textValue()).isEqualTo("16013.60");
+            assertThat(rows.get("payroll.receivableAfterRetirementNominalTwd").path("value").isTextual()).isTrue();
+            assertThat(rows.get("reserves.livingReserveCeilingRealTwd").path("value").textValue()).isEqualTo("2250000.00");
+            assertThat(rows.get("strategy.signalBasis").path("value").asText()).contains("不是每日MA200");
+            assertThat(body.path("deterministicResult").path("result").path("scenario").path("reserveStrategyAudit").path("monthlyAudit").size()).isGreaterThan(100);
+        }finally{server.stop(0);}
+    }
+
     private static void sameJson(com.fasterxml.jackson.databind.JsonNode expected,com.fasterxml.jackson.databind.JsonNode actual,String path) {
         if(expected.isNumber()){assertThat(actual.isNumber()).as(path).isTrue();assertThat(actual.decimalValue()).as(path).isEqualByComparingTo(expected.decimalValue());return;}
         if(expected.isObject()){java.util.Set<String> a=new java.util.TreeSet<>(),b=new java.util.TreeSet<>();expected.fieldNames().forEachRemaining(a::add);actual.fieldNames().forEachRemaining(b::add);assertThat(b).as(path).isEqualTo(a);for(String key:a)sameJson(expected.get(key),actual.get(key),path+"."+key);return;}

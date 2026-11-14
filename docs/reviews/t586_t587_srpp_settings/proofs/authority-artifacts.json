@@ -1,0 +1,19 @@
+{
+  "bundle": "fc31e0979d7279cc3f1237e9ea91500d8a48958ed67f9b1d66f9e420ff996bda",
+  "formalPolicyBytesUnchanged": true,
+  "registrationInsertOnly": true,
+  "files": {
+    "backend/src/main/resources/srpp/decision/model_inputs.json": "6d26483bcb530e26d8686bbaa565e805bfe137efa1d6db7a8671cedb796620aa",
+    "backend/src/main/resources/srpp/decision/policy_manifest.json": "16dd92d0f65cc6d97038ad984b7bbe7e53615396dc458840118899f856a8ff22",
+    "backend/src/main/resources/srpp/report/d201-policy-document.json": "d2352d97f44e0ba74e32c35000148f034352a186bb26243bc743ec9f5abc2212",
+    "backend/src/main/resources/srpp/report/d201-registration.sql": "5dff438c23c99b5f102a402c3999981277b79b0c1227ec85c707a49e9644f156",
+    "backend/src/main/resources/srpp/settings/settings_catalog.json": "fef178c38b6c9b1d71f8809416777540811f09255235d8d286b5f111336af2bb",
+    "backend/src/main/resources/srpp/settings/pre_retirement_payroll.json": "c146cb1f0fb9c19778075a376bb7e08a7f501e4e5839da594c19e5c3948637e5",
+    "backend/src/test/resources/srpp/report-same-input-golden.json": "934f7dde1d10a1723e862c7d51a6e481bb6468868773d5d497334b3e1ef9393f",
+    "backend/src/test/resources/srpp/report-long-short-exit-golden.json": "1642bb85c4a3e39b8683c37e6a42316cf96099467a2314997b8c5253d0e4596a"
+  },
+  "sourceBytesUnchanged": {
+    "assumptions/model_inputs.json": "6d26483bcb530e26d8686bbaa565e805bfe137efa1d6db7a8671cedb796620aa",
+    "assumptions/pre_retirement_payroll.json": "c146cb1f0fb9c19778075a376bb7e08a7f501e4e5839da594c19e5c3948637e5"
+  }
+}
