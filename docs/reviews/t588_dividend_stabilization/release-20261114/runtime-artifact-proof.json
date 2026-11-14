@@ -1,0 +1,61 @@
+{
+  "status": "DEPLOYED_ARTIFACTS_AND_SYNTHETIC_PURE_RULE_PASS",
+  "bundle": "62a95aad53248a93e8fa3768347d2abd7b2c81babbfc97789f2d8a6233e6fc56",
+  "services": {
+    "business-services": {
+      "jarSha256": "51e2265816572c5759e72131e606f15255b11de18834f4f0fe5dfbd63c24bc85",
+      "resources": [
+        {
+          "path": "srpp/decision/model_inputs.json",
+          "bytesEqualMergedSource": true,
+          "sha256": "c4d982462afcf3985eae7071b2b8cf75ccf6052011663c22f8d3df4c097c1776"
+        },
+        {
+          "path": "srpp/decision/policy_manifest.json",
+          "bytesEqualMergedSource": true,
+          "sha256": "424d492806033b48fcea20e6735918a91fe7af486b215890a0998f912e878351"
+        },
+        {
+          "path": "srpp/9090-api-swagger.md",
+          "bytesEqualMergedSource": true,
+          "sha256": "6e2ada03c01a5e3bcbde24be7c6fc7df04e30bf76dd76766d5215b1839c820c0"
+        },
+        {
+          "path": "srpp/report/d201-registration.sql",
+          "bytesEqualMergedSource": true,
+          "sha256": "aeae2515493f9c058228ef0556af9f62f61dadde7eb2d66cb339e56f568bb01d"
+        }
+      ]
+    },
+    "bff": {
+      "jarSha256": "5e6eb12afee2ecb0bcd17ce2b3fd7d02ecf11df0ef4f918d137d87fd1abef348",
+      "resources": [
+        {
+          "path": "srpp/formula_manifest_v3.json",
+          "bytesEqualMergedSource": true,
+          "sha256": "4315950ca25e3de20b6afa7b50000466975c375c5569f4e80af0f7257f88e132"
+        }
+      ]
+    }
+  },
+  "worker": {
+    "status": "PASS",
+    "actualHttpHealth": {
+      "status": "UP",
+      "baseBundleSha256": "62a95aad53248a93e8fa3768347d2abd7b2c81babbfc97789f2d8a6233e6fc56"
+    },
+    "actualHttpCatalogBaseBundleSha256": "62a95aad53248a93e8fa3768347d2abd7b2c81babbfc97789f2d8a6233e6fc56",
+    "catalogFields": 76,
+    "runtimeFilesByteExact": 20
+  },
+  "actualJarPureRule": {
+    "status": "PASS",
+    "scope": "ACTUAL_DEPLOYED_JAR_SYNTHETIC_PURE_RULE",
+    "cases": 26,
+    "formulaManifestMatchesRegistry": true,
+    "formulaSetSha256": "452d42608d6357c8e7ddd82ff03e91b3fb82d1c56978e029fd4717cfc60f90fb",
+    "formalReportAdoption": false,
+    "brokerWrites": false
+  },
+  "checkedAt": "2026-11-14T09:21:32.010923+00:00"
+}

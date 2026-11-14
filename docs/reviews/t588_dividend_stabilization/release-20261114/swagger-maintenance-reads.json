@@ -1,0 +1,28 @@
+{
+  "status": "READ_COMPLETE",
+  "swaggerSha256": "6e2ada03c01a5e3bcbde24be7c6fc7df04e30bf76dd76766d5215b1839c820c0",
+  "catalogBatchesRead": [
+    0,
+    1,
+    2
+  ],
+  "catalogBatchMaxBytes": 6000,
+  "routeBatchesRead": {
+    "GET /api/public/trading-calendar": [
+      0
+    ],
+    "GET /api/public/market-index": [
+      0
+    ],
+    "GET /api/quotes": [
+      0,
+      1
+    ],
+    "GET /api/public/srpp/calculation-context": [
+      0
+    ]
+  },
+  "routeBatchMaxBytes": 12000,
+  "scope": "DEPLOYMENT_MAINTENANCE_READS_ONLY_NOT_FORMAL_REPORT_REQUIRED_READS",
+  "boundedReadCorrection": "Initial max-bytes 20000 rejected by helper; reread full routes using allowed 12000; no API call preceded completed route reads."
+}

@@ -1,0 +1,150 @@
+{
+  "status": "FINAL_AUTHORITY_ARTIFACTS_AND_OFFLINE_CHECKS_PASS_NO_LANDING_OR_DEPLOY",
+  "bundle": "62a95aad53248a93e8fa3768347d2abd7b2c81babbfc97789f2d8a6233e6fc56",
+  "startedAt": "2026-11-14T09:12:26.545554+00:00",
+  "steps": [
+    {
+      "name": "formula-v3-final-source-check",
+      "exitCode": 0,
+      "command": [
+        "/tmp/srpp-settings-python/bin/python",
+        "scripts/generate-srpp-formula-v3.py",
+        "--srpp-root",
+        "/Users/steven/.codex/worktrees/dividend-two-session/SRPP",
+        "--check"
+      ]
+    },
+    {
+      "name": "registration-sql-generated",
+      "exitCode": 0,
+      "command": [
+        "ruby",
+        "scripts/srpp-report-policy-register.rb"
+      ]
+    },
+    {
+      "name": "report-golden-generated",
+      "exitCode": 0,
+      "command": [
+        "/tmp/srpp-settings-python/bin/python",
+        "scripts/generate-srpp-report-golden.py",
+        "--srpp-root",
+        "/Users/steven/.codex/worktrees/dividend-two-session/SRPP"
+      ]
+    },
+    {
+      "name": "long-short-golden-generated",
+      "exitCode": 0,
+      "command": [
+        "/tmp/srpp-settings-python/bin/python",
+        "scripts/generate-srpp-long-short-exit-golden.py",
+        "--srpp-root",
+        "/Users/steven/.codex/worktrees/dividend-two-session/SRPP"
+      ]
+    },
+    {
+      "name": "worker-runtime-exported",
+      "exitCode": 0,
+      "command": [
+        "/tmp/srpp-settings-python/bin/python",
+        "scripts/export_settings_runtime.py",
+        "--destination",
+        "/Users/steven/.codex/worktrees/dividend-two-session/asset-management/srpp-simulator/runtime"
+      ]
+    },
+    {
+      "name": "worker-runtime-export-check",
+      "exitCode": 0,
+      "command": [
+        "/tmp/srpp-settings-python/bin/python",
+        "scripts/export_settings_runtime.py",
+        "--destination",
+        "/Users/steven/.codex/worktrees/dividend-two-session/asset-management/srpp-simulator/runtime",
+        "--check"
+      ]
+    },
+    {
+      "name": "authority-final-check",
+      "exitCode": 0,
+      "command": [
+        "/tmp/srpp-settings-python/bin/python",
+        "scripts/check-srpp-report-authority.py",
+        "--srpp-root",
+        "/Users/steven/.codex/worktrees/dividend-two-session/SRPP",
+        "--check"
+      ]
+    },
+    {
+      "name": "report-golden-final-check",
+      "exitCode": 0,
+      "command": [
+        "/tmp/srpp-settings-python/bin/python",
+        "scripts/generate-srpp-report-golden.py",
+        "--srpp-root",
+        "/Users/steven/.codex/worktrees/dividend-two-session/SRPP",
+        "--check"
+      ]
+    },
+    {
+      "name": "long-short-golden-final-check",
+      "exitCode": 0,
+      "command": [
+        "/tmp/srpp-settings-python/bin/python",
+        "scripts/generate-srpp-long-short-exit-golden.py",
+        "--srpp-root",
+        "/Users/steven/.codex/worktrees/dividend-two-session/SRPP",
+        "--check"
+      ]
+    },
+    {
+      "name": "ruby-registration-base-tests",
+      "exitCode": 0,
+      "command": [
+        "ruby",
+        "scripts/tests/srpp-policy-register-test.rb"
+      ]
+    },
+    {
+      "name": "ruby-registration-report-tests",
+      "exitCode": 0,
+      "command": [
+        "ruby",
+        "scripts/tests/srpp-report-policy-register-test.rb"
+      ]
+    },
+    {
+      "name": "formula-source-generator-tests",
+      "exitCode": 0,
+      "command": [
+        "/tmp/srpp-settings-python/bin/python",
+        "scripts/tests/srpp-formula-v3-test.py"
+      ]
+    },
+    {
+      "name": "authority-release-gate-tests",
+      "exitCode": 0,
+      "command": [
+        "/tmp/srpp-settings-python/bin/python",
+        "scripts/tests/check-srpp-report-authority-test.py"
+      ]
+    },
+    {
+      "name": "diff-whitespace-check",
+      "exitCode": 0,
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ]
+    }
+  ],
+  "identity": {
+    "bundle": "62a95aad53248a93e8fa3768347d2abd7b2c81babbfc97789f2d8a6233e6fc56",
+    "modelSha256": "c4d982462afcf3985eae7071b2b8cf75ccf6052011663c22f8d3df4c097c1776",
+    "manifestSha256": "424d492806033b48fcea20e6735918a91fe7af486b215890a0998f912e878351",
+    "swaggerSha256": "6e2ada03c01a5e3bcbde24be7c6fc7df04e30bf76dd76766d5215b1839c820c0",
+    "formulaManifestSha256": "452d42608d6357c8e7ddd82ff03e91b3fb82d1c56978e029fd4717cfc60f90fb",
+    "sqlSha256": "aeae2515493f9c058228ef0556af9f62f61dadde7eb2d66cb339e56f568bb01d"
+  },
+  "finishedAt": "2026-11-14T09:12:34.987093+00:00"
+}

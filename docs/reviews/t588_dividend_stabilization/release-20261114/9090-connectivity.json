@@ -1,0 +1,94 @@
+{
+  "checked_at": "2026-11-14T17:23:05.762689+08:00",
+  "scope": "READ_ONLY_CONNECTIVITY_ONLY",
+  "srpp_root": "/Users/steven/Project/SRPP",
+  "python": "/Users/steven/Project/SRPP/.venv/bin/python",
+  "policy_bundle_sha256": "62a95aad53248a93e8fa3768347d2abd7b2c81babbfc97789f2d8a6233e6fc56",
+  "api_base": "http://127.0.0.1:9090",
+  "financial_runtime_acceptance": "NOT_EVALUATED_BY_CONNECTIVITY_CHECK",
+  "status": "PASS",
+  "source_checks": {
+    "policy": {
+      "status": "PASS",
+      "consumer": "Codex",
+      "purpose": "daily",
+      "decision": "D-218",
+      "policy_version": "2.66.0",
+      "model_version": "3.22.0",
+      "POLICY_BUNDLE_SHA256": "62a95aad53248a93e8fa3768347d2abd7b2c81babbfc97789f2d8a6233e6fc56",
+      "verified_files": 211,
+      "SWAGGER_SHA256": "6e2ada03c01a5e3bcbde24be7c6fc7df04e30bf76dd76766d5215b1839c820c0",
+      "swagger_contract_version": "1.28.2"
+    },
+    "runtime": {
+      "status": "PASS",
+      "decision": "D-178",
+      "schema_version": 3,
+      "decision_authority": {
+        "engine": "scripts/daily_decision_engine.py",
+        "engine_role": "DIAGNOSTIC_ONLY",
+        "production_enabled": false,
+        "equivalence_status": "NOT_PROVEN",
+        "production_authority": "required authoritative documents; verified scoped 9090 calculations first, existing shared calculators only for named gaps",
+        "model_may_override": false,
+        "diagnostic_missing_receipt_blocks_report": false,
+        "places_orders": false
+      },
+      "path": "assumptions/daily_runtime_contract.json",
+      "sha256": "b3a485c2e7d515a40a25749caf861ed9ab19c8e1f0729a9271af0459da5153d4",
+      "sources": 67
+    }
+  },
+  "results": [
+    {
+      "purpose": "calendar",
+      "path": "/api/public/trading-calendar",
+      "parameters": {
+        "year": "2026"
+      },
+      "method": "GET",
+      "http_status": 200,
+      "content_type": "application/json",
+      "body_sha256": "67a082b96d9d186e8816acc6fb834201ecaafa67d15aba346acd4a851eed2727",
+      "rows": 365,
+      "tw_availability": "AVAILABLE",
+      "content_valid": true,
+      "status": "PASS",
+      "elapsed_seconds": 0.074
+    },
+    {
+      "purpose": "index",
+      "path": "/api/public/market-index",
+      "parameters": {
+        "market": "TWSE",
+        "range": "1m"
+      },
+      "method": "GET",
+      "http_status": 200,
+      "content_type": "application/json",
+      "body_sha256": "f6f04a0bc02c3f3301a5b150672ee31fd6e98186e1b9c07a954a0b10e1edbab7",
+      "rows": 21,
+      "market": "TWSE",
+      "mode": "DAILY",
+      "content_valid": true,
+      "status": "PASS",
+      "elapsed_seconds": 0.039
+    },
+    {
+      "purpose": "quotes",
+      "path": "/api/quotes",
+      "parameters": {
+        "market": "台股"
+      },
+      "method": "GET",
+      "http_status": 200,
+      "content_type": "application/json",
+      "body_sha256": "2538de0f2fb2f3300b8d04e59e60d86643eb0de7672be309097c1d3ff6b9cd82",
+      "rows": 39,
+      "positive_price_rows": 39,
+      "content_valid": true,
+      "status": "PASS",
+      "elapsed_seconds": 0.612
+    }
+  ]
+}

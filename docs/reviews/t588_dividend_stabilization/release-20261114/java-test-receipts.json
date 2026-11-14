@@ -1,0 +1,114 @@
+[
+  {
+    "module": "backend",
+    "exit_code": 0,
+    "log": "/tmp/d218-final-backend-tests.log",
+    "classes": [
+      {
+        "name": "SrppDividendStabilizationTest",
+        "tests": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "SrppReportStateTopupCalculatorTest",
+        "tests": 12,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "SrppReportModuleCalculatorTest",
+        "tests": 19,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "SrppFormulaCatalogTest",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "SrppPolicyRegistryServiceTest",
+        "tests": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "SrppModuleCalculatorV2Test",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "SrppModuleCalculatorV3Test",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "SrppDailyContextProducerSchedulerTest",
+        "tests": 16,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "D218FormulaAuthorityTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    ]
+  },
+  {
+    "module": "bff",
+    "exit_code": 0,
+    "log": "/tmp/d218-final-bff-tests.log",
+    "classes": [
+      {
+        "name": "SrppReportResponseValidatorTest",
+        "tests": 15,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "SrppDailyContextResponseValidatorTest",
+        "tests": 19,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "SrppOrchestratedResponseValidatorTest",
+        "tests": 10,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "PublicSrppReportControllerTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "SrppReportReadOnlyTelemetryTest",
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    ]
+  }
+]

@@ -1,0 +1,20 @@
+{
+  "status": "PASS",
+  "bundle": "62a95aad53248a93e8fa3768347d2abd7b2c81babbfc97789f2d8a6233e6fc56",
+  "registeredAt": "2026-11-14T09:19:04.578242+00:00",
+  "source": "merged tracked original INSERT ON CONFLICT DO NOTHING SQL in transaction",
+  "sourceCommit": "3ce6744f98e2dffae2a61f115f868d9f81e9aa5f",
+  "sqlSha256": "aeae2515493f9c058228ef0556af9f62f61dadde7eb2d66cb339e56f568bb01d",
+  "rowsBefore": 53,
+  "rowsAfter": 54,
+  "existingRowsUnchanged": true,
+  "sameHashAlreadyExisted": false,
+  "exactAllFourSourceFieldsEqual": true,
+  "exactRow": {
+    "policy_bundle_sha256": "62a95aad53248a93e8fa3768347d2abd7b2c81babbfc97789f2d8a6233e6fc56",
+    "formula_version": "ASSET_MGMT_SRPP_V3",
+    "policy_document": "{\"schema\":\"SRPP_POLICY_DOCUMENT_V1\",\"targets\":{\"CASH:TWD:DEMAND\":\"0.006\",\"CASH:TWD:TERM\":\"0.164\",\"STOCK:台股:0050\":\"0.1\",\"STOCK:台股:0056\":\"0.025\",\"STOCK:台股:00679B\":\"0\",\"STOCK:台股:00697B\":\"0.02\",\"STOCK:台股:00713\":\"0.0333333333\",\"STOCK:台股:00719B\":\"0.1997\",\"STOCK:台股:00751B\":\"0\",\"STOCK:台股:00850\":\"0\",\"STOCK:台股:00865B\":\"0.025\",\"STOCK:台股:00878\":\"0.025\",\"STOCK:台股:00881\":\"0.0453\",\"STOCK:台股:00919\":\"0.0166666667\",\"STOCK:台股:009826\":\"0.025\",\"STOCK:美股:SGOV\":\"0.02\",\"STOCK:美股:VOO\":\"0.27\",\"STOCK:美股:VT\":\"0.025\"}}",
+    "formula_manifest": "{\"calculations\":{\"allocation\":{\"assetKey\":\"ASSET_KEY_V1\",\"calculationId\":\"ASSET_MGMT_TOTAL_EXPOSURE_V1\",\"division\":\"MathContext(34,HALF_EVEN)\"},\"assets\":{\"calculationId\":\"ASSET_MGMT_ASSETS_RECON_V2\",\"dataAsOf\":\"MIN_LIVE_STOCK_UPDATED_AT_V1\",\"depositInterest\":\"SnapshotAggregateCalculator.depositEstimatedInterest\",\"depositNullRatePolicy\":\"ORDINARY_UNAVAILABLE_TRANSIT_ZERO_V2\",\"inputs\":\"LatestAssetsDto.Response(snapshot,liveAssets,targetPriceComplete)\",\"revisionProjection\":\"SNAPSHOT_DETAIL_EXCLUDING_DISPLAY_FIELDS_V1\",\"tolerance\":\"max(0.01,max(abs(detail),abs(reported))*0.0001)\"},\"cashIncome\":{\"calculationId\":\"ASSET_MGMT_GROSS_INCOME_V2\",\"depositNullRatePolicy\":\"ORDINARY_UNAVAILABLE_TRANSIT_ZERO_V2\",\"netCalculation\":\"NOT_VERIFIED\"},\"completedTechnicals\":{\"calculationId\":\"ASSET_MGMT_TECHNICALS_UNAVAILABLE_V1\",\"status\":\"CALCULATOR_NOT_VERIFIED\"},\"dividendStabilization\":{\"calculationId\":\"DIVIDEND_TOPUP_D218_COMPLETED_TWO_SESSIONS_FIXED_WAVE_CUMULATIVE_BUDGET\",\"sourceSha256\":{\"SRPP/scripts/dividend_stabilization.py\":\"2a5c47e261eb83d560ace9a37591d5e958423e0447ec9c9dd896823972a19f5e\",\"asset-management/backend/src/main/java/com/steven/assets/service/srpp/report/SrppDividendStabilization.java\":\"d3fe87bab027b27f9ac52d420bf7e3a76d90120983a9bae802bc6749afd1a591\",\"asset-management/backend/src/main/java/com/steven/assets/service/srpp/report/SrppReportModuleCalculator.java\":\"c318166e411aa00922a5754284137cdf39f2a307538f6fbd0f7de7d7ea9428ac\",\"asset-management/backend/src/main/java/com/steven/assets/service/srpp/report/SrppReportTopupSizing.java\":\"d150a37d072b519990b3a7da91cfc9b2bee3804adee1b194f29aebb92ac3f4f8\"}},\"funding\":{\"calculationId\":\"ASSET_MGMT_FUNDING_UNAVAILABLE_V1\",\"status\":\"CALCULATOR_NOT_VERIFIED\"}},\"decimal\":\"canonical-string\",\"formulaVersion\":\"ASSET_MGMT_SRPP_V3\",\"hash\":\"RFC8785-JCS+SHA-256\",\"offsetLessTimezone\":\"Asia/Taipei\",\"schema\":\"SRPP_FORMULA_MANIFEST_V3\",\"timezone\":\"Asia/Taipei\"}",
+    "registered_at": "2026-11-14T17:19:04.533432+08:00"
+  }
+}
