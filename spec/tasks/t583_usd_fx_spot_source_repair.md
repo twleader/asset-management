@@ -48,3 +48,7 @@ bash scripts/tests/schema-sql-drift-test.sh
 ### 根agent功能QA日期修正（ARCH第二輪範圍）
 
 實際原文與當輪日曆證明2026-02-12／13、07-10、10-23為TW股票休市但存在原生銀行FX且US開市。2年FX須在台北17:00時鐘截點內取最新qualified native日期D；完整query coverage到D，D落後獨立TW最低完成日則UNKNOWN，currentLIVE／future-capture與舊5年score截點均不變。以02-13晚盤包含12／13新極值、17:00前最多12、lag落後TWminimum反例驗證。根agent已核准此具體bug修正；ARCH1 PASS後ARCH2審delta，無第四輪spec cycle。
+
+### 1.28.1 文件勘誤
+
+路由5摘要／說明／合成範例與BFF Javadoc改為既有兩年範圍；金融行為、API shape、歷史來源及排程均不變。兩專案以新文件身分8c5efa165b270731451d1412af8cbe8439a4855a1b96a53c1a435a5d59cf2c1f完成metadata發布；原495／491資料收據保留、不重複回補。勘誤與新身分驗收證據另存同發布目錄metadata-1.28.1。

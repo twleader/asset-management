@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: 資產管理系統 Docker 外部 API
-  version: 1.28.0
+  version: 1.28.1
   description: |
     本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的二十七條精確 method/path pairs：
     二十三條 GET（其中 transactions／trading-radar／部分 SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar、commodity-prices、completed-technicals 與 technical-series 是 global no-tenant）
@@ -417,8 +417,8 @@ paths:
     get:
       tags: [公開匯率]
       operationId: getPublicUsdTwd
-      summary: 取得 USD/TWD 即期與近一年歷史
-      description: 以 Asia/Taipei 當日計算 inclusive 的 today.minusYears(1)..today；history 日期升冪且不重複，count 必須等於 history 長度，中間價以 HALF_UP 固定計算至小數 4 位。
+      summary: 取得 USD/TWD 即期與近兩年歷史
+      description: 以 Asia/Taipei 當日計算 inclusive 的 today.minusYears(2)..today；history 日期升冪且不重複，count 必須等於 history 長度，中間價以 HALF_UP 固定計算至小數 4 位。
       responses:
         '200':
           description: 固定 USD/TWD metadata、即期狀態與非空歷史。
@@ -432,7 +432,7 @@ paths:
                     pair: USD/TWD
                     baseCurrency: USD
                     quoteCurrency: TWD
-                    requestedStartDate: '2025-01-15'
+                    requestedStartDate: '2024-01-15'
                     requestedEndDate: '2026-01-15'
                     refreshIntervalSeconds: 2
                     timezone: Asia/Taipei
@@ -448,8 +448,10 @@ paths:
                       quoteStatus: LIVE
                     count: 2
                     history:
-                      - {date: '2025-01-15', buyRate: 30.1000, sellRate: 30.2000, midRate: 30.1500}
-                      - {date: '2026-01-15', buyRate: 31.1000, sellRate: 31.2000, midRate: 31.1500}
+                      - {date: '2024-01-15', buyRate: 30.1000, sellRate: 30.2000, midRate: 30.1500, rateBasis: UNKNOWN, source: null, sourceSha256: null, sourceMemberSha256: null, fetchedAt: null, spotBasisVerified: false}
+                      - {date: '2026-01-15', buyRate: 31.1000, sellRate: 31.2000, midRate: 31.1500, rateBasis: UNKNOWN, source: null, sourceSha256: null, sourceMemberSha256: null, fetchedAt: null, spotBasisVerified: false}
+                    historyBoundary: null
+                    historySourceCaptures: []
         '404':
           description: History 為零列，或 live/spot 完全不存在。
           content:

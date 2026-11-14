@@ -1,0 +1,1 @@
+{"status": "PASS", "consumer": "Claude", "purpose": "daily", "decision": "D-215", "policy_version": "2.63.0", "model_version": "3.22.0", "POLICY_BUNDLE_SHA256": "8c5efa165b270731451d1412af8cbe8439a4855a1b96a53c1a435a5d59cf2c1f", "verified_files": 189, "SWAGGER_SHA256": "5704b5599bf948e0c9d3398aa88929c26fcdad885117845bbdfbf9156c4d6683", "swagger_contract_version": "1.28.1"}
