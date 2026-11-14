@@ -163,8 +163,8 @@ class SrppReportShortUsCalculatorTest {
     @Test void d216CombinedCapKeepsBondLegacyAndInvalidPolicyClosed() throws Exception {
         ObjectNode current = d216Model();
         JsonNode equity = current.path("execution_policy").path("short_term_opportunity_d171");
-        assertThat(SrppReportShortUsCalculator.combinedSymbolCap(current, equity, "0050")).isEqualByComparingTo(".105");
-        assertThat(SrppReportShortUsCalculator.combinedSymbolCap(current, equity, "00881")).isEqualByComparingTo(".0503");
+        assertThat(SrppReportShortUsCalculator.combinedSymbolCap(current, equity, "0050")).isEqualByComparingTo(".125");
+        assertThat(SrppReportShortUsCalculator.combinedSymbolCap(current, equity, "00881")).isEqualByComparingTo(".0703");
         assertThat(SrppReportShortUsCalculator.combinedSymbolCap(current, equity, "0056")).isEqualByComparingTo(".05");
         JsonNode bond = current.path("execution_policy").path("bond_short_term_opportunity_d185");
         assertThat(SrppReportShortUsCalculator.combinedSymbolCap(current, bond, "00697B")).isEqualByComparingTo(".03");

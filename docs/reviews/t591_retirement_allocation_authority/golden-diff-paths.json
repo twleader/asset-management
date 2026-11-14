@@ -1,0 +1,14 @@
+{
+  "report-same-input-golden.json": [
+    "/policyBundleSha256"
+  ],
+  "report-long-short-exit-golden.json": [
+    "/policyBundleSha256"
+  ],
+  "report-state-topup-golden.json": [
+    "/cases/17/groupCap",
+    "/cases/18/groupCap",
+    "/cases/19/groupCap",
+    "/originalCalculatorHashes/transition_ledger.py"
+  ]
+}

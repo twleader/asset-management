@@ -1,0 +1,44 @@
+{
+  "stage": "FINAL_FROZEN_OFFLINE_PREPARATION",
+  "policyBundleSha256": "b71151fefc58dfbf2f1c129037ad1ac3ea3c1d547ce66b5cb0be9b5ff9d97c11",
+  "modelVersion": "3.24.0",
+  "policyVersion": "2.68.0",
+  "sourceRoot": "/Users/steven/.codex/worktrees/retirement-allocation-audit/SRPP",
+  "sourceFrozen": true,
+  "checks": {
+    "authority": "PASS",
+    "goldenSameInputCases": 111,
+    "goldenLongShortExitCases": 15,
+    "goldenStateTopupCases": 22,
+    "runtimeExportFiles": 23,
+    "runtimeExportCheck": "PASS",
+    "exportedSettingsWorkerImport": "PASS",
+    "javaTests": 61,
+    "javaFailures": 0,
+    "javaErrors": 0,
+    "javaSkipped": 0
+  },
+  "formulaV3Sha256": "452d42608d6357c8e7ddd82ff03e91b3fb82d1c56978e029fd4717cfc60f90fb",
+  "registryApplied": false,
+  "deployed": false,
+  "financialAdoption": "NOT_YET_EXECUTED",
+  "bridgeApiPositiveQuantitySupport": false,
+  "independentSpecReview": {
+    "rounds": 3,
+    "final": "PASS",
+    "critical": 0,
+    "major": 0,
+    "minor": 0
+  },
+  "independentArchitectureReview": {
+    "rounds": 3,
+    "final": "PASS",
+    "critical": 0,
+    "major": 0,
+    "minor": 0,
+    "reviewedBundleSha256": "b71151fefc58dfbf2f1c129037ad1ac3ea3c1d547ce66b5cb0be9b5ff9d97c11",
+    "latestCandidateStatus": "PASS_OFFLINE_ONLY"
+  },
+  "candidateValid": true,
+  "historicalCandidateInvalidationReason": "Parent confirmed direct VOO purchase capacity omitted existing bridge commitments in pension lump-sum and post-2028 ordinary rebalance paths; new shared cap_direct_voo_purchase pending final source synchronization."
+}

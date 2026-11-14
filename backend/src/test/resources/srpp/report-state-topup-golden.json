@@ -1037,7 +1037,7 @@
       "expectedRoom": "49994.8349086185",
       "feeRate": "0.001425",
       "group": 1400000,
-      "groupCap": "0.12",
+      "groupCap": "0.15",
       "kind": "topupRoom",
       "name": "1400000",
       "targetWeight": "0.0725",
@@ -1048,7 +1048,7 @@
       "expectedRoom": "9998.9669817237",
       "feeRate": "0.001425",
       "group": 1440000,
-      "groupCap": "0.12",
+      "groupCap": "0.15",
       "kind": "topupRoom",
       "name": "1440000",
       "targetWeight": "0.0725",
@@ -1059,7 +1059,7 @@
       "expectedRoom": "0",
       "feeRate": "0.001425",
       "group": 1450000,
-      "groupCap": "0.12",
+      "groupCap": "0.15",
       "kind": "topupRoom",
       "name": "1450000",
       "targetWeight": "0.0725",
@@ -1103,7 +1103,7 @@
   "originalCalculatorHashes": {
     "bear_ladder.py": "fd32d2655df96bcff2a006db136c711bd7830c004403abf2565e8e65bc40eb81",
     "execution_policy.py": "8a6aa8f4a36c23fcd0edc371640e369538abbf8fadfad2c248b286eae11022aa",
-    "transition_ledger.py": "e01032aea964331841cc54aee5e7587061333225640bef178b7113cfbff511f5"
+    "transition_ledger.py": "5760f96ee5c68e47a15fc44e62ef0c3dbfea6e2b86d9dbb8fb86081a908810d1"
   },
   "schema": "SRPP_STATE_TOPUP_GOLDEN_V1"
 }

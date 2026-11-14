@@ -1,14 +1,14 @@
 {
-  "baseBundleSha256": "94239e74779f360502f358772bdd85b374dc10113c6443e370d2c8fb2146c4c4",
+  "baseBundleSha256": "b71151fefc58dfbf2f1c129037ad1ac3ea3c1d547ce66b5cb0be9b5ff9d97c11",
   "files": {
-    "assumptions/model_inputs.json": "48c87397b59b5594f623e993363083b5585ba9c2eebfa100551815f068468484",
-    "assumptions/policy_manifest.json": "4dc2618c40a216da7e065d5d750d1713e8e9ba63dacc29bf7f2dbfa1f70e6396",
+    "assumptions/model_inputs.json": "0e8a30a19cfeca49b5781a865e6ef0bbdb3be6c64f9d9d16b679d035d4899500",
+    "assumptions/policy_manifest.json": "13d77e7507bfbd8ca76a308efc7272323d938ec1e52343f47f33b8c3a7037d78",
     "assumptions/pre_retirement_payroll.json": "c146cb1f0fb9c19778075a376bb7e08a7f501e4e5839da594c19e5c3948637e5",
     "assumptions/settings_catalog.json": "730db3b0743b0b71df5e20274951c91eab1ca3325b964b67c939b9aada3bb3e3",
     "scripts/bear_ladder.py": "fd32d2655df96bcff2a006db136c711bd7830c004403abf2565e8e65bc40eb81",
     "scripts/budget_accounting.py": "070e40f2168025398b227c84cfd94baab5cd36d09a1a24fabb25a0bf86dd2268",
     "scripts/execution_policy.py": "8a6aa8f4a36c23fcd0edc371640e369538abbf8fadfad2c248b286eae11022aa",
-    "scripts/monthly_engine.py": "41686f220e75cc02a3645dbf205e0e66111b0939d6112fc84659da7b93fa4fef",
+    "scripts/monthly_engine.py": "61e17f94c72e37de6b2c9686970d5f397e5464056ee46739b01bd7ea3f582966",
     "scripts/pre_retirement_cashflow.py": "b0de2efe12db72587e48c430d0e463987615ce361da435a82528a66547e6df13",
     "scripts/resident_income_tax.py": "0ce3c40e5ebd5d8506293748ab353dd7dd552f700fff81083d55c49f88c202b7",
     "scripts/return_model.py": "29802801f034261236e7dffd7aaf7bd030ff4c24aaa3e61cc9cbcf9cf41c44b3",
@@ -21,7 +21,8 @@
     "scripts/settings_catalog.py": "5a0b5816e51400dad25195abc8d0071d05eb090a802ab4f41711789bcf204a12",
     "scripts/settings_daily_rules.py": "fe6bfef8416326b4b5621df777feadb402988d8134d559a00ba3adad299513c3",
     "scripts/settings_worker.py": "cd78c06a60c458a0ec6ab04b3926a267f8b457bf9d9a39e167b83895bdf70ab8",
-    "scripts/transition_ledger.py": "e01032aea964331841cc54aee5e7587061333225640bef178b7113cfbff511f5"
+    "scripts/transition_ledger.py": "5760f96ee5c68e47a15fc44e62ef0c3dbfea6e2b86d9dbb8fb86081a908810d1",
+    "scripts/voo_bridge_proxy.py": "3a7bd68cc8202bbf039641afa13dac5a4b228cf04e7c63159cf1ffa9b2ddf590"
   },
   "schemaVersion": 1
 }

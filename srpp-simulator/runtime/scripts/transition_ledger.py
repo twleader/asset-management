@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 import numpy as np
+import voo_bridge_proxy
 from execution_policy import GlobalEquityCadence, sell_shares
 
 
@@ -21,7 +22,7 @@ class TransitionLedger:
         self.target = inputs["detailed_target_allocation_2027"]
         # 24B2 is the Schroder global income bond fund. It is held in the bond
         # bucket for valuation and redemption ordering, but it is NOT one of the
-        # 55/28/17 target-table securities (D-143 §2 lists only 00865B, 00719B,
+        # 56.53/26.47/17 target-table securities (D-143 §2 lists only 00865B, 00719B,
         # SGOV and 00697B with bond targets), so it carries no target weight.
         self.bond_codes = {"00865B", "00719B", "00697B", "SGOV", "00679B", "00751B", "24B2"}
         holdings = {}
@@ -38,10 +39,16 @@ class TransitionLedger:
             if not quote or float(quote.get("price") or 0) <= 0:
                 raise ValueError(f"missing same-run reference price for transition target {code}")
             holdings[code] = {"shares": 0., "value": 0., "price": float(quote["price"]), "market": quote["market"]}
+        self.bridge_enabled=bool(inputs.get("runtime_enable_voo_bridge",False))
+        self.voo_fx_wait_proxy=bool(inputs.get("runtime_voo_fx_wait_proxy",False))
+        if self.bridge_enabled:
+            for alias,base in voo_bridge_proxy.ALIASES.items():
+                holdings[alias]={**holdings[base],"shares":0.,"value":0.}
         self.codes = sorted(holdings)
         self.rows = [holdings[c] for c in self.codes]
         self.bucket = np.array([int(c in self.bond_codes) for c in self.codes])
         self.weights = np.array([float(self.target.get(c, 0)) for c in self.codes])
+        self.core_caps = inputs["execution_policy"]["bull_correction_dip_d212"]["tsmc_exposure_waiver"]["effects_when_inactive"]["caps_pct"]
         self.high_policy = inputs["execution_policy"]["high_dividend_execution_policy"]
         self.high_group = np.array([c in self.high_policy["symbols"] for c in self.codes])
         self.high_cap = float(self.high_policy["aggregate_hard_cap"])
@@ -111,6 +118,7 @@ class TransitionLedger:
             inputs["execution_policy_overrides"]["global_equity_build_cadence_d141"], paths)
         self.price_level = np.full(paths, initial_price_level)
         self.fx = np.full(paths, float(inputs.get("runtime_usd_twd", 31.0)))
+        self.execution_fx_ratio=float(inputs.get("runtime_execution_fx_mid",self.fx[0]))/self.fx[0]
         self.cash_yield = np.array([float(inputs.get("runtime_security_rates", {}).get(c, {}).get("regular_cash_yield", 0)) for c in self.codes])
         self.tw_dca_stopped = {c: np.zeros(paths, dtype=bool) for c in ("00878", "0056", "00713")}
         self.bond_buy_stopped = {c: np.zeros(paths, dtype=bool) for c in ("00865B", "00719B", "00697B")}
@@ -121,6 +129,7 @@ class TransitionLedger:
         self.return_history = np.broadcast_to(np.power(1 + previous, 1/12), (12, paths, len(self.codes))).copy()
         self.return_month_growth = np.ones(self.units.shape)
         self.return_month_index = 0
+        voo_bridge_proxy.initialize(self,inputs,seed)
 
     def trailing_twd_returns(self):
         return np.prod(self.return_history, axis=0) - 1
@@ -130,8 +139,14 @@ class TransitionLedger:
         self.return_month_growth.fill(1.)
         self.return_month_index += 1
 
-    def earmark(self):
+    def execution_fx(self):
+        return self.fx * self.execution_fx_ratio
+
+    def usd_dca_earmark(self):
         return np.maximum(self.initial_earmark_usd - self.dca_spent_usd, 0) * self.fx / self.price_level
+
+    def earmark(self):
+        return self.usd_dca_earmark() + self.bridge_cash + self.bridge_pending
 
     def high_dividend_purchase_room(self, column, total, commission):
         """Four-fund and individual capacity after the purchase fee reduces NAV."""
@@ -144,7 +159,8 @@ class TransitionLedger:
     def equity_purchase_room(self, column, assets, reserve, commission):
         total = assets.sum(axis=1) + reserve
         target = self.weights[column]
-        room = np.maximum((target * total - self.values[:, column]) / (1 + target * commission), 0)
+        bridge = self.values[:, [self.codes.index(c) for c in voo_bridge_proxy.ALIASES]].sum(axis=1) if self.bridge_enabled and self.codes[column]=="VOO" else 0
+        room = np.maximum((target * total - self.values[:, column] - bridge - (self.bridge_cash+self.bridge_pending if self.bridge_enabled and self.codes[column]=="VOO" else 0)) / (1 + target * commission), 0)
         room = np.minimum(room, np.maximum((.60 * total - assets[:, 0]) / (1 + .60 * commission), 0))
         if self.codes[column] in {"VOO", "009826", "VT"}:
             global_mask = np.array([c in {"VOO", "009826", "VT"} for c in self.codes])
@@ -220,9 +236,9 @@ class TransitionLedger:
         value = np.minimum(np.minimum(overdue, physical) / (1 + commission),
                            self.equity_purchase_room(j, assets, reserve, commission))
         value = np.minimum(value, self.cadence.room("VOO") / self.price_level)
-        allowed = ~paused
-        if evidence_ok is not None:
-            allowed &= evidence_ok
+        allowed = ~paused & (np.zeros(self.n, dtype=bool) if evidence_ok is None else np.asarray(evidence_ok, dtype=bool))
+        if self.voo_fx_wait_proxy:
+            allowed &= voo_bridge_proxy.voo_buy_allowed(self)
         value = np.where(allowed, value, 0)
         self.forced_voo_blocked += (overdue > 1e-8) & (value <= 1e-8)
         if not np.any(value > 1e-8):
@@ -243,7 +259,7 @@ class TransitionLedger:
         # money cap and updates the latest confirmed price for ordinary buys.
         self.cadence.fill("VOO", value * self.price_level, price=self.nominal_prices[:, j], scheduled=True)
 
-    def advance_idle_month(self, assets, reserve, required_cash, commission, bear_reserved=None):
+    def advance_idle_month(self, assets, reserve, required_cash, commission, bear_reserved=None, probability=0.):
         """Equivalent monthly batch once all remaining proceeds are overdue.
 
         There are no intervening prices, receipts or qualification changes in
@@ -251,24 +267,16 @@ class TransitionLedger:
         overdue money, cash, monthly amount or portfolio capacity. Retain every
         original cohort's age; only eliminate nineteen identical retry loops.
         """
-        limit = self.inputs["execution_policy_overrides"]["rotation_equity_floor_d141"]["stock_rotation_reserve_max_idle_sessions"]
-        mature = not self.pending_sales and all(np.all((lot["age"] > limit) | (lot["amount"] <= 1e-8))
-                                               for lot in self.stock_reserve_lots)
-        if mature:
+        if not 0 <= probability <= 1:
+            raise ValueError("qualification probability must be in [0,1]")
+        for day in range(20):
+            if day % 5 == 0:
+                evidence_ok = self.rng.random(self.n) < probability
+            self.settle_proceeds()
             paused = self.reserve_day(bear_reserved)
-            self.deploy_overdue_reserve(assets, reserve, required_cash, commission, paused)
-            for lot in self.stock_reserve_lots:
-                lot["age"] += (~paused) * 19
-            self.rotation_bear_paused += paused * 19
-            self.forced_voo_blocked += (self.stock_reserve > 1e-8) * 19
-            self.session += 20
-        else:
-            for _ in range(20):
-                self.settle_proceeds()
-                paused = self.reserve_day(bear_reserved)
-                self.deploy_overdue_reserve(assets, reserve, required_cash, commission, paused)
-                self.session += 1
-
+            self.deploy_overdue_reserve(assets, reserve, required_cash, commission, paused,
+                                       evidence_ok=evidence_ok)
+            self.session += 1
     def audit_high_dividend_purchase(self, value, assets, reserve):
         total = assets.sum(axis=1) + reserve
         group_value = self.values[:, self.high_group].sum(axis=1)
@@ -305,7 +313,7 @@ class TransitionLedger:
         self.nominal_prices[:, self.us] /= np.maximum(1 + fx_return[:, None], .05)
         self.fx *= np.maximum(1 + fx_return, .05)
         self.price_level = np.asarray(price_level).copy()
-        for tagged in (self.stock_reserve, self.bond_reserve, self.pending_stock, self.pending_bond, self.opening_receivable):
+        for tagged in (self.stock_reserve, self.bond_reserve, self.pending_stock, self.pending_bond, self.opening_receivable, self.bridge_cash, self.bridge_pending):
             tagged *= np.maximum(1 + returns[:, 2], .05)
         for lot in self.stock_reserve_lots + self.pending_sales:
             lot["amount"] *= np.maximum(1 + returns[:, 2], .05)
@@ -326,7 +334,7 @@ class TransitionLedger:
         code = self.codes[column]
         unit_value = self.nominal_prices[:, column] / self.price_level * self.fx
         full_payment = nominal * (1 + commission) * self.fx / self.price_level
-        funded = self.earmark() + 1e-8 >= full_payment
+        funded = self.usd_dca_earmark() + 1e-8 >= full_payment
         budget = np.where(funded, full_payment, 0)
         room = self.equity_purchase_room(column, assets, reserve, commission)
         qualified = full_payment / (1 + commission) <= room + 1e-8
@@ -361,7 +369,7 @@ class TransitionLedger:
         commission = .001425 if deduct_costs else 0.
         voo_column = self.codes.index("VOO")
         vt_column = self.codes.index("VT")
-        self.cadence.begin(date, self.fx)
+        self.cadence.begin(date, self.execution_fx())
         for instruction in self.voo_dca_schedule:
             if date.day != int(instruction["day"]):
                 continue
@@ -418,7 +426,7 @@ class TransitionLedger:
                 lot=1000*self.nominal_prices[:,j]/self.price_level
                 gap=np.maximum(total*self.weights[j]-self.values[:,j],0)
                 self.bond_buy_stopped[code] |= gap<1.
-                gate=qualified_buy[:,j]&~self.bond_buy_stopped[code]&(self.fx<=33.)&(gap>=lot)&(available>=lot*(1+commission))&(assets.sum(axis=1)>0)
+                gate=qualified_buy[:,j]&~self.bond_buy_stopped[code]&(self.execution_fx()<=33.)&(gap>=lot)&(available>=lot*(1+commission))&(assets.sum(axis=1)>0)
                 if date>=dt.date(2028,1,1):gate &= self.extended[:,j]
                 if bear_reserved is not None:gate &= ~bear_reserved
                 if code=="00697B":
@@ -440,7 +448,7 @@ class TransitionLedger:
                 self.buy_count[:,j]+=hit.astype(np.int16)
                 self.last_trade[hit,j]=self.session+day
                 lots+=hit
-                self.fx_bond_gate_violations+=int(np.sum(hit&(self.fx>33.)))
+                self.fx_bond_gate_violations+=int(np.sum(hit&(self.execution_fx()>33.)))
                 if self.codes[j]=="00697B":self.intermediate_cap_violations+=int(np.sum(hit&(self.values[:,j]>.30*assets[:,1]+1e-6)))
             self.max_bond_daily_lots=max(self.max_bond_daily_lots,int(any_eligible.any()))
         self.max_bond_weekly_lots=max(self.max_bond_weekly_lots,int(lots.max()))
@@ -458,16 +466,19 @@ class TransitionLedger:
         commission = .001425 if deduct_costs else 0.
         for day in range(20):
             execution_date = date.replace(day=1) + dt.timedelta(days=day)
-            self.cadence.begin(execution_date, self.fx, week=(date.year, date.month, day // 5),
+            self.cadence.begin(execution_date, self.execution_fx(), week=(date.year, date.month, day // 5),
                                day=(date.year, date.month, day))
             self.settle_proceeds()
             paused = self.reserve_day(bear_reserved)
-            self.deploy_overdue_reserve(assets, reserve, required_cash, commission, paused)
             if day % 5 == 0:
-                uniforms = self.rng.random((self.n, len(self.codes), 2))
+                ordinary=[j for j,c in enumerate(self.codes) if c not in voo_bridge_proxy.ALIASES]
+                uniforms=np.ones((self.n,len(self.codes),2))
+                uniforms[:,ordinary,:]=self.rng.random((self.n,len(ordinary),2))
                 qualified_buy = uniforms[:, :, 0] < probability
                 qualified_sell = uniforms[:, :, 1] < probability
                 weekly_bond_before = self.buy_count[:, [self.codes.index(c) for c in self.bond_buy_stopped]].sum(axis=1).copy()
+            self.deploy_overdue_reserve(assets, reserve, required_cash, commission, paused,
+                evidence_ok=qualified_buy[:, self.codes.index("VOO")])
             self.local_bond_week(assets,reserve,qualified_buy,required_cash,execution_date,deduct_costs,bear_reserved,day_count=1)
             weekly_bond_lots = self.buy_count[:, [self.codes.index(c) for c in self.bond_buy_stopped]].sum(axis=1) - weekly_bond_before
             self.max_bond_weekly_lots = max(self.max_bond_weekly_lots, int(weekly_bond_lots.max()))
@@ -510,6 +521,8 @@ class TransitionLedger:
                 if self.us[j]:
                     unit_value *= self.fx
                 if code == "VOO":
+                    if self.voo_fx_wait_proxy:
+                        gate &= voo_bridge_proxy.voo_buy_allowed(self)
                     purchase = np.minimum(purchase, self.cadence.voo_budget(self.nominal_prices[:, j]) / self.price_level)
                 if code == "009826":
                     purchase = np.minimum(purchase, self.cadence.room(code) / self.price_level)
@@ -543,8 +556,10 @@ class TransitionLedger:
                 hit = value > .01
                 self.last_trade[hit, j] = self.session
             for j, code in enumerate(self.codes):
-                if code in {"VOO", "VT", "SGOV", "24B2"}:
+                if code in {"VOO", "VT", "SGOV", "24B2"} or code in voo_bridge_proxy.ALIASES:
                     continue  # no retirement-transition or age-triggered sale
+                if code=="2330" and self.inputs.get("runtime_tsmc_waiver_active",True):
+                    continue
                 bucket = self.bucket[j]
                 gate = qualified_sell[:, j] & (self.session - self.last_trade[:, j] >= 5) & (assets.sum(axis=1)>0)
                 if date >= dt.date(2028, 1, 1):
@@ -564,8 +579,8 @@ class TransitionLedger:
                     group_excess = self.values[:, self.high_group].sum(axis=1) > total * self.high_cap + 1e-6
                     individual_excess = self.values[:, j] > total * self.high_upper[j] + 1e-6
                     gate &= group_excess | individual_excess
-                if code == "0050":
-                    target_value = np.where(self.values[:, j] > total * .06, total * .06, target_value)
+                if code in self.core_caps:
+                    gate &= self.values[:, j] > total * (float(self.core_caps[code]) / 100) + 1e-6
                 excess = np.maximum(self.values[:, j] - target_value, 0)
                 unit_value = np.maximum(np.divide(self.values[:, j], self.units[:, j], out=np.ones(self.n), where=self.units[:, j] > 1e-8), 1e-8)
                 sell_tax = (.003 if not code.startswith("00") else .001) if deduct_costs and not self.us[j] else 0.
@@ -606,7 +621,7 @@ class TransitionLedger:
             self.session += 1
             if execution_date >= dt.date(2027, 7, 1):
                 total = assets.sum(axis=1) + reserve
-                managed = np.array([c not in {"VOO", "SGOV", "24B2"} for c in self.codes])
+                managed = np.array([c not in {"VOO", "SGOV", "24B2"} and c not in voo_bridge_proxy.ALIASES for c in self.codes])
                 complete = np.abs(self.values - total[:, None] * self.weights) <= total[:, None] * self.config["transition_completion_tolerance_total_weight"]
                 complete[:, self.weights == 0] = self.units[:, self.weights == 0] < 1
                 self.rotation_completed |= np.all(complete[:, managed], axis=1)
@@ -619,12 +634,36 @@ class TransitionLedger:
         total = assets.sum(axis=1) + reserve
         deviation = np.divide(self.values, total[:, None], out=np.zeros_like(self.values), where=total[:, None] > 0) - self.weights
         # VOO/SGOV and the deposit-replenishment fund have independent rules.
-        managed = np.array([c not in {"VOO", "SGOV", "24B2"} for c in self.codes])
+        managed = np.array([c not in {"VOO", "SGOV", "24B2"} and c not in voo_bridge_proxy.ALIASES for c in self.codes])
         complete_by_code = np.abs(deviation) <= self.config["transition_completion_tolerance_total_weight"]
         complete_by_code[:, self.weights == 0] = self.units[:, self.weights == 0] < 1
         complete = np.all(complete_by_code[:, managed], axis=1)
+        allocation_complete_by_code = complete_by_code.copy()
+        if "24B2" in self.codes:
+            allocation_complete_by_code[:, self.codes.index("24B2")] = True  # retained until a verified cash shortfall, not a forced zero-target exit
+        all_targets_complete = np.all(allocation_complete_by_code, axis=1)
+        tolerance = self.config["transition_completion_tolerance_total_weight"]
+        cash_target = self.inputs["recommended_total_allocation"]["cash_like_including_term_deposits_and_reserve"]
+        cash_weight = (assets[:, 2] + reserve) / np.maximum(total, 1)
+        settled = (self.pending_stock + self.pending_bond + self.stock_reserve + self.bond_reserve) < 1
+        fully_allocated = all_targets_complete & (np.abs(cash_weight - cash_target) <= tolerance) & settled
+        deployed_by_code=allocation_complete_by_code.copy()
+        if self.bridge_enabled:
+            bridge_js=[self.codes.index(c) for c in voo_bridge_proxy.ALIASES]
+            effective_voo=self.values[:,self.codes.index("VOO")]+self.values[:,bridge_js].sum(axis=1)
+            deployed_by_code[:,self.codes.index("VOO")]=np.abs(effective_voo/np.maximum(total,1)-self.target["VOO"])<=tolerance
+            deployed_by_code[:,bridge_js]=True
+        deployed=np.all(deployed_by_code,axis=1)&(np.abs(cash_weight-cash_target)<=tolerance)&settled
+        fully_allocated &= self.values[:,self.high_group].sum(axis=1)<=self.high_cap*total+1e-6
         whole = np.column_stack((assets[:, 0], assets[:, 1], assets[:, 2] + reserve)) / np.maximum(total[:, None], 1)
         result = {"date": label, "completed_paths_pct": float(complete.mean() * 100), "unfinished_paths_pct": float((~complete).mean() * 100),
+                  "completion_scope": "legacy rotation subset; excludes VOO, SGOV and 24B2",
+                  "all_funds_allocated_paths_pct": float(fully_allocated.mean() * 100),
+                  "including_temporary_bridge_deployed_paths_pct":float(deployed.mean()*100),
+                  "all_funds_unallocated_paths_pct": float((~fully_allocated).mean() * 100),
+                  "all_funds_scope": "all strategic securities and zero-target exits, target cash and unsettled/tagged proceeds; 24B2 permitted retention is disclosed separately; no bear exclusions",
+                  "completion_tolerance_total_weight": tolerance,
+                  "permitted_retained_fund_median_twd": float(np.median(self.values[:, self.codes.index("24B2")])) if "24B2" in self.codes else 0.,
                   "whole_weights_median": np.median(whole, axis=0).tolist(),
                   "whole_deviation_from_target_median_pp": ((np.median(whole, axis=0) - np.array([self.inputs["recommended_total_allocation"][k] for k in ("equity", "bond_etfs", "cash_like_including_term_deposits_and_reserve")])) * 100).tolist(),
                   "stock_rotation_reserve_median_twd": float(np.median(self.stock_reserve)),
@@ -652,5 +691,12 @@ class TransitionLedger:
                 "fx_bond_gate_violations": self.fx_bond_gate_violations,
                 "intermediate_cap_violations": self.intermediate_cap_violations,
                 "unsettled_proceeds_used": self.unsettled_spend_violations, "additional_living_reserve_injection_twd": 0,
+                "bridge_enabled":self.bridge_enabled,
+                "bridge_paths_with_build_pct":float(self.bridge_built.mean()*100),
+                "bridge_paths_with_voo_conversion_pct":float(self.bridge_converted.mean()*100),
+                "bridge_maximum_weight_p95":float(np.percentile(self.bridge_max_weight,95)),
+                "bridge_open_value_median_twd":float(np.median(self.values[:,[self.codes.index(c) for c in voo_bridge_proxy.ALIASES]].sum(axis=1))) if self.bridge_enabled else 0.,
+                "bridge_cash_released_to_general_median_twd":float(np.median(self.bridge_cash_released)),
+                "bridge_pending_cash_median_twd":float(np.median(self.bridge_cash+self.bridge_pending)),
                 "future_qualification_is_assumption": True, "future_holidays_and_order_books_are_not_predicted": True,
                 "post_extension_residue": "retained in actual ending bucket; no new extension or forced disposal authorized", "places_orders": False}

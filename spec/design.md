@@ -14027,3 +14027,16 @@ BFF結構驗證同步六個D218 closed fact name、單位與有限數值範圍�
 本節為較新限縮修訂：覆蓋Task587將債券allowedSymbols限於正式三檔，以及Task586未納年度薪資結算的舊限制。Catalog仍V2/76欄，shortBondSymbols候選五檔但default三檔不變；backend草稿及detail透過已核manifest SHA的classpath catalog查允許範圍，owner-gated pure radar來源不變。withholdingRate明確為現金預繳，V3透過無I/O resident_income_tax/scenario_tax共用115年累進稅，Payroll可選annualIncomeTax records含年度gross、自提、各扣除、所得淨額、逐級切片、應納/預扣/五月補退與自動marginal/effective率；單身薪資規劃範圍、未來代理與歷史回推明示。新property null省略，V1/V2原結果hash保持；money固定兩位字串、rate數字、settlementDate LocalDate，BFF排序投影、Vue僅render。
 
 D219 formal D141熊梯為15/20/25/30/35%與原窗口8/12/20/25/35%；D202與D212熊觸發typed來源同15%，MA200/RISK_OFF等驗證不變。D212 NOT_PRESENT只走原修正梯，其它AI狀態才可進熊梯，單輪只一window，既有pending/funding/dedup仍扣除，不另開可相加預算。深熊30%、正式60/70上限及資金保護不變。MonthlySignals由同版來源傳門檻且ReserveStrategy真正套用來源bearLadder，不能只改assumptions/畫面；月頻aggregate cap近似不偷改亦不稱正式逐日等價。自足Task589/590完整凍結上述欄位/邊界/驗收；source+authority+JAR+registry受控同版發布，不新增外部API、DB schema、訂單、報告重跑或寄信。
+
+
+### Task 591：退休配置與暫時替代規則的精確權威同步
+
+資產端不再推導配置常數，`backend/src/main/resources/srpp/decision/model_inputs.json`及`policy_manifest.json`取自主代理明示候選來源供離線準備、最後以經SRPP完整驗證且主代理凍結之最終來源原bytes重新對齊；來源使用D220（policy 2.68.0／model 3.24.0、voo_bridge_d220／VOO_BRIDGE_D220），須保留Task589/590現行功能。`scripts/check-srpp-report-authority.py`的`expected_formal_document`由同一來源模型產生`d201-policy-document.json`的canonical JSON；既有same-input、long-short-exit、state-topup三個golden generator與Ruby registration generator分別產生測例與insert-only SQL，既有SRPP scripts/export_settings_runtime.py同步srpp-simulator runtime/catalog/provenance；formula V3先以原generator --check，implementation bytes未變則三份formula原樣保留。產生程序和差異列表保存於審查證據。
+
+state-topup離線generator的__new__隔離fixture需補明示零bridge_cash/bridge_pending與bridge_enabled=False、voo_fx_wait_proxy=False以符合新版earmark()欄位，不更改正式缺證據判定。
+
+Java正式計算已從同版model讀高股息目標/組上限、分配目標及熊市階梯；檢查相關calculator/validator若有舊配置常數則只將該政策讀取改為同版model，不新增bridge交易量計算。新增或沿用具代表性的離線測例證明新目標可讀、原阻擋仍保留，所有既有source/golden/authority gate原樣執行。
+
+VOO暫時替代規則仍是SRPP saved-evidence budget diagnostics：尚無正式9090 module/closed-fact contract、歸屬與pending/settlement執行證據整合，本次不擴充該wire或偽造執行量。即使model中enabled為true，也只代表使用者採用該條件政策，不代表API可產生正數bridge leg。核心目標與額外暫時容量不能混為一欄；既有正式BLOCKED及零量保留。
+
+本階段不修改Swagger/路由/DB/排程，不執行正式registry SQL或部署；最終source hash凍結且主代理驗收後才以獨立後續release步驟處理雙repoGit、insert-only登錄、受控服務重建與精確hash業務API回讀，任何缺口必須保留原狀態。

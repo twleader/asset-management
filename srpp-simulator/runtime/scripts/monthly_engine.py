@@ -11,6 +11,7 @@ import csv
 import json
 import math
 import numpy as np
+import voo_bridge_proxy
 from transition_ledger import TransitionLedger
 from return_model import CalendarMarketPath, InflationPath, security_returns, weighted_bucket_returns
 from bear_ladder import BearLadder, BullLadder, ranked_bond_sale
@@ -35,7 +36,7 @@ def constrain_bond_purchase(assets, before, capacity, fx):
 
 def bear_purchase_values(values, total, net_budget, *, equity_value, equity_cap,
                          target_weights, high_group, global_group, voo_index,
-                         tw50_index, tw50_cap):
+                         tw50_index, tw50_cap, pair_ratio=(4,1)):
     """Use whole-equity capacity in priority order, then keep VOO:0050 at 4:1.
 
     Constrain the available principal before filling high-dividend deficits.
@@ -55,7 +56,8 @@ def bear_purchase_values(values, total, net_budget, *, equity_value, equity_cap,
         out=np.zeros(paths), where=deficits > 0)[:, None]
 
     market_budget = np.maximum(budget - high_amount, 0)
-    voo_desired, tw50_desired = market_budget * .80, market_budget * .20
+    voo_share=pair_ratio[0]/sum(pair_ratio)
+    voo_desired, tw50_desired = market_budget * voo_share, market_budget * (1-voo_share)
     voo_room = np.maximum(total * .42 - values[:, voo_index], 0)
     tw50_room = np.maximum(total * tw50_cap - values[:, tw50_index], 0)
     global_room = np.maximum(total * .50 - values[:, global_group].sum(axis=1), 0)
@@ -196,7 +198,7 @@ def run(m, allocation, simulations, seed, guardrail, initial_total=None,
         enable_bull_timing=False, enable_bear_timing=False, tactical_wait_months=6,
         transition_probability=None, equity_real_geometric=None, bond_yield_shift=0.,
         bond_parallel_rate_shock=0.,
-        retirement_date=None, extra_grid_dates=(), capture_percentiles=False, **unsupported):
+        retirement_date=None, extra_grid_dates=(), capture_percentiles=False, enable_voo_bridge=False, enable_voo_fx_wait_proxy=False, tsmc_waiver_active=True, **unsupported):
     if unsupported:
         raise ValueError(f"retired/unsupported model arguments: {sorted(unsupported)}")
     if retirement_cashflow_timing not in {"start", "midpoint"}:
@@ -305,6 +307,14 @@ def run(m, allocation, simulations, seed, guardrail, initial_total=None,
     labor_routes = {"BULL_HIGH_BONDS": 0, "BEAR_LOW_EQUITY": 0, "NEUTRAL_STRATEGIC": 0}
     rates = m.simulation_security_rates()
     source_inputs = dict(m.STATIC_MODEL_INPUTS)
+    if enable_voo_bridge:
+        for alias,base in voo_bridge_proxy.ALIASES.items():rates[alias]=dict(rates[base])
+    source_inputs["runtime_tsmc_waiver_active"]=bool(tsmc_waiver_active)
+    source_inputs["runtime_enable_voo_bridge"]=enable_voo_bridge
+    source_inputs["runtime_voo_fx_wait_proxy"]=enable_voo_fx_wait_proxy or enable_voo_bridge
+    source_inputs["runtime_execution_fx_mid"]=float(m.TEN_YEAR_PERFORMANCE["fx_history"]["last_mid"])
+    bridge_fx=getattr(m,"AUDIT_BRIDGE_FX",{})
+    source_inputs.update(bridge_fx)
     source_inputs["runtime_security_rates"] = rates
     source_inputs["runtime_usd_twd"] = m.FX_CURRENT_MID
     source_inputs["runtime_initial_price_level"] = initial_price_level
@@ -326,6 +336,7 @@ def run(m, allocation, simulations, seed, guardrail, initial_total=None,
     ledger.sync(assets)
     bear_ladder = BearLadder(source_inputs["execution_policy"]["dynamic_allocation_policy_d141"], n)
     bull_ladder = BullLadder(source_inputs["execution_policy"]["dynamic_allocation_policy_d141"], n)
+    bull_ladder.equity_floor = float(target[0])  # D-216: optional profit taking retains the strategic core.
     bond_codes = ledger.bond_codes
     high_codes = {"0056", "00713", "00878", "00919", "00882"}
     with (m.ROOT/"portfolio/target_allocation_2027.csv").open() as f:
@@ -386,14 +397,16 @@ def run(m, allocation, simulations, seed, guardrail, initial_total=None,
     market_path = CalendarMarketPath(m, n, seed, factor, t_adjust)
 
     def mark_failure(index, terminal=False):
+        voo_bridge_proxy.release_excess_cash(ledger,assets,reserve)
         raise_cash(0.)
-        broke = assets[:, 2] < -1e-7
+        broke = assets[:, 2] - ledger.bridge_cash - ledger.bridge_pending < -1e-7
         if terminal:
             broke |= assets.sum(axis=1) <= 0
         new = broke & ~failed
         failure_period[new] = index
         failed[:] |= broke
         assets[failed] = 0.
+        ledger.bridge_cash[failed] = 0.; ledger.bridge_pending[failed] = 0.
         # Protected reserve is never consumed, including failed paths.
 
     def flush_exposures():
@@ -496,6 +509,7 @@ def run(m, allocation, simulations, seed, guardrail, initial_total=None,
         return capacity
 
     def raise_cash(required, only_fund=False):
+        required = required + ledger.bridge_cash + ledger.bridge_pending
         """Redeem 24B2 only after retirement and only for a cash shortfall."""
         need = np.maximum(required-assets[:,2],0)
         if not np.any(need>1e-8):
@@ -509,7 +523,7 @@ def run(m, allocation, simulations, seed, guardrail, initial_total=None,
             # future qualified VT/SGOV exit and destination are not invented.
             for path_gate, order in ((equity_up,(0,1)),(~equity_up,(1,0))):
                 for b in order:
-                    masks.append(((ledger.bucket==b)&np.array([not (age>=70 and c in {"VT","SGOV"}) and c!="24B2" for c in ledger.codes]),path_gate))
+                    masks.append(((ledger.bucket==b)&np.array([not (age>=70 and c in {"VT","SGOV"}) and c!="24B2" and c not in voo_bridge_proxy.ALIASES for c in ledger.codes]),path_gate))
         tax_rates = transaction_tax_rates(ledger.codes, ledger.us, start) if deduct_costs else np.zeros(len(ledger.codes))
         for eligible, path_gate in masks:
             balance=values[:,eligible].sum(axis=1)
@@ -553,7 +567,7 @@ def run(m, allocation, simulations, seed, guardrail, initial_total=None,
                 j=ledger.codes.index("00697B")
                 additions[:,j]=np.minimum(additions[:,j],np.maximum((.30*(before[:,1]+additions.sum(axis=1)-additions[:,j])-values[:,j])/.70,0))
             values += additions
-            sell=(ledger.bucket==b)&np.array([c!="24B2" and not (age>=70 and c in {"VT","SGOV"}) for c in ledger.codes])
+            sell=(ledger.bucket==b)&np.array([c!="24B2" and c not in voo_bridge_proxy.ALIASES and not (age>=70 and c in {"VT","SGOV"}) for c in ledger.codes])
             available=values[:,sell].sum(axis=1)
             sale=np.minimum(np.maximum(-delta,0),available)
             fraction=np.divide(sale,available,out=np.zeros(n),where=available>0)
@@ -561,6 +575,7 @@ def run(m, allocation, simulations, seed, guardrail, initial_total=None,
         # Solve purchases and fees against the protected cash before applying
         # any position change. A later living-cash refill must not undo a buy.
         protected = living_floor + car_earmark + ledger.stock_reserve + ledger.bond_reserve + ledger.pending_stock + ledger.pending_bond + ledger.earmark()
+        values=voo_bridge_proxy.cap_direct_voo_purchase(ledger,original_values,values,before.sum(axis=1)+reserve,deduct_costs)
         values, funded_cash, fees = funded_rebalance(original_values, values, before[:,2], protected,
             before.sum(axis=1)+reserve, ledger.weights,
             ((high_group, ledger.high_cap), (global_group, GLOBAL_GROUP_CAP), (ledger.bucket == 0, .60)), deduct_costs,
@@ -709,6 +724,7 @@ def run(m, allocation, simulations, seed, guardrail, initial_total=None,
             caps[low, ledger.codes.index("VOO")] = .42
             caps[:, high_group] = ledger.weights[high_group]
             protected = living_floor + car_earmark + ledger.stock_reserve + ledger.bond_reserve + ledger.pending_stock + ledger.pending_bond + ledger.earmark()
+            values=voo_bridge_proxy.cap_direct_voo_purchase(ledger,original_values,values,assets.sum(axis=1)+reserve,deduct_costs,applicable_cap=caps[:,ledger.codes.index("VOO")])
             values, cash_after, commission = funded_rebalance(original_values, values, assets[:, 2],
                 protected, assets.sum(axis=1) + reserve, caps,
                 ((high_group, ledger.high_cap), (global_group, np.where(low, .50, GLOBAL_GROUP_CAP)),
@@ -767,9 +783,9 @@ def run(m, allocation, simulations, seed, guardrail, initial_total=None,
             elif ledger.stock_reserve_lots or ledger.pending_sales:
                 # An existing reserve does not lose its age or settlement
                 # obligation when ordinary transition trading has ended.
-                ledger.cadence.begin(start, ledger.fx)
+                ledger.cadence.begin(start, ledger.execution_fx())
                 ledger.advance_idle_month(assets, reserve, living_floor,
-                    .001425 if deduct_costs else 0., bear_ladder.active if enable_bear_timing else None)
+                    .001425 if deduct_costs else 0., bear_ladder.active if enable_bear_timing else None, probability=probability)
             all_trade_cost += ledger.costs - old_cost
             all_turnover += ledger.turnover - old_turn
         if end == dt.date(2028, 7, 1):
@@ -839,6 +855,12 @@ def run(m, allocation, simulations, seed, guardrail, initial_total=None,
             prior_bull_anchor = signals.anchor.copy()
             bull_signal, bear_signal, drawdown = signals.update(equity_index, tactical_wait_months)
             spending_bull_signal, spending_bear_signal, _ = spending_signals.update(equity_index, 6)
+            if enable_voo_bridge or enable_voo_fx_wait_proxy:
+                old_cost,old_turn=ledger.costs.copy(),ledger.turnover.copy()
+                voo_bridge_proxy.step(ledger,assets,reserve,end-dt.timedelta(days=1),drawdown,bull_signal,probability,living_floor,deduct_costs,
+                    tax_cover=lambda tax:tax_budget.cover(tax,start.year))
+                all_trade_cost+=ledger.costs-old_cost;all_turnover+=ledger.turnover-old_turn
+                apply_positions(ledger.values.copy())
             bond_eligible = np.array([c in {"00865B", "00719B", "00697B"} for c in ledger.codes])
             if enable_bear_timing:
                 locked = car_earmark + ledger.stock_reserve + ledger.bond_reserve + ledger.pending_stock + ledger.pending_bond + ledger.earmark()
@@ -885,12 +907,12 @@ def run(m, allocation, simulations, seed, guardrail, initial_total=None,
                 assets[~ordinary_ok] = before[~ordinary_ok]
                 local=[ledger.codes.index(c) for c in ("00865B","00719B","00697B")]
                 capacity=np.min(ledger.nominal_prices[:,local],axis=1)*1000*cfg["ordinary_rebalancing_proxy"]["maximum_bond_purchase_days"]/price_level
-                bond_capacity_used = constrain_bond_purchase(assets,before,capacity,ledger.fx)
+                bond_capacity_used = constrain_bond_purchase(assets,before,capacity,ledger.execution_fx())
                 actual_fees, actual_taxes, actual_turnover = apply_bucket_targets(before)
                 delta = assets - before
                 actual_bond_buy=np.maximum(delta[:,1],0)
                 ordinary_capacity_violations += int(np.sum(actual_bond_buy>capacity+1e-6))
-                ordinary_fx_violations += int(np.sum((actual_bond_buy>1e-6)&(ledger.fx>33.)))
+                ordinary_fx_violations += int(np.sum((actual_bond_buy>1e-6)&(ledger.execution_fx()>33.)))
                 ordinary_events += (np.abs(delta[:,:2]).sum(axis=1)>1e-6).astype(np.int16)
                 cost = actual_fees
                 if deduct_costs:
@@ -933,7 +955,9 @@ def run(m, allocation, simulations, seed, guardrail, initial_total=None,
                         equity_value=assets[:, 0], equity_cap=cap, target_weights=ledger.weights,
                         high_group=high_group, global_group=global_group,
                         voo_index=ledger.codes.index("VOO"), tw50_index=ledger.codes.index("0050"),
-                        tw50_cap=upper[ledger.codes.index("0050")])
+                        tw50_cap=upper[ledger.codes.index("0050")],pair_ratio=(1,1) if tsmc_waiver_active else (4,1))
+                    proposed=voo_bridge_proxy.cap_direct_voo_purchase(ledger,values,values+allocations,total-costs,deduct_costs,applicable_cap=.42)
+                    allocations=np.maximum(proposed-values,0)
                     bought = allocations.sum(axis=1)
                     scale = np.divide(bought, principal, out=np.zeros(n), where=principal > 0)
                     sale *= scale
@@ -971,9 +995,11 @@ def run(m, allocation, simulations, seed, guardrail, initial_total=None,
                 monthly_capacity = np.minimum(*(ledger.nominal_prices[:,j] for j in local)) * 1000*20/price_level
                 monthly_capacity = np.maximum(monthly_capacity-bond_capacity_used,0)
                 values = positions()
-                equity_mask = (ledger.bucket==0)&np.array([not(age>=70 and c=="VT") for c in ledger.codes])
+                equity_mask = (ledger.bucket==0)&np.array([c not in voo_bridge_proxy.ALIASES and not(tsmc_waiver_active and c=="2330") and not(age>=70 and c=="VT") for c in ledger.codes])
+                sellable = np.maximum(values[:, equity_mask] - total[:, None] * ledger.weights[equity_mask], 0)
+                sale = np.minimum(sale, sellable.sum(axis=1))
                 sale, cash_fill, bond_purchase, fees, bull_taxes = bull_proceeds(
-                    sale, values[:,equity_mask],
+                    sale, sellable,
                     transaction_tax_rates(ledger.codes,ledger.us,start)[equity_mask],
                     assets[:,2], m.THREE_YEAR_LIVING_RESERVE_2026_TWD,
                     values[:,local], ledger.weights[local], total,
@@ -981,9 +1007,9 @@ def run(m, allocation, simulations, seed, guardrail, initial_total=None,
                 accepted = bull_ladder.growing_fill(sale)
                 sale *= accepted; cash_fill *= accepted; bond_purchase *= accepted[:, None]
                 fees *= accepted; bull_taxes *= accepted
-                eq = values[:,equity_mask].sum(axis=1)
+                eq = sellable.sum(axis=1)
                 ratio = np.divide(sale,eq,out=np.zeros(n),where=eq>0)
-                values[:,equity_mask] *= (1-ratio[:,None])
+                values[:,equity_mask] -= sellable * ratio[:,None]
                 cost = fees+bull_taxes
                 # D-156 routes actual proceeds, rather than buying bonds and
                 # then selling another asset to manufacture the same cash.
@@ -1069,8 +1095,8 @@ def run(m, allocation, simulations, seed, guardrail, initial_total=None,
         "salary_tax_basis_by_year": salary_by_year, "labor_retirement_receipt": labor_receipt_audit,
         "opening_year_tax_basis": "full-year projected dated payroll; pre-snapshot investment income at current verified run rate, for tax only; replace with actual annual tax statements",
         "major_expense_events": m.STATIC_MODEL_INPUTS["major_expense_events"]["events"],
-        "bear_market_policy":{"base_status":"SENSITIVITY_ONLY" if enable_bear_timing else "DISABLED_BASE", "paths_with_at_least_one_bond_deployment_pct":tactical["bear_paths_with_purchase_pct"],"bond_deployment_limit":"at most two-thirds of eligible bond ETFs while retaining 10% total bonds","purchase_order":"fill four-fund high-dividend deficits to 10%, then route the remainder VOO:0050 at 4:1; capacity-bound residue stays cash","deep_bear_equity_cap":.70},
-        "bull_high_policy":{"base_status":"SENSITIVITY_ONLY" if enable_bull_timing else "DISABLED_BASE", "paths_with_at_least_one_sale_pct":tactical["bull_paths_with_sale_pct"],"ath_sell_delay_months":tactical_wait_months,"equity_target_after_signal":.50,"batches":"D-156 five growing tranches 8/12/20/25/35% of one locked release budget; gains of 15/20/25/30/35% arm the rungs and pullbacks of 3/4/5/6/8% from a ratcheted high-water mark release them"},
+        "bear_market_policy":{"base_status":"SENSITIVITY_ONLY" if enable_bear_timing else "DISABLED_BASE", "paths_with_at_least_one_bond_deployment_pct":tactical["bear_paths_with_purchase_pct"],"bond_deployment_limit":"at most two-thirds of eligible bond ETFs while retaining 10% total bonds","purchase_order":f"fill four-fund high-dividend deficits to {ledger.weights[high_group].sum()*100:g}%, then route the remainder VOO:0050 at {'1:1' if tsmc_waiver_active else '4:1'}; capacity-bound residue stays cash","deep_bear_equity_cap":.70},
+        "bull_high_policy":{"base_status":"SENSITIVITY_ONLY" if enable_bull_timing else "DISABLED_BASE", "paths_with_at_least_one_sale_pct":tactical["bull_paths_with_sale_pct"],"ath_sell_delay_months":tactical_wait_months,"equity_target_after_signal":float(target[0]),"batches":"D-156 five growing tranches 8/12/20/25/35% of one locked release budget; gains of 15/20/25/30/35% arm the rungs and pullbacks of 3/4/5/6/8% from a ratcheted high-water mark release them"},
         "dynamic_allocation_diagnostics":{"paths_equity_ever_above_60_pct":float(np.mean(weight_max[pool]>.60)*100),"paths_equity_ever_below_40_pct":float(np.mean(weight_min[pool]<.40)*100),"minimum_bond_weight_p1":float(np.percentile(bond_min[pool],1)),"maximum_bond_weight_p99":float(np.percentile(bond_max[pool],99))},
         "realized_equity_weight_post":float(np.mean(realized[pool])),"realized_equity_weight_post_median":float(np.median(realized[pool])),
         "labor_retirement_route_counts":labor_routes,"first_pension":first_pension,"annual_cash_income_projection":annual_rows,
@@ -1100,7 +1126,7 @@ def run(m, allocation, simulations, seed, guardrail, initial_total=None,
             "stage_age_boundaries": {"age_75_start": stage_age_75, "age_80_start": stage_age_80},
             "market_adjustment_annualized_real_twd": float(market_spend_adjustment_twd),
             "bear_definition": f"MonthlySignals: at least {100*cfg['monthly_signal_proxy']['bear_drawdown_initial']:g}% drawdown and falling 10-month trend; applied from the next modeled period.",
-            "strong_bull_definition": f"MonthlySignals D-156 proxy: rising 10-month trend, at least 15% above the locked anchor, after {tactical_wait_months} months; applied from the next modeled period.",
+            "strong_bull_definition": f"MonthlySignals D-156 proxy: rising 10-month trend, at least 15% above the locked anchor, after 6 months; applied from the next modeled period.",
             "application": "Prorated by modeled period duration while each path is in the confirmed monthly regime; no future-month look-ahead.",
             "base_allocation_bull_bear_timing_enabled": False,
         },
