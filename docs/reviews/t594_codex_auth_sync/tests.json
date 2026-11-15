@@ -1,0 +1,21 @@
+{
+  "backendTests": 65,
+  "frontendTests": 192,
+  "pythonBridgeTests": 91,
+  "failures": 0,
+  "frontendBuild": "PASS",
+  "independentParentPythonTests": "PASS",
+  "independentParentFrontendTests": "PASS",
+  "sourceSha256": {
+    "scripts/srpp-local-ai-bridge.py": "2f899997818a1b69f9a008e39a797e610cd2e3ac34b054b5a8700e7ed3d51f14",
+    "scripts/install-srpp-local-ai-bridge.py": "d3e928ff9fb8c8ebed5ec6d0df50e6b407250a83020314a6d376d9446a0f011e",
+    "scripts/tests/test_srpp_local_ai_bridge.py": "554f81b8166594de7e9b1930ba74e495344e76ae8d310b7e902aac5b9815ba3a",
+    "backend/src/main/java/com/steven/assets/service/srpp/settings/SrppSettingsLocalAi.java": "6406db9095970576b5cdb9a7f129e835f487627b9723840f7355d59aec4aa61d",
+    "frontend/src/utils/srppSettingsCenterAi.js": "736520ce7622d310850b024f49cd49fd21224a8d68b67affb8590fbf02a5b2bc"
+  },
+  "notes": [
+    "Fixtures contain synthetic credentials only.",
+    "Parent frontend rerun requires shared node_modules; temporary symlink removed.",
+    "Installer load regression caused by dataclass module registration was fixed and full Python regression passed."
+  ]
+}

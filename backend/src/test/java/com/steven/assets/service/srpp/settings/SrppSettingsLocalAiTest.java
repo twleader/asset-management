@@ -67,6 +67,49 @@ class SrppSettingsLocalAiTest {
                 .satisfies(e->assertThat(((SrppSettingsProblem)e).code()).isEqualTo("AI_EXTRA_USAGE_ENABLED"));
         assertThat(interpretations.get()).isZero();
     }
+    @Test void codexAuthenticationProblemsKeepOtherToolsAvailableAndDoNotBecomeBillingErrors() {
+        ObjectNode codex=((ArrayNode)caps.path("tools")).addObject().put("id","codex").put("label","Codex CLI")
+                .put("adapter","codex_cli").put("billingMode","SUBSCRIPTION").put("available",false)
+                .put("code","AI_AUTH_REQUIRED").put("modelSource","CACHE");
+        codex.putArray("models").addObject().put("id","gpt-6-luna").put("label","GPT-6 Luna").put("defaultEffort","low").putArray("efforts").add("low");
+        AiSelection requested=new AiSelection("codex","gpt-6-luna","low",revision);
+        for(String code:java.util.List.of("AI_AUTH_REQUIRED","AI_AUTH_EXPIRED","AI_BILLING_UNVERIFIED")) {
+            codex.put("code",code);
+            AiCapabilities available=ai.capabilities();assertThat(available.tools()).hasSize(2);
+            assertThat(available.tools().get(0).available()).isTrue();assertThat(available.tools().get(1).code()).isEqualTo(code);
+            assertThatThrownBy(()->ai.validateSelection(requested)).isInstanceOf(SrppSettingsProblem.class)
+                    .satisfies(e->{SrppSettingsProblem problem=(SrppSettingsProblem)e;assertThat(problem.status()).isEqualTo(409);assertThat(problem.code()).isEqualTo(code);});
+            assertThatCode(()->ai.validateSelection(choice)).doesNotThrowAnyException();
+        }
+        assertThat(interpretations.get()).isZero();
+    }
+    @Test void freshAuthenticationFailureBeforeProviderExecutionStaysNamedWithoutReceiptOrFallback() {
+        status=401;
+        for(String code:java.util.List.of("AI_AUTH_REQUIRED","AI_AUTH_EXPIRED")) {
+            ObjectNode error=JsonNodeFactory.instance.objectNode().put("code",code).put("message","raw provider error must not be exposed").putNull("execution");
+            reply.set(error.toString());int before=interpretations.get();
+            assertThatThrownBy(()->ai.interpret(result(),choice)).isInstanceOf(SrppSettingsAiFailure.class)
+                    .satisfies(e->{SrppSettingsAiFailure failed=(SrppSettingsAiFailure)e;assertThat(failed.code()).isEqualTo(code);assertThat(failed.execution()).isNull();assertThat(failed.getMessage()).doesNotContain("raw provider");});
+            assertThat(interpretations.get()).isEqualTo(before+1);
+        }
+    }
+    @Test void expiredCodexAuthenticationReceiptCrossesHttpOnlyWhenRequestedIdentityMatches() {
+        ObjectNode tool=(ObjectNode)caps.path("tools").get(0);tool.put("id","codex").put("label","Codex CLI")
+                .put("adapter","codex_cli").put("billingMode","SUBSCRIPTION");
+        ObjectNode model=(ObjectNode)tool.path("models").get(0);model.put("id","gpt-6-luna").put("label","GPT-6 Luna")
+                .put("defaultEffort","low");((ArrayNode)model.path("efforts")).add("low");
+        AiSelection requested=new AiSelection("codex","gpt-6-luna","low",revision);
+        AiExecution failedReceipt=new AiExecution("codex","gpt-6-luna","low",null,"REQUESTED_ONLY","SUBSCRIPTION","1",
+                "2026-11-15T01:00:00Z","2026-11-15T01:00:01Z","FAILED","AI_AUTH_EXPIRED");
+        status=401;ObjectNode error=JsonNodeFactory.instance.objectNode().put("code","AI_AUTH_EXPIRED").put("message","請重新登入");
+        error.set("execution",SettingsCanonicalJson.tree(failedReceipt));reply.set(error.toString());
+        assertThatThrownBy(()->ai.interpret(result(),requested)).isInstanceOf(SrppSettingsAiFailure.class)
+                .satisfies(e->{SrppSettingsAiFailure failed=(SrppSettingsAiFailure)e;assertThat(failed.code()).isEqualTo("AI_AUTH_EXPIRED");assertThat(failed.execution()).isEqualTo(failedReceipt);});
+        ((ObjectNode)error.path("execution")).put("requestedModel","wrong-model");reply.set(error.toString());
+        assertThatThrownBy(()->ai.interpret(result(),requested)).isInstanceOf(SrppSettingsAiFailure.class)
+                .satisfies(e->assertThat(((SrppSettingsAiFailure)e).code()).isEqualTo("AI_EXECUTION_FAILED"));
+        assertThat(interpretations.get()).isEqualTo(2);
+    }
     @Test void effortCannotBeOmittedForAnEffortCapableModel() {
         ObjectNode model=(ObjectNode)caps.at("/tools/0/models/0");model.put("defaultEffort","high");((ArrayNode)model.path("efforts")).add("high");
         assertThatThrownBy(()->ai.validateSelection(choice)).isInstanceOf(SrppSettingsProblem.class);

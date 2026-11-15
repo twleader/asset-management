@@ -7034,3 +7034,12 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 4. 原有registry的Claude models鍵作相容性讀取但不再決定可選模型或effort，不改寫使用者registry／token；新建registry不再產生Claude固定models。探索失敗、未知協定、逾時或空清單均具名不可用，禁止回退固定清單／付費API／改模型。只允初始化控制回應，發現模型回合或工具執行事件即拒絕。
 5. canonical模型／effort及必要CLI設定變化納catalogRevision，額度／時間不納。既有20秒能力快取保留，每次解讀前立即重新驗證當前模型／effort及費用；過期或移除的選擇拒絕，舊run收據仍可讀。初始化程序／輸出／timeout均有界，必須關閉pipe並清理子程序，不拖垮現有BFF讀取期限。
 6. 不新增DB、9090、公網API或SRPP規則變更；既有typed capabilities及modelSource=RUNTIME即可承載。須測真實metadata結構、超過三模型fixture、去重／費用／非法effort／未知schema／timeout／零推論／舊registry相容、其他工具及既有費用閘門回歸，並完成host服務與業務API實機回讀、至少一個訂閱內Claude model／effort解讀成功、獨立spec/arch審查、commit／main no-ff merge／push及main來源部署驗證。
+
+
+## Task 594：Codex 最新訂閱登入同步與錯誤分類
+
+1. 取消一次複製且永久沿用私有codex-home/auth.json的行為。每次Codex能力探測與每次實際執行均從目前使用者正常~/.codex/auth.json安全讀取最新登入，缺失或不安全即關閉，絕不回退舊副本。只接受同使用者擁有、非symlink的私有常規檔，限制大小、以開啟後fstat及前後identity檢查避免替換/部分寫入。來源只讀，不能chmod、覆寫、refresh或改動一般CLI登入。
+2. 每個操作建立0700暫存CODEX_HOME及0600 auth.json，僅投影同一來源的有效access token與已核對account identity；使用CLI支援的chatgptAuthTokens外部登入模式，id_token可使用同一access JWT、refresh_token固定空，不攜帶原refresh token、API key、一般設定或工具。解析必要JWT exp與帳號claim只作拒絕過期/不一致的本機前置檢查，不能作訂閱授權證據。操作完成/失敗/timeout清理所有子程序與暫存憑證。舊私有登入不再讀取，亦不自動刪改使用者既有檔案。
+3. 真正推論前的原生CLI account/rateLimits/read、model/list與exec必須共用同一不可變登入投影；source在這期間變更不能造成檢查A而執行B。metadata快取不能授權推論，每次立即重新驗證。保留personal subscription、ordinaryUsageAllowed、credits.hasCredits=false、unlimited=false、額度未用盡、固定provider、無API key、無額外付費/自動購買/fallback與所有工具隔離限制。外部token refresh要求一律停止，不獨立刷新登入。
+4. 新增閉合安全碼AI_AUTH_REQUIRED（尚未登入、來源無法安全讀取或格式無效）與AI_AUTH_EXPIRED（access過期、可信結構化401/明確失效或外部刷新要求）；API登入仍AI_SUBSCRIPTION_REQUIRED，網路/未知RPC/費用證據缺漏仍AI_BILLING_UNVERIFIED，額度耗盡沿原碼。不得憑任意stderr文字猜401，不能公開原始錯誤、帳號或token。backend安全碼白名單與前端安全文案同步，明示請在一般Codex CLI重新登入，費用未知另顯示未呼叫；數值模擬與其他工具保持原行為。
+5. 範圍為host bridge與測試/操作文件、Java安全碼白名單/測試、前端安全文案/測試；無DB、BFF wire、9090、金融公式或政策變更。測試涵蓋登入輪替、舊副本不可回退、不安全檔/過期/錯帳、無refresh token或來源寫入、同snapshot proof+exec、併行隔離及清理、401與費用未知區分、費用拒絕零推論與原安全閘回歸。實際部署重啟host，重建並recreate business-services及frontend，實測新有效Codex能力與一次訂閱解讀、跨層安全錯誤碼及既有數值結果不變。完成獨立規格/架構審查、測試、部署驗證後feature commit、main no-ff merge與push，host最終來源指main。
