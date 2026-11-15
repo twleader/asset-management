@@ -140,14 +140,18 @@ class SrppSettingsServiceTest {
     }
     @Test void aiFailureRetainsIdenticalDeterministicNumbersAndSanitizedReceipt() {
         ObjectNode d=create(),local=simulate(d,"LOCAL");
-        when(ai.interpret(any(),eq(choice))).thenThrow(new SrppSettingsAiFailure("AI_EXTRA_USAGE_ENABLED",aiReceipt("FAILED","AI_EXTRA_USAGE_ENABLED")));
-        ObjectNode failed=simulate(d,"AI");
-        assertThat(failed.path("status").asText()).isEqualTo("SUCCEEDED");assertThat(failed.path("aiStatus").asText()).isEqualTo("FAILED");
-        assertThat(failed.path("errorCode").asText()).isEqualTo("AI_EXTRA_USAGE_ENABLED");
-        assertThat(failed.path("deterministicResult")).isEqualTo(local.path("deterministicResult"));
-        assertThat(failed.path("resultSha256")).isEqualTo(local.path("resultSha256"));
-        assertThat(failed.path("aiExecution").path("status").asText()).isEqualTo("FAILED");
-        verify(ai).validateSelection(choice);
+        for(String code:List.of("AI_EXTRA_USAGE_ENABLED","AI_CATALOG_STALE","AI_RATE_LIMITED")) {
+            AiExecution receipt=code.equals("AI_CATALOG_STALE")?null:aiReceipt("FAILED",code);
+            when(ai.interpret(any(),eq(choice))).thenThrow(new SrppSettingsAiFailure(code,receipt));
+            ObjectNode failed=simulate(d,"AI");
+            assertThat(failed.path("status").asText()).isEqualTo("SUCCEEDED");assertThat(failed.path("aiStatus").asText()).isEqualTo("FAILED");
+            assertThat(failed.path("errorCode").asText()).isEqualTo(code);
+            assertThat(failed.path("deterministicResult")).isEqualTo(local.path("deterministicResult"));
+            assertThat(failed.path("resultSha256")).isEqualTo(local.path("resultSha256"));
+            if(receipt==null)assertThat(failed.path("aiExecution").isNull()).isTrue();
+            else assertThat(failed.path("aiExecution").path("status").asText()).isEqualTo("FAILED");
+        }
+        verify(ai,times(3)).validateSelection(choice);
     }
     @Test void successfulAiAddsTextWithoutChangingCalculatedEvidenceOrWorkerInput() {
         ObjectNode d=create(),local=simulate(d,"LOCAL");

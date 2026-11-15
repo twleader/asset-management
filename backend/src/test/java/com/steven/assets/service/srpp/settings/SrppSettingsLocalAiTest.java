@@ -16,7 +16,7 @@ class SrppSettingsLocalAiTest {
     @TempDir Path temp;
     HttpServer server;SrppSettingsLocalAi ai;Path token;
     final String revision="f".repeat(64);
-    final AtomicInteger requests=new AtomicInteger(),interpretations=new AtomicInteger();
+    final AtomicInteger requests=new AtomicInteger(),capabilityReads=new AtomicInteger(),interpretations=new AtomicInteger();
     final AtomicReference<String> reply=new AtomicReference<>(),received=new AtomicReference<>();
     int status=200;ObjectNode caps;
     final AiSelection choice=new AiSelection("ollama","gemma4:31b",null,"f".repeat(64));
@@ -31,7 +31,7 @@ class SrppSettingsLocalAiTest {
         server.createContext("/",exchange->{
             requests.incrementAndGet();String response;
             if(!("Bearer "+"a".repeat(48)).equals(exchange.getRequestHeaders().getFirst("Authorization")))throw new AssertionError("token missing");
-            if(exchange.getRequestURI().getPath().equals("/capabilities"))response=caps.toString();
+            if(exchange.getRequestURI().getPath().equals("/capabilities")){capabilityReads.incrementAndGet();response=caps.toString();}
             else {interpretations.incrementAndGet();received.set(new String(exchange.getRequestBody().readAllBytes(),StandardCharsets.UTF_8));response=reply.get();}
             byte[] bytes=response.getBytes(StandardCharsets.UTF_8);exchange.getResponseHeaders().set("Content-Type","application/json");
             exchange.sendResponseHeaders(exchange.getRequestURI().getPath().equals("/capabilities")?200:status,bytes.length);
@@ -56,13 +56,76 @@ class SrppSettingsLocalAiTest {
         var body=SettingsCanonicalJson.parse(received.get());assertThat(body.size()).isEqualTo(2);
         assertThat(body.path("selection")).isEqualTo(SettingsCanonicalJson.tree(choice));assertThat(body.path("result")).isEqualTo(frozen);
     }
+    @Test void selectionAndInterpretationNeverRefreshCatalogUnlessExplicitlyRequested() {
+        assertThat(requests.get()).isZero();
+        assertThatThrownBy(()->ai.validateSelection(choice)).isInstanceOf(SrppSettingsProblem.class)
+                .satisfies(e->{assertThat(((SrppSettingsProblem)e).status()).isEqualTo(409);assertThat(((SrppSettingsProblem)e).code()).isEqualTo("AI_CATALOG_STALE");});
+        assertThatThrownBy(()->ai.interpret(result(),choice)).isInstanceOf(SrppSettingsAiFailure.class)
+                .satisfies(e->assertThat(((SrppSettingsAiFailure)e).code()).isEqualTo("AI_CATALOG_STALE"));
+        assertThat(requests.get()).isZero();
+        ai.capabilities();assertThat(capabilityReads.get()).isEqualTo(1);
+        // Even a changed host catalog cannot cause an implicit cross-provider capability probe.
+        caps.put("catalogRevision","e".repeat(64));
+        ai.validateSelection(choice);assertThat(ai.interpret(result(),choice).execution().status()).isEqualTo("SUCCEEDED");
+        assertThat(capabilityReads.get()).isEqualTo(1);assertThat(interpretations.get()).isEqualTo(1);
+        ai.capabilities();assertThat(capabilityReads.get()).isEqualTo(2);
+        assertThatThrownBy(()->ai.validateSelection(choice)).isInstanceOf(SrppSettingsProblem.class)
+                .satisfies(e->assertThat(((SrppSettingsProblem)e).code()).isEqualTo("AI_CATALOG_STALE"));
+        assertThatThrownBy(()->ai.interpret(result(),choice)).isInstanceOf(SrppSettingsAiFailure.class)
+                .satisfies(e->assertThat(((SrppSettingsAiFailure)e).code()).isEqualTo("AI_CATALOG_STALE"));
+        assertThat(capabilityReads.get()).isEqualTo(2);assertThat(interpretations.get()).isEqualTo(1);
+    }
+    @Test void failedExplicitRefreshClearsThePreviousCatalogWithoutAnyAutomaticRecoveryProbe() {
+        ai.capabilities();assertThat(capabilityReads.get()).isEqualTo(1);
+        caps.put("extra","invalid host schema");assertThat(ai.capabilities().tools()).isEmpty();
+        assertThat(capabilityReads.get()).isEqualTo(2);
+        assertThatThrownBy(()->ai.validateSelection(choice)).isInstanceOf(SrppSettingsProblem.class)
+                .satisfies(e->assertThat(((SrppSettingsProblem)e).code()).isEqualTo("AI_CATALOG_STALE"));
+        assertThatThrownBy(()->ai.interpret(result(),choice)).isInstanceOf(SrppSettingsAiFailure.class)
+                .satisfies(e->assertThat(((SrppSettingsAiFailure)e).code()).isEqualTo("AI_CATALOG_STALE"));
+        assertThat(capabilityReads.get()).isEqualTo(2);assertThat(interpretations.get()).isZero();
+        caps.remove("extra");ai.capabilities();ai.validateSelection(choice);assertThat(capabilityReads.get()).isEqualTo(3);
+    }
+    @Test void returnedCatalogIsImmutableThroughEveryNestedList() {
+        AiCapabilities loaded=ai.capabilities();
+        assertThatThrownBy(()->loaded.tools().clear()).isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(()->loaded.tools().get(0).models().clear()).isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(()->loaded.tools().get(0).models().get(0).efforts().add("invented")).isInstanceOf(UnsupportedOperationException.class);
+        ai.validateSelection(choice);assertThat(capabilityReads.get()).isEqualTo(1);
+    }
+    @Test void limitedClaudeKeepsCodexAndOllamaAvailableAndDoesNotSubmitAnInterpretation() {
+        ObjectNode codex=((ArrayNode)caps.path("tools")).addObject().put("id","codex").put("label","Codex CLI")
+                .put("adapter","codex_cli").put("billingMode","SUBSCRIPTION").put("available",true).putNull("code").put("modelSource","RUNTIME");
+        codex.putArray("models").addObject().put("id","gpt-6-luna").put("label","GPT-6 Luna").put("defaultEffort","low").putArray("efforts").add("low");
+        ObjectNode claude=((ArrayNode)caps.path("tools")).addObject().put("id","claude").put("label","Claude CLI")
+                .put("adapter","claude_cli").put("billingMode","SUBSCRIPTION").put("available",false).put("code","AI_RATE_LIMITED").put("modelSource","RUNTIME");
+        claude.putArray("models");
+        AiCapabilities loaded=ai.capabilities();assertThat(loaded.tools()).hasSize(3);
+        assertThat(loaded.tools().get(0).available()).isTrue();assertThat(loaded.tools().get(1).available()).isTrue();assertThat(loaded.tools().get(2).code()).isEqualTo("AI_RATE_LIMITED");
+        ai.validateSelection(choice);ai.validateSelection(new AiSelection("codex","gpt-6-luna","low",revision));
+        assertThatThrownBy(()->ai.validateSelection(new AiSelection("claude","claude-sonnet-5-5","low",revision)))
+                .isInstanceOf(SrppSettingsProblem.class).satisfies(e->{assertThat(((SrppSettingsProblem)e).status()).isEqualTo(409);assertThat(((SrppSettingsProblem)e).code()).isEqualTo("AI_RATE_LIMITED");});
+        assertThat(capabilityReads.get()).isEqualTo(1);assertThat(interpretations.get()).isZero();
+    }
+    @Test void selectedWorkerRateLimitPreservesNamedFailureWithoutRetryOrCapabilityProbe() {
+        ai.capabilities();status=429;
+        ObjectNode error=JsonNodeFactory.instance.objectNode().put("code","AI_RATE_LIMITED").put("message","opaque provider output").putNull("execution");reply.set(error.toString());
+        assertThatThrownBy(()->ai.interpret(result(),choice)).isInstanceOf(SrppSettingsAiFailure.class)
+                .satisfies(e->{SrppSettingsAiFailure failure=(SrppSettingsAiFailure)e;assertThat(failure.code()).isEqualTo("AI_RATE_LIMITED");assertThat(failure.execution()).isNull();assertThat(failure.getMessage()).doesNotContain("opaque");});
+        error.set("execution",SettingsCanonicalJson.tree(receipt("FAILED","AI_RATE_LIMITED")));reply.set(error.toString());
+        assertThatThrownBy(()->ai.interpret(result(),choice)).isInstanceOf(SrppSettingsAiFailure.class)
+                .satisfies(e->{assertThat(((SrppSettingsAiFailure)e).code()).isEqualTo("AI_RATE_LIMITED");assertThat(((SrppSettingsAiFailure)e).execution().status()).isEqualTo("FAILED");});
+        assertThat(capabilityReads.get()).isEqualTo(1);assertThat(interpretations.get()).isEqualTo(2);
+    }
     @Test void staleUnknownUnsupportedEffortAndBillingBlockNeverSubmitModelRequest() {
+        ai.capabilities();
         assertThatThrownBy(()->ai.validateSelection(new AiSelection("ollama","gemma4:31b",null,"e".repeat(64))))
                 .isInstanceOf(SrppSettingsProblem.class).satisfies(e->assertThat(((SrppSettingsProblem)e).code()).isEqualTo("AI_CATALOG_STALE"));
         for(AiSelection invalid:java.util.List.of(new AiSelection("missing","gemma4:31b",null,revision),
                 new AiSelection("ollama","cloud-model",null,revision),new AiSelection("ollama","gemma4:31b","high",revision)))
             assertThatThrownBy(()->ai.validateSelection(invalid)).isInstanceOf(SrppSettingsProblem.class);
         ((ObjectNode)caps.path("tools").get(0)).put("available",false).put("code","AI_EXTRA_USAGE_ENABLED");
+        ai.capabilities();
         assertThatThrownBy(()->ai.validateSelection(choice)).isInstanceOf(SrppSettingsProblem.class)
                 .satisfies(e->assertThat(((SrppSettingsProblem)e).code()).isEqualTo("AI_EXTRA_USAGE_ENABLED"));
         assertThat(interpretations.get()).isZero();
@@ -84,7 +147,7 @@ class SrppSettingsLocalAiTest {
         assertThat(interpretations.get()).isZero();
     }
     @Test void freshAuthenticationFailureBeforeProviderExecutionStaysNamedWithoutReceiptOrFallback() {
-        status=401;
+        ai.capabilities();status=401;
         for(String code:java.util.List.of("AI_AUTH_REQUIRED","AI_AUTH_EXPIRED")) {
             ObjectNode error=JsonNodeFactory.instance.objectNode().put("code",code).put("message","raw provider error must not be exposed").putNull("execution");
             reply.set(error.toString());int before=interpretations.get();
@@ -101,6 +164,7 @@ class SrppSettingsLocalAiTest {
         AiSelection requested=new AiSelection("codex","gpt-6-luna","low",revision);
         AiExecution failedReceipt=new AiExecution("codex","gpt-6-luna","low",null,"REQUESTED_ONLY","SUBSCRIPTION","1",
                 "2026-11-15T01:00:00Z","2026-11-15T01:00:01Z","FAILED","AI_AUTH_EXPIRED");
+        ai.capabilities();
         status=401;ObjectNode error=JsonNodeFactory.instance.objectNode().put("code","AI_AUTH_EXPIRED").put("message","請重新登入");
         error.set("execution",SettingsCanonicalJson.tree(failedReceipt));reply.set(error.toString());
         assertThatThrownBy(()->ai.interpret(result(),requested)).isInstanceOf(SrppSettingsAiFailure.class)
@@ -112,6 +176,7 @@ class SrppSettingsLocalAiTest {
     }
     @Test void effortCannotBeOmittedForAnEffortCapableModel() {
         ObjectNode model=(ObjectNode)caps.at("/tools/0/models/0");model.put("defaultEffort","high");((ArrayNode)model.path("efforts")).add("high");
+        ai.capabilities();
         assertThatThrownBy(()->ai.validateSelection(choice)).isInstanceOf(SrppSettingsProblem.class);
         assertThatCode(()->ai.validateSelection(new AiSelection("ollama","gemma4:31b","high",revision))).doesNotThrowAnyException();
         assertThat(interpretations.get()).isZero();
@@ -122,21 +187,21 @@ class SrppSettingsLocalAiTest {
         Files.writeString(token,"a".repeat(48));caps.put("extra","not allowed");assertThat(ai.capabilities().tools()).isEmpty();assertThat(interpretations.get()).isZero();
     }
     @Test void failureReceiptIsSanitizedAndNoAlternativeModelIsInvoked() {
-        status=409;ObjectNode error=JsonNodeFactory.instance.objectNode().put("code","AI_EXTRA_USAGE_ENABLED").put("message","unsafe raw provider output");
+        ai.capabilities();status=409;ObjectNode error=JsonNodeFactory.instance.objectNode().put("code","AI_EXTRA_USAGE_ENABLED").put("message","unsafe raw provider output");
         error.set("execution",SettingsCanonicalJson.tree(receipt("FAILED","AI_EXTRA_USAGE_ENABLED")));reply.set(error.toString());
         assertThatThrownBy(()->ai.interpret(result(),choice)).isInstanceOf(SrppSettingsAiFailure.class)
                 .satisfies(e->{SrppSettingsAiFailure failed=(SrppSettingsAiFailure)e;assertThat(failed.code()).isEqualTo("AI_EXTRA_USAGE_ENABLED");assertThat(failed.execution().status()).isEqualTo("FAILED");assertThat(failed.getMessage()).doesNotContain("unsafe");});
         assertThat(interpretations.get()).isEqualTo(1);
     }
     @Test void forbiddenToolUseFailureRemainsNamedAndNeverRetries() {
-        status=409;ObjectNode error=JsonNodeFactory.instance.objectNode().put("code","AI_TOOL_USE_FORBIDDEN").put("message","工具呼叫已拒絕");
+        ai.capabilities();status=409;ObjectNode error=JsonNodeFactory.instance.objectNode().put("code","AI_TOOL_USE_FORBIDDEN").put("message","工具呼叫已拒絕");
         error.set("execution",SettingsCanonicalJson.tree(receipt("FAILED","AI_TOOL_USE_FORBIDDEN")));reply.set(error.toString());
         assertThatThrownBy(()->ai.interpret(result(),choice)).isInstanceOf(SrppSettingsAiFailure.class)
                 .satisfies(e->assertThat(((SrppSettingsAiFailure)e).code()).isEqualTo("AI_TOOL_USE_FORBIDDEN"));
         assertThat(interpretations.get()).isEqualTo(1);
     }
     @Test void responseReceiptCannotChangeRequestedIdentityBillingOrClaimUnreportedModel() {
-        String valid=reply.get();
+        ai.capabilities();String valid=reply.get();
         for(String field:java.util.List.of("requestedModel","toolId","billingMode","requestedEffort","modelEvidence","startedAt")) {
             ObjectNode modified=(ObjectNode)SettingsCanonicalJson.parse(valid);((ObjectNode)modified.path("execution")).put(field,"wrong");reply.set(modified.toString());
             assertThatThrownBy(()->ai.interpret(result(),choice)).as(field).isInstanceOf(SrppSettingsAiFailure.class)
@@ -144,7 +209,7 @@ class SrppSettingsLocalAiTest {
         }
     }
     @Test void responseBodyHasAnEnforcedSizeLimit() {
-        reply.set(" ".repeat(2*1024*1024+1));assertThatThrownBy(()->ai.interpret(result(),choice)).isInstanceOf(SrppSettingsAiFailure.class);
+        ai.capabilities();reply.set(" ".repeat(2*1024*1024+1));assertThatThrownBy(()->ai.interpret(result(),choice)).isInstanceOf(SrppSettingsAiFailure.class);
         assertThat(interpretations.get()).isEqualTo(1);
     }
     @Test void selectionRequiresExactFourKeysAndRealStringTypes() {

@@ -34,6 +34,8 @@ python3 -B scripts/install-srpp-local-ai-bridge.py --install
 
 - `bridge.token`：原始連線 token，0600。
 - `registry.json`：管理者設定，0600；新增工具時可重用任何已支援 adapter，前端無須新增固定選項。
+- `claude-usage.lock`：0600、同使用者持有的協調鎖；host 與每次新建的 worker 共用 flock，避免同時查詢 Claude 費用端點。鎖等待受本輪 deadline 限制。
+- `claude-usage-backoff.json`：僅在真實費用端點回 HTTP 429 後保存的 0600 負向狀態，只有失敗次數與時間界線；不保存成功授權、token、指紋、帳號、email、原 usage 或 header。重啟 bridge、換工具別名或更新憑證不會重設冷卻。
 - `docker-token/bridge.token`：原 token 的唯讀 Docker 投影檔，0444；父目錄為 host 0700。僅 mount 此單一檔案，不能 mount home、CLI 設定目錄或原始憑證。
 - `codex-home/`：早期版本的狀態目錄。Task 594 起不再讀取其中的 `auth.json`、不以舊登入 fallback，也不再使用其 refresh secret。既有檔案不自動刪改，無須人工更新副本；正常登入只在一般 Codex CLI 維護。舊模型快取若有仍僅供不可用時的展示，不構成登入或費用授權。
 - `bridge.log`／`bridge-error.log`：不記錄請求、持股、提示、token 或模型全文。
@@ -50,11 +52,27 @@ python3 -B scripts/srpp-local-ai-bridge.py --check
 python3 -B scripts/install-srpp-local-ai-bridge.py --stop
 ```
 
-`--check` 僅查模型 metadata、登入及費用狀態，不發模型推論；輸出僅含能力清單及安全原因碼。安裝器無參數時只讀狀態，不重啟工作。停止會保留 token、registry 和訂閱憑證。重新啟動使用 `--install`；每次明確安裝都會 `kickstart -k` 重新載入程式，因此同一路徑的程式更新也會生效。
+`--check` 僅查模型 metadata、登入及費用狀態，不發模型推論；輸出僅含能力清單及安全原因碼。它也遵守共享退避，真 429 時可更新私有負向狀態，不會修改供應商帳戶。安裝器無參數時只讀狀態，不重啟工作。停止會保留 token、registry 和訂閱憑證。重新啟動使用 `--install`；每次明確安裝都會 `kickstart -k` 重新載入程式，因此同一路徑的程式更新也會生效。
 
 `GET /capabilities` 與 `POST /interpret` 均需 `Authorization: Bearer <token>`。不要在命令列或日誌列印 token；操作程式應從私有檔在記憶體中讀取。HTTP 路徑為 exact match，拒絕 query token、redirect、proxy 及遠端地址。body 最大 2 MiB，輸出最多 20,000 字元，同時僅一個解讀工作。推論 worker 最長 120 秒，逾時終止整個程序群組；CLI／本機模型均沒有自動 fallback。
 
 能力 metadata 最多並行 16 個管理者設定工具，短暫快取 20 秒。catalogRevision 涵蓋工具設定（含 executable／port）與模型能力，不涵蓋額度、時間或可用狀態。請求使用過期清單會回 `AI_CATALOG_STALE`，重新載入後才能選擇。
+
+## Claude 費用查詢限流與退避
+
+工具可以同時可用，Codex 與 Claude 沒有互斥限制。開始解讀時，業務端與 host parent 只驗證先前已載入的目錄結構、選擇與當前 registry 身分，不因選用 Codex 而重新探測全部工具。沒有目錄或 registry 已變更時要求重新載入。目錄的 20 秒顯示快取過期也不會讓 interpret 偷查其它工具；真正 worker 只重新檢查所選工具的模型／effort 與費用，再執行該工具。LOCAL 不進 AI 檢查。
+
+Claude 工具清單的成功費用檢查可在同一 host 程序的記憶體暫存最多 60 秒，僅供 metadata 顯示。每次仍先確認正常訂閱登入與當下憑證身分，以只存在記憶體的指紋隔離；登入變更、失效、未知資料或查詢失敗不能沿用舊正證據。動態模型能力仍由原生 CLI 取得。worker 的 `fresh` 費用檢查永不使用成功快取，且每次只查一次，成功後立即解讀；不保存可供下一個 worker 使用的正向授權。
+
+跨執行緒與跨程序透過全域 usage 鎖協調，涵蓋多個 Claude 工具別名與重新建立的 worker。只有固定 Claude usage 端點的可信 HTTP 429 會建立共享負向狀態與 `AI_RATE_LIMITED`；鎖忙碌或等待逾時使用既有忙碌／逾時原因，不冒充供應商 HTTP 429。鎖、負向狀態及目錄必須符合 no-follow、owner、0600／0700 安全條件，損壞狀態不會被當成沒有冷卻。
+
+退避由約 60、120、240、480 秒逐步延長到 900 秒，加入非負、最多 6 秒的抖動，本機等待含抖動不超過 900 秒。有效 `Retry-After` 支援整數秒及 HTTP-date；若供應商要求更晚才重試，即使超過 900 秒也不截短。無效、負數、非有限或損壞 header 使用保守預設。時間回退不會提前解除已保存的期限。
+
+退避期間，重新載入與新 worker 直接讀取共享狀態並回限流，不重打費用端點、不呼叫模型。每個 probe 最多一個 HTTP 請求；本輪不在 request 內睡到期後重試，也不啟動背景輪詢。到期後，下一次使用者合法查詢才可再嘗試一次。有效 HTTP 200 且完整費用安全檢查通過後，才清除連續限流狀態；401／403、網路失敗或未知 schema 不能當作恢復，更不能沿用先前快取放行。
+
+worker 遇到限流會使 host 的正證據與目錄可用狀態失效。即使命中目錄快取，每次回傳仍會輕量套用共享負向狀態，因此既有模型名稱可保留為不可選 metadata，Claude 暫停不影響 Codex／Ollama 的獨立選擇。真服務仍回 429 時應如實顯示等待，不為了讓選單變亮而刷新冷卻、購買點數或跳過費用證據。
+
+`AI_RATE_LIMITED` 的使用者處理方式是「費用狀態查詢暫時被限流，等待退避後再重新載入；等待期間不重複查詢，費用確認前不呼叫模型」。它不代表已額外付費，也不代表登入過期，更不保證會在背景自動重試。模型請求本身沒有自動重試或付費 fallback。普通 HTTP helper 的其他 adapter 行為不因本功能改變。
 
 ## Codex 最新登入同步與登入錯誤
 
@@ -111,6 +129,6 @@ Codex 不可用時仍僅展示標 `CACHE` 的 CLI 模型快取，無權靠快取
 python3 -B -m unittest scripts/tests/test_srpp_local_ai_bridge.py
 ```
 
-單元測試使用隔離 fixture，涵蓋付費／未知狀態零推論、憑證隔離、組合驗證、版本過期、單工作鎖、逾時 killpg、拒絕遠端模型、token 驗證及安裝冪等。Codex 同步測試只用合成 JWT，覆蓋登入輪替、同 snapshot proof／exec、來源安全讀取、過期／錯帳、舊副本不可 fallback、401 與費用未知分流、並行投影及外層硬逾時清理；不讀寫真實登入、不發模型推論。Claude 自動探索另驗真實去識別 initialize 結構、動態第四模型、能力矛盾、未知 effort、原始付費 context 拒絕、legacy 配置不裁切、共同 deadline、成功／失敗／輸出超限的程序與管線清理。fixture 只保存合成 request_id 與公開 model metadata，不含真實 account、email、org、憑證、commands 或 skills 來源。整體驗收另外應經正式頁面 BFF 執行 LOCAL 與所選 AI，確認數值雜湊一致、文字解讀與收據保留、未選模型及工具不被呼叫。
+單元測試使用隔離 fixture，涵蓋付費／未知狀態零推論、憑證隔離、組合驗證、版本過期、單工作鎖、逾時 killpg、拒絕遠端模型、token 驗證及安裝冪等。Codex 同步測試只用合成 JWT，覆蓋登入輪替、同 snapshot proof／exec、來源安全讀取、過期／錯帳、舊副本不可 fallback、401 與費用未知分流、並行投影及外層硬逾時清理；不讀寫真實登入、不發模型推論。Claude 自動探索另驗真實去識別 initialize 結構、動態第四模型、能力矛盾、未知 effort、原始付費 context 拒絕、legacy 配置不裁切、共同 deadline、成功／失敗／輸出超限的程序與管線清理。usage 退避測試使用 loopback 合成 HTTP、時鐘及新建程序，驗證 429→零外呼冷卻→200 恢復、跨程序／重啟共享、原子負向檔、記憶體 TTL／登入輪替、fresh 不讀正快取，以及真 parent→worker 路徑過目錄 TTL 後選 Codex 零 Claude query、選 Claude 僅一次 fresh query，不打真 usage 刷限流。fixture 只保存合成 request_id 與公開 model metadata，不含真實 account、email、org、憑證、commands 或 skills 來源。整體驗收另外應經正式頁面 BFF 執行 LOCAL 與所選 AI，確認數值雜湊一致、文字解讀與收據保留、未選模型及工具不被呼叫。
 
 參考官方說明：[Codex app-server](https://developers.openai.com/codex/app-server/)、[Codex 額外 credits](https://help.openai.com/en/articles/12642688-using-credits-for-flexible-usage-in-chatgpt-plus-pro)、[Claude Code CLI](https://code.claude.com/docs/en/cli-reference)、[Claude 額外用量](https://support.claude.com/en/articles/12429409-manage-usage-credits-for-paid-claude-plans)、[LM Studio 本機庫存](https://lmstudio.ai/docs/developer/rest/list)。

@@ -1,0 +1,357 @@
+{
+  "schemaVersion": 1,
+  "scope": "FEATURE_PREMERGE_RUNTIME_ACCEPTANCE",
+  "status": "WAITING_PROVIDER_RETRY_AFTER",
+  "verifiedAt": "2026-11-15T16:31:20.895055+00:00",
+  "sourceRoot": "/Users/steven/.codex/worktrees/srpp-claude-rate-limit/asset-management",
+  "sourceBranch": "codex/srpp-claude-rate-limit",
+  "baseMainSha": "0841c46b0e169befa9c3cca007706a068913f6dd",
+  "hostInstaller": {
+    "label": "com.steven.srpp-local-ai-bridge",
+    "mode": "INSTALLED",
+    "jobLoaded": true,
+    "sourceRoot": "/Users/steven/.codex/worktrees/srpp-claude-rate-limit/asset-management",
+    "bind": "127.0.0.1:8766",
+    "tokenPreserved": true,
+    "registryPreserved": true,
+    "tokenAndRegistryBytesAndModesPreserved": true,
+    "sourceAuthBytesAndModeUnchanged": true
+  },
+  "deployment": {
+    "servicesRebuiltAndRecreated": [
+      "business-services",
+      "frontend"
+    ],
+    "bffRebuiltOrRecreated": false,
+    "configuration": {
+      "featureEnvMatchesMain": true,
+      "fubonSecretsBoundToMain": true,
+      "services": {
+        "business-services": {
+          "image": "sha256:067bbb35ff67201c9e23c45af7e3627230bf278bb243b5792b2da04f267941ea",
+          "effectiveEnvironmentMatchesMain": true,
+          "composeWorkingDirectory": "/Users/steven/.codex/worktrees/srpp-claude-rate-limit/asset-management",
+          "restartCount": 0
+        },
+        "frontend": {
+          "image": "sha256:9c4872a7d026089f5281d42b1a06c6496d5a9be9fefbb632ea0828407ef990c5",
+          "effectiveEnvironmentMatchesMain": true,
+          "composeWorkingDirectory": "/Users/steven/.codex/worktrees/srpp-claude-rate-limit/asset-management",
+          "restartCount": 0
+        }
+      }
+    }
+  },
+  "metadata": {
+    "httpStatus": 200,
+    "elapsedSeconds": 0.729,
+    "catalog": {
+      "catalogRevision": "e583500a840c4e241944a81ce0765857310ea5179d76cbb6269e2f31ba4f9ef6",
+      "schemaVersion": 1,
+      "tools": [
+        {
+          "adapter": "codex_cli",
+          "available": true,
+          "billingMode": "SUBSCRIPTION",
+          "code": null,
+          "id": "codex",
+          "label": "Codex CLI",
+          "modelSource": "RUNTIME",
+          "models": [
+            {
+              "defaultEffort": "low",
+              "efforts": [
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max",
+                "ultra"
+              ],
+              "id": "gpt-6.1-sol",
+              "label": "GPT-6.1-Sol"
+            },
+            {
+              "defaultEffort": "medium",
+              "efforts": [
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max",
+                "ultra"
+              ],
+              "id": "gpt-6-astra",
+              "label": "GPT-6-Astra"
+            },
+            {
+              "defaultEffort": "low",
+              "efforts": [
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max",
+                "ultra"
+              ],
+              "id": "gpt-6.1-terra",
+              "label": "GPT-6.1 Terra"
+            },
+            {
+              "defaultEffort": "medium",
+              "efforts": [
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max",
+                "ultra"
+              ],
+              "id": "gpt-6-sol",
+              "label": "GPT-6-Sol"
+            },
+            {
+              "defaultEffort": "medium",
+              "efforts": [
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ],
+              "id": "gpt-6-luna",
+              "label": "GPT-6-Luna"
+            },
+            {
+              "defaultEffort": "low",
+              "efforts": [
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max",
+                "ultra"
+              ],
+              "id": "gpt-5.6-sol",
+              "label": "GPT-5.6-Sol"
+            },
+            {
+              "defaultEffort": "medium",
+              "efforts": [
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max",
+                "ultra"
+              ],
+              "id": "gpt-5.6-terra",
+              "label": "GPT-5.6-Terra"
+            },
+            {
+              "defaultEffort": "medium",
+              "efforts": [
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ],
+              "id": "gpt-5.6-luna",
+              "label": "GPT-5.6-Luna"
+            }
+          ]
+        },
+        {
+          "adapter": "claude_cli",
+          "available": false,
+          "billingMode": "SUBSCRIPTION",
+          "code": "AI_RATE_LIMITED",
+          "id": "claude",
+          "label": "Claude CLI",
+          "modelSource": "RUNTIME",
+          "models": []
+        },
+        {
+          "adapter": "ollama",
+          "available": true,
+          "billingMode": "LOCAL",
+          "code": null,
+          "id": "ollama",
+          "label": "Ollama（本機模型）",
+          "modelSource": "RUNTIME",
+          "models": [
+            {
+              "defaultEffort": null,
+              "efforts": [],
+              "id": "local-coder-31b:128k",
+              "label": "local-coder-31b:128k"
+            },
+            {
+              "defaultEffort": null,
+              "efforts": [],
+              "id": "gemma4:31b",
+              "label": "gemma4:31b"
+            }
+          ]
+        },
+        {
+          "adapter": "local_openai",
+          "available": false,
+          "billingMode": "LOCAL",
+          "code": "AI_TOOL_UNAVAILABLE",
+          "id": "lmstudio",
+          "label": "LM Studio（本機模型）",
+          "modelSource": "RUNTIME",
+          "models": []
+        }
+      ]
+    },
+    "businessCenterStatus": 200,
+    "businessMatchesHost": true,
+    "backoffState": {
+      "failureCount": 1,
+      "nextAllowedAt": 1794762269.5176299,
+      "recordedAt": 1794760172.5179489,
+      "schemaVersion": 1
+    },
+    "modelRequestsIssued": 0
+  },
+  "claudeRecovery": {
+    "status": "WAITING_PROVIDER_RETRY_AFTER",
+    "code": "AI_RATE_LIMITED",
+    "state": {
+      "failureCount": 1,
+      "nextAllowedAt": 1794762269.5176299,
+      "recordedAt": 1794760172.5179489,
+      "schemaVersion": 1
+    },
+    "nextAllowedUtc": "2026-11-15T17:04:29.517630+00:00",
+    "nextAllowedTaipei": "2026-11-16T01:04:29.517630+08:00",
+    "modelRequestsIssued": 0,
+    "stateDeletedOrDeadlineShortened": false,
+    "automaticRetryOrFallback": false,
+    "successfulClaudeSyntheticInterpretation": "NOT_YET_EXECUTED"
+  },
+  "infrastructure": {
+    "oldRuns": {
+      "local": {
+        "id": "5d4213dc-b7f5-41ce-adc6-6a3603734639",
+        "status": "SUCCEEDED",
+        "aiStatus": "NOT_REQUESTED",
+        "resultSha256": "65757660328b41f04c4f26a842b1253ca083ccc296668dbcf4a2a56a3b984a4c",
+        "hashVerified": true,
+        "aiSelection": null,
+        "aiExecution": null
+      },
+      "ai": {
+        "id": "4d15edde-cebf-45c5-b60c-2aaf4230b9a9",
+        "status": "SUCCEEDED",
+        "aiStatus": "SUCCEEDED",
+        "resultSha256": "02125b3865f3020224cd90e2d5704ae16b6d71bc7cc25f4da3aa830655dfe261",
+        "hashVerified": true,
+        "aiSelection": {
+          "toolId": "ollama",
+          "model": "gemma4:31b",
+          "effort": null,
+          "catalogRevision": "d4a11f928f74df82ce8e4d23321162ffaa7a37b40aae66ec87ce23bd284d2c46"
+        },
+        "aiExecution": {
+          "toolId": "ollama",
+          "requestedModel": "gemma4:31b",
+          "requestedEffort": null,
+          "actualModel": "gemma4:31b",
+          "modelEvidence": "PROVIDER_REPORTED",
+          "billingMode": "LOCAL",
+          "adapterVersion": "1",
+          "startedAt": "2026-11-15T10:41:00.736449Z",
+          "completedAt": "2026-11-15T10:41:50.226475Z",
+          "status": "SUCCEEDED",
+          "code": null
+        }
+      }
+    },
+    "containers": {
+      "business-services": {
+        "image": "sha256:067bbb35ff67201c9e23c45af7e3627230bf278bb243b5792b2da04f267941ea",
+        "startedAt": "2026-11-15T16:28:48.59741913Z",
+        "restartCount": 0,
+        "health": "healthy"
+      },
+      "bff": {
+        "image": "sha256:36d9fa4e6b53631651d9e6f163bc4542a63b33b4d2b1c3a8564c3c69d34f8b5e",
+        "startedAt": "2026-11-15T10:52:01.651066388Z",
+        "restartCount": 0,
+        "health": "healthy"
+      },
+      "frontend": {
+        "image": "sha256:9c4872a7d026089f5281d42b1a06c6496d5a9be9fefbb632ea0828407ef990c5",
+        "startedAt": "2026-11-15T16:28:59.481659468Z",
+        "restartCount": 0,
+        "health": null
+      }
+    },
+    "unchangedBff": true,
+    "safe9090": {
+      "quotes": 200,
+      "marketIndex": 200
+    },
+    "formalDomainTlsSystemTrustAndHostnameVerified": true
+  },
+  "browser": {
+    "source": "https://localhost",
+    "deployedProductionAssets": true,
+    "frontendImageDigest": "sha256:9c4872a7d026089f5281d42b1a06c6496d5a9be9fefbb632ea0828407ef990c5",
+    "syntheticAuthAndBffDataOnly": true,
+    "realLogin": false,
+    "realInference": false,
+    "apiWrites": 0,
+    "checks": {
+      "codexSelectableBefore429": true,
+      "claudeSelectableBefore429": true,
+      "bothToolsAvailableBefore429": true,
+      "claudeUnavailableAfter429": true,
+      "rateLimitMessageVisible": true,
+      "rawCodeHidden": true,
+      "codexAvailableAfter429": true,
+      "codexSelectableAfter429": true,
+      "claudeOptionDisabledAfter429": true,
+      "aiModeRemainsEnabledAfter429": true,
+      "pageErrors": 0,
+      "unexpectedApiRequests": 0,
+      "attemptedExternalRequests": 0,
+      "externalRequestsBlocked": true
+    },
+    "screenshots": {
+      "availableTools": "/tmp/t595-acceptance/available-tools.png",
+      "rateLimited": "/tmp/t595-acceptance/claude-rate-limited.png"
+    },
+    "status": "FULL_PASS"
+  },
+  "tests": {
+    "python": 109,
+    "backend": 70,
+    "frontend": 193,
+    "allPassed": true
+  },
+  "limitations": [
+    "Native provider returned HTTP429 with a Retry-After later than the local exponential backoff; its full deadline is preserved.",
+    "Feature recovery acceptance remains incomplete until a fresh fee proof and the authorized Claude synthetic interpretation succeed.",
+    "Browser cases use synthetic response fixtures on actual production assets, not real login or model requests.",
+    "No raw credentials, account identifiers, provider error bodies, source-auth hashes or model text are saved in this receipt."
+  ],
+  "noExtraApiBillingNoFallback": true,
+  "noPublishNoMailNoTrade": true,
+  "parentRealCooldownNoOutboundVerification": {
+    "scope": "DEPLOYED_SOURCE_AND_REAL_NEGATIVE_STATE_NO_OUTBOUND_VERIFICATION",
+    "probes": 3,
+    "code": "AI_RATE_LIMITED",
+    "calls": {
+      "network": 0,
+      "credentialOrCli": 0
+    },
+    "negativeStateUnchanged": true,
+    "retryDeadlinePreserved": true,
+    "bridgeSha256": "1132e630d952b48ab4b77496a432cd2b305b9c451acf612019038860f0d66c25"
+  }
+}

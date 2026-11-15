@@ -6,6 +6,7 @@ const SAFE_AI_CODE_MESSAGES = Object.freeze({
   AI_TOOL_UNAVAILABLE: '此工具目前無法使用，請稍後重新載入工具清單。',
   AI_SUBSCRIPTION_REQUIRED: '尚未確認可用的既有訂閱，系統未呼叫模型。',
   AI_BILLING_UNVERIFIED: '無法確認這次使用不會產生額外費用，因此系統未呼叫模型。',
+  AI_RATE_LIMITED: '此工具的費用狀態查詢暫時被限流，請等待退避後再重新載入。等待期間不會重複查詢，費用確認前不呼叫模型。',
   AI_PAID_CREDITS_ENABLED: '帳戶啟用了可能計費的點數，為避免額外費用，系統未呼叫模型。',
   AI_EXTRA_USAGE_ENABLED: '帳戶啟用了額外用量，為避免額外費用，系統未呼叫模型。',
   AI_MODEL_UNAVAILABLE: '此模型目前無法使用，請重新載入工具清單。',
