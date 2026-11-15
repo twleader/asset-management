@@ -1357,8 +1357,9 @@ const chartOption = computed(() => {
 .analysis-empty   { text-align:center;padding:60px 0;color:#94a3b8;font-size:14px }
 .dividend-decimal { display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle }
 .dividend-history-meta { margin-bottom:8px;color:#64748b;font-size:12px }
-.dividend-evidence-cell { display:flex;flex-direction:column;align-items:flex-start;gap:3px;min-width:0 }
-.dividend-evidence-detail,.dividend-evidence-source { max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:#475569 }
+.dividend-evidence-cell { display:flex;align-items:center;gap:6px;min-width:0 }
+.dividend-evidence-cell :deep(.el-tag) { flex-shrink:0 }
+.dividend-evidence-detail,.dividend-evidence-source { min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:#475569 }
 .dividend-evidence-source { color:#64748b }
 /* 右邊保留的空間要對齊 echarts grid.right (96px)，這樣 period selector / 資料截止 才會
    和 chart 內容（endLabels 落點）的右緣切齊，不會越界到圖外。 */
