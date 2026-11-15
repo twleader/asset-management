@@ -118,6 +118,42 @@ test('登入必要與登入過期文案不會混淆費用未知或未呼叫模�
   assert.notEqual(authExpired, billingUnverified)
 })
 
+test('費用查詢限流只停用該工具，並與費用未知及登入錯誤分開說明', () => {
+  const catalog = [
+    {
+      id: 'codex',
+      label: 'Codex CLI',
+      available: true,
+      models: [{ id: 'codex-model', efforts: ['low'], defaultEffort: 'low' }]
+    },
+    {
+      id: 'claude',
+      label: 'Claude CLI',
+      available: true,
+      models: [{ id: 'claude-model', efforts: ['low'], defaultEffort: 'low' }]
+    }
+  ]
+  const rateLimitedCatalog = [catalog[0], {
+    ...catalog[1],
+    available: false,
+    code: 'AI_RATE_LIMITED',
+    models: []
+  }]
+  const rateLimitedMessage = safeSrppAiCodeMessage('AI_RATE_LIMITED')
+
+  assert.equal(isSrppAiToolSelectable(catalog[0]), true)
+  assert.equal(isSrppAiToolSelectable(catalog[1]), true)
+  assert.equal(isSrppAiToolSelectable(rateLimitedCatalog[0]), true)
+  assert.equal(isSrppAiToolSelectable(rateLimitedCatalog[1]), false)
+  assert.equal(rateLimitedMessage, '此工具的費用狀態查詢暫時被限流，請等待退避後再重新載入。等待期間不會重複查詢，費用確認前不呼叫模型。')
+  assert.equal(rateLimitedMessage.includes('自動'), false)
+  assert.equal(rateLimitedMessage.includes('60 秒'), false)
+  assert.notEqual(rateLimitedMessage, safeSrppAiCodeMessage('AI_BILLING_UNVERIFIED'))
+  assert.notEqual(rateLimitedMessage, safeSrppAiCodeMessage('AI_AUTH_REQUIRED'))
+  assert.notEqual(rateLimitedMessage, safeSrppAiCodeMessage('AI_AUTH_EXPIRED'))
+  assert.equal(safeSrppAiCodeMessage('AI_RATE_LIMITED_RAW_DETAIL'), 'AI 工具回報暫時無法處理；情境數值仍已保留。')
+})
+
 test('收據只在有供應者回報證據時顯示實際模型，並翻譯有限狀態與來源', () => {
   assert.equal(srppAiActualModelLabel({ modelEvidence: 'REQUESTED_ONLY', actualModel: null }), '未回報實際模型（僅記錄要求模型）')
   assert.equal(srppAiActualModelLabel({ modelEvidence: 'PROVIDER_REPORTED', actualModel: 'model-live-2' }), 'model-live-2')

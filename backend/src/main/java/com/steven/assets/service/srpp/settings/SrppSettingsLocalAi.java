@@ -23,11 +23,13 @@ public final class SrppSettingsLocalAi implements SrppSettingsAiPort {
     private static final Set<String> CODES=Set.of("AI_UNAUTHORIZED","AI_AUTH_REQUIRED","AI_AUTH_EXPIRED","AI_INVALID_REQUEST","AI_INVALID_SELECTION",
             "AI_CATALOG_STALE","AI_TOOL_UNAVAILABLE","AI_SUBSCRIPTION_REQUIRED","AI_BILLING_UNVERIFIED",
             "AI_PAID_CREDITS_ENABLED","AI_EXTRA_USAGE_ENABLED","AI_MODEL_UNAVAILABLE","AI_REMOTE_MODEL_FORBIDDEN",
-            "AI_BUSY","AI_TIMEOUT","AI_EMPTY_RESPONSE","AI_EXECUTION_FAILED","AI_TOOL_USE_FORBIDDEN");
+            "AI_BUSY","AI_RATE_LIMITED","AI_TIMEOUT","AI_EMPTY_RESPONSE","AI_EXECUTION_FAILED","AI_TOOL_USE_FORBIDDEN");
     private static final Set<String> ADAPTERS=Set.of("codex_cli","claude_cli","ollama","local_openai");
     private final HttpClient client;
     private final URI base;
     private final Path tokenFile;
+    /** Immutable request catalog only. The host still checks the selected tool's fresh billing gates. */
+    private volatile AiCapabilities catalogSnapshot;
 
     @Autowired
     public SrppSettingsLocalAi(@Value("${srpp.settings.ai-token-file:/run/secrets/srpp_local_ai_token}") String tokenFile) {
@@ -43,7 +45,9 @@ public final class SrppSettingsLocalAi implements SrppSettingsAiPort {
                 }).build();
     }
     @Override public AiCapabilities capabilities() {
-        try{return readCapabilities();}catch(RuntimeException unavailable){return new AiCapabilities(1,null,List.of());}
+        try {
+            AiCapabilities current=readCapabilities();catalogSnapshot=current;return current;
+        }catch(RuntimeException unavailable){catalogSnapshot=null;return new AiCapabilities(1,null,List.of());}
     }
     private AiCapabilities readCapabilities() {
         JsonNode raw;
@@ -86,8 +90,12 @@ public final class SrppSettingsLocalAi implements SrppSettingsAiPort {
         }catch(RuntimeException invalid){throw failure("AI_EXECUTION_FAILED");}
     }
     @Override public void validateSelection(AiSelection selection) {
-        try{selected(readCapabilities(),selection);}
-        catch(SrppSettingsAiFailure unavailable){throw new SrppSettingsProblem(503,unavailable.code(),"AI 工具暫時無法驗證，請重新載入或選擇不呼叫 AI");}
+        selected(catalogSnapshot(),selection);
+    }
+    private AiCapabilities catalogSnapshot() {
+        AiCapabilities current=catalogSnapshot;
+        if(current==null)throw new SrppSettingsProblem(409,"AI_CATALOG_STALE","請重新載入 AI 工具與模型清單後再選擇");
+        return current;
     }
     private static AiTool selected(AiCapabilities caps,AiSelection selection) {
         if(selection==null)throw selectionProblem();
@@ -100,7 +108,7 @@ public final class SrppSettingsLocalAi implements SrppSettingsAiPort {
     }
     @Override public AiResult interpret(JsonNode frozenResult,AiSelection selection) {
         AiTool tool;
-        try {tool=selected(readCapabilities(),selection);}
+        try {tool=selected(catalogSnapshot(),selection);}
         catch(SrppSettingsProblem invalid){throw failure(safeCode(invalid.code()));}
         ObjectNode body=com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
         body.set("selection",SettingsCanonicalJson.tree(selection));body.set("result",frozenResult.deepCopy());

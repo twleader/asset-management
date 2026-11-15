@@ -1,0 +1,28 @@
+{
+  "pythonTests": 109,
+  "backendTests": 70,
+  "frontendTests": 193,
+  "failures": 0,
+  "frontendBuild": "PASS",
+  "parentIndependentPythonTests": "PASS 109 (6.205 seconds)",
+  "parentIndependentFrontendTests": "PASS 193",
+  "coverage": [
+    "Real loopback HTTP429 then zero-query cooldown then 200 recovery",
+    "Cross-process lock and restart persist cooldown",
+    "Retry-After seconds/date and long server delay; exponential jitter caps",
+    "Metadata TTL and credential rotation; fresh worker ignores positive metadata cache",
+    "Expired structural snapshot: Codex zero Claude HTTP; Claude fresh worker one HTTP",
+    "Java explicit catalog loading only; validate/interpret zero GET; failed reload clears snapshot",
+    "Immutable catalog; safe named rate limit and retained deterministic result/hash"
+  ],
+  "sourceSha256": {
+    "scripts/srpp-local-ai-bridge.py": "1132e630d952b48ab4b77496a432cd2b305b9c451acf612019038860f0d66c25",
+    "scripts/tests/test_srpp_local_ai_bridge.py": "f684d409799f56c6e6dabd89fb54d6f6270d39dbf10f4cef336dc90239dc5210",
+    "backend/src/main/java/com/steven/assets/service/srpp/settings/SrppSettingsLocalAi.java": "871b0877843ccda383db2b01f786954dfce781c9d6b814cd7e711ffddb635c2d",
+    "backend/src/test/java/com/steven/assets/service/srpp/settings/SrppSettingsLocalAiTest.java": "8662e49f0043f1e552ca41eccdfcbf6e7ea60febf1adce0f5914edd4a5f0b607",
+    "backend/src/test/java/com/steven/assets/service/srpp/settings/SrppSettingsServiceTest.java": "83741b7543490fcce7b891ee9374c199767ab8a7d5a4ee9f4c021a79d0a91809",
+    "frontend/src/utils/srppSettingsCenterAi.js": "b7a5d62629dcc7b478bb9bad1e3b8cf651337041bca88ada469debe235b26183",
+    "frontend/src/utils/srppSettingsCenterAi.test.js": "27cd90f438f257407e61ff97e277040bcb7b9e89616d60eabc402bdeb181d749",
+    "docs/operations/srpp-local-ai.md": "0a3c863068c314ebd3d8c6c518c11710976cfe7be34d2deda14789fba10bdad4"
+  }
+}

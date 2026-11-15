@@ -9,16 +9,21 @@ from __future__ import annotations
 import argparse
 import base64
 import concurrent.futures
+import copy
 import contextlib
 import datetime as dt
 import decimal
+import email.utils
+import fcntl
 import hashlib
 import hmac
 import http.server
 import ipaddress
 import json
+import math
 import os
 import pathlib
+import random
 import re
 import selectors
 import shutil
@@ -44,6 +49,9 @@ CLAUDE_METADATA_SECONDS = 7.5
 CODEX_METADATA_SECONDS = 6
 AUTH_MAX_BYTES = 64 * 1024
 AUTH_MIN_VALID_SECONDS = 180
+CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+CLAUDE_METADATA_TTL = 60
+CLAUDE_USAGE_MUTEX = threading.Lock()
 STATE = pathlib.Path.home() / ".local/share/srpp-local-ai"
 ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+\-]{0,159}\Z")
 TOOL_ID = re.compile(r"[a-z0-9][a-z0-9_\-]{0,63}\Z")
@@ -65,6 +73,7 @@ MESSAGES = {
     "AI_AUTH_REQUIRED": "無法讀取有效的 Codex 訂閱登入，請在一般 Codex CLI 重新登入",
     "AI_AUTH_EXPIRED": "Codex 登入已失效或需要更新，請在一般 Codex CLI 重新登入",
     "AI_BILLING_UNVERIFIED": "無法確認僅使用訂閱額度，已停止呼叫",
+    "AI_RATE_LIMITED": "費用狀態查詢暫時被限流，請等待退避後再重新載入；確認前不呼叫模型",
     "AI_PAID_CREDITS_ENABLED": "帳戶可使用額外付費點數，已停止呼叫",
     "AI_EXTRA_USAGE_ENABLED": "帳戶已開啟額外付費用量，已停止呼叫",
     "AI_MODEL_UNAVAILABLE": "所選模型目前不可使用",
@@ -92,6 +101,37 @@ class CodexAuthSnapshot:
     access_token: str
     account_id: str
     expires_at: int
+
+
+class ClaudeUsageRateLimited(Problem):
+    def __init__(self, retry_at=None):
+        super().__init__("AI_RATE_LIMITED", 429)
+        self.retry_at = retry_at
+
+
+def retry_after_time(value, now):
+    """Retain a safe timestamp only, never a raw upstream header."""
+    if not isinstance(value, str) or len(value) > 128:
+        return None
+    value = value.strip()
+    try:
+        if re.fullmatch(r"[0-9]+", value):
+            result = now+int(value)
+        else:
+            parsed = email.utils.parsedate_to_datetime(value)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=dt.timezone.utc)
+            result = parsed.timestamp()
+        return max(now, result) if math.isfinite(result) else None
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
+def finite_number(value):
+    try:
+        return not isinstance(value, bool) and isinstance(value, (int, float, decimal.Decimal)) and math.isfinite(value)
+    except (ValueError, OverflowError):
+        return False
 
 
 def utc():
@@ -317,7 +357,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         raise Problem("AI_REMOTE_MODEL_FORBIDDEN")
 
 
-def http_json(url, *, data=None, headers=None, timeout=4, deadline=None):
+def http_json(url, *, data=None, headers=None, timeout=4, deadline=None, claude_usage=False):
     # Empty ProxyHandler explicitly disables both environment and OS proxies.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     req = urllib.request.Request(url, data=None if data is None else encode(data),
@@ -348,6 +388,14 @@ def http_json(url, *, data=None, headers=None, timeout=4, deadline=None):
             return decode(raw)
     except Problem:
         raise
+    except urllib.error.HTTPError as error:
+        retry_at = None
+        if claude_usage and url == CLAUDE_USAGE_URL and error.code == 429:
+            retry_at = retry_after_time(error.headers.get("Retry-After") if error.headers else None, time.time())
+            error.close()
+            raise ClaudeUsageRateLimited(retry_at) from None
+        error.close()
+        raise Problem("AI_TOOL_UNAVAILABLE") from None
     except (OSError, urllib.error.URLError, ValueError):
         raise Problem("AI_TOOL_UNAVAILABLE") from None
 
@@ -471,6 +519,110 @@ class Bridge:
         self.cached = None
         self.cached_until = 0
         self.registry_digest = None
+        self.claude_metadata_positive = None
+
+    def read_claude_backoff(self):
+        path = self.state/"claude-usage-backoff.json"
+        try:
+            directory = self.state.lstat()
+            if (not stat.S_ISDIR(directory.st_mode) or directory.st_uid != os.getuid()
+                    or stat.S_IMODE(directory.st_mode) != 0o700):
+                raise Problem("AI_BILLING_UNVERIFIED")
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+        except FileNotFoundError:
+            return None
+        except OSError:
+            raise Problem("AI_BILLING_UNVERIFIED") from None
+        try:
+            info = os.fstat(fd)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                    or stat.S_IMODE(info.st_mode) != 0o600 or not 0 < info.st_size <= 4096):
+                raise Problem("AI_BILLING_UNVERIFIED")
+            try:
+                value = decode(os.read(fd, 4097))
+            except Problem:
+                raise Problem("AI_BILLING_UNVERIFIED") from None
+            if (not isinstance(value, dict) or set(value) != {"schemaVersion", "failureCount", "recordedAt", "nextAllowedAt"}
+                    or type(value["schemaVersion"]) is not int or value["schemaVersion"] != 1
+                    or type(value["failureCount"]) is not int or not 1 <= value["failureCount"] <= 16):
+                raise Problem("AI_BILLING_UNVERIFIED")
+            for key in ("recordedAt", "nextAllowedAt"):
+                number = value[key]
+                if not finite_number(number) or number < 0:
+                    raise Problem("AI_BILLING_UNVERIFIED")
+            if value["nextAllowedAt"] < value["recordedAt"]:
+                raise Problem("AI_BILLING_UNVERIFIED")
+            return value
+        finally:
+            os.close(fd)
+
+    def claude_cooldown(self):
+        try:
+            value = self.read_claude_backoff()
+        except Problem:
+            self.claude_metadata_positive = None
+            raise
+        if value is not None and time.time() < value["nextAllowedAt"]:
+            self.claude_metadata_positive = None
+            raise Problem("AI_RATE_LIMITED", 429)
+        return value
+
+    @contextlib.contextmanager
+    def claude_usage_lock(self, deadline):
+        fd, acquired = None, False
+        try:
+            if not CLAUDE_USAGE_MUTEX.acquire(timeout=remaining(deadline, CLAUDE_METADATA_SECONDS)):
+                raise Problem("AI_BUSY", 429)
+            acquired = True
+            fd = os.open(self.state/"claude-usage.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, 0o600)
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600:
+                raise Problem("AI_BILLING_UNVERIFIED")
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    time.sleep(remaining(deadline, .02))
+            yield
+        except OSError:
+            raise Problem("AI_BILLING_UNVERIFIED") from None
+        finally:
+            if fd is not None:
+                with contextlib.suppress(OSError):
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                os.close(fd)
+            if acquired:
+                CLAUDE_USAGE_MUTEX.release()
+
+    def record_claude_429(self, previous, retry_at):
+        self.claude_metadata_positive = None
+        now = time.time()
+        count = min(16, (previous["failureCount"] if previous else 0)+1)
+        base = min(900, 60*2**min(count-1, 4))
+        delay = min(900, base+random.uniform(0, 6))
+        recorded = max(now, float(previous["recordedAt"]) if previous else now)
+        next_allowed = max(recorded+delay, float(previous["nextAllowedAt"]) if previous else 0, retry_at or 0)
+        value = {"schemaVersion": 1, "failureCount": count, "recordedAt": recorded, "nextAllowedAt": next_allowed}
+        fd, temporary = tempfile.mkstemp(prefix=".claude-usage-", dir=self.state)
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(encode(value))
+            os.replace(temporary, self.state/"claude-usage-backoff.json")
+        except OSError:
+            raise Problem("AI_BILLING_UNVERIFIED") from None
+        finally:
+            pathlib.Path(temporary).unlink(missing_ok=True)
+
+    def overlay_claude_cooldown(self, catalog):
+        out = copy.deepcopy(catalog)
+        try:
+            self.claude_cooldown()
+        except Problem as error:
+            for tool in out["tools"]:
+                if tool["adapter"] == "claude_cli":
+                    tool.update(available=False, code=error.code)
+        return out
 
     @contextlib.contextmanager
     def codex_session(self):
@@ -720,34 +872,71 @@ class Bridge:
                 continue
         return []
 
-    def claude_proof(self, tool, deadline=None):
+    def claude_proof(self, tool, deadline=None, *, fresh=False):
         deadline = deadline if deadline is not None else time.monotonic()+CLAUDE_METADATA_SECONDS
-        with tempfile.TemporaryDirectory(prefix="srpp-ai-") as cwd:
-            raw = run_process([tool["executable"], "--safe-mode", "auth", "status"], env=clean_environment(), cwd=cwd, timeout=remaining(deadline, 2.5))
-        auth = decode(raw)
-        if auth.get("loggedIn") is not True or auth.get("authMethod") != "claude.ai" or auth.get("subscriptionType") not in {"pro", "max", "ultra"}:
-            raise Problem("AI_SUBSCRIPTION_REQUIRED")
         try:
+            self.claude_cooldown()
+            with tempfile.TemporaryDirectory(prefix="srpp-ai-") as cwd:
+                raw = run_process([tool["executable"], "--safe-mode", "auth", "status"], env=clean_environment(), cwd=cwd, timeout=remaining(deadline, 2.5))
+            auth = decode(raw)
+            if not isinstance(auth, dict) or auth.get("loggedIn") is not True or auth.get("authMethod") != "claude.ai" or auth.get("subscriptionType") not in {"pro", "max", "ultra"}:
+                raise Problem("AI_SUBSCRIPTION_REQUIRED")
             credential = decode(run_process(["/usr/bin/security", "find-generic-password", "-s", "Claude Code-credentials", "-w"], env=clean_environment(), timeout=remaining(deadline, 1.5)))
             token = credential["claudeAiOauth"]["accessToken"]
             if not isinstance(token, str) or not token:
                 raise ValueError()
-            usage = http_json("https://api.anthropic.com/api/oauth/usage", headers={"Authorization": "Bearer "+token,
-                              "anthropic-beta": "oauth-2025-04-20"}, timeout=remaining(deadline, 2.5), deadline=deadline)
+            fingerprint = hashlib.sha256(token.encode()).hexdigest()
+            with self.claude_usage_lock(deadline):
+                previous = self.claude_cooldown()
+                cached = self.claude_metadata_positive
+                if (not fresh and cached is not None and cached["fingerprint"] == fingerprint
+                        and time.monotonic() < cached["until"]):
+                    return
+                try:
+                    usage = http_json(CLAUDE_USAGE_URL, headers={"Authorization": "Bearer "+token,
+                                      "anthropic-beta": "oauth-2025-04-20"}, timeout=remaining(deadline, 2.5),
+                                      deadline=deadline, claude_usage=True)
+                except ClaudeUsageRateLimited as error:
+                    self.record_claude_429(previous, error.retry_at)
+                    raise Problem("AI_RATE_LIMITED", 429) from None
+                self.validate_claude_usage(usage)
+                # A clock rollback while HTTP was in flight must not erase an
+                # unexpired negative deadline saved by an earlier attempt.
+                if previous is not None and time.time() < previous["nextAllowedAt"]:
+                    raise Problem("AI_RATE_LIMITED", 429)
+                self.read_claude_backoff()  # refuse a corrupt/unsafe replacement
+                (self.state/"claude-usage-backoff.json").unlink(missing_ok=True)
+                if not fresh:
+                    self.claude_metadata_positive = {"fingerprint": fingerprint, "until": time.monotonic()+CLAUDE_METADATA_TTL}
         except Problem as error:
+            self.claude_metadata_positive = None
+            if error.code in {"AI_RATE_LIMITED", "AI_SUBSCRIPTION_REQUIRED", "AI_EXTRA_USAGE_ENABLED", "AI_BUSY"}:
+                raise
             if error.code == "AI_TIMEOUT" or time.monotonic() >= deadline:
                 raise Problem("AI_TIMEOUT") from None
             raise Problem("AI_BILLING_UNVERIFIED") from None
-        except (KeyError, ValueError, TypeError):
+        except (OSError, KeyError, ValueError, TypeError):
+            self.claude_metadata_positive = None
             raise Problem("AI_BILLING_UNVERIFIED") from None
+
+    @staticmethod
+    def validate_claude_usage(usage):
+        if not isinstance(usage, dict) or not isinstance(usage.get("extra_usage"), dict):
+            raise Problem("AI_BILLING_UNVERIFIED")
         enabled = usage.get("extra_usage", {}).get("is_enabled")
         if enabled is True:
             raise Problem("AI_EXTRA_USAGE_ENABLED")
-        if enabled is not False or usage.get("spend", {}).get("enabled") is True:
+        spend = usage.get("spend", {})
+        if enabled is not False or not isinstance(spend, dict) or spend.get("enabled") is True:
             raise Problem("AI_BILLING_UNVERIFIED")
         for field in ("five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet"):
             value = usage.get(field)
-            if isinstance(value, dict) and value.get("utilization", 100) >= 100:
+            if value is None:
+                continue
+            if not isinstance(value, dict):
+                raise Problem("AI_BILLING_UNVERIFIED")
+            utilization = value.get("utilization")
+            if not finite_number(utilization) or not 0 <= utilization < 100:
                 raise Problem("AI_BILLING_UNVERIFIED")
 
     @staticmethod
@@ -882,7 +1071,7 @@ class Bridge:
         return [model_entry({"id": r["key"], "label": r.get("display_name", r["key"]), "efforts": [], "defaultEffort": None})
                 for r in rows if r.get("type") == "llm" and r.get("format") in {"gguf", "mlx"} and no_remote(r)]
 
-    def probe(self, tool):
+    def probe(self, tool, *, for_execution=False):
         adapter = tool["adapter"]
         result = {"id": tool["id"], "label": tool["label"], "adapter": adapter,
                   "billingMode": "SUBSCRIPTION" if adapter.endswith("_cli") else "LOCAL", "available": False,
@@ -894,7 +1083,10 @@ class Bridge:
                 self.check_codex_billing(limits)
             elif adapter == "claude_cli":
                 deadline = time.monotonic()+CLAUDE_METADATA_SECONDS
-                self.claude_proof(tool, deadline=deadline)
+                if for_execution:
+                    self.claude_proof(tool, deadline=deadline, fresh=True)
+                else:
+                    self.claude_proof(tool, deadline=deadline)
                 result["models"] = self.claude_models(tool, deadline)
             else:
                 result["models"] = self.local_models(tool)
@@ -911,20 +1103,39 @@ class Bridge:
     def capabilities(self, fresh=False):
         with self.catalog_lock:
             if not fresh and self.cached is not None and time.monotonic() < self.cached_until:
-                return self.cached
+                # Retry once on a later allowed request, not in the same one.
+                needs_retry = False
+                if any(t["adapter"] == "claude_cli" and t.get("code") == "AI_RATE_LIMITED" for t in self.cached["tools"]):
+                    try:
+                        self.claude_cooldown()
+                        needs_retry = True
+                    except Problem:
+                        pass
+                if not needs_retry:
+                    return self.overlay_claude_cooldown(self.cached)
             tools = load_registry(self.registry_path)
-            self.registry_digest = hashlib.sha256(encode(tools)).hexdigest()
+            registry_digest = hashlib.sha256(encode(tools)).hexdigest()
+            previous = self.cached if self.registry_digest == registry_digest else None
+            self.registry_digest = registry_digest
             # At most 16 administrator entries, probed together. Sequential
             # batches would exceed the browser/BFF capability deadline.
             with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
                 entries = list(pool.map(self.probe, tools))
+            if previous is not None:
+                old = {t["id"]:t for t in previous["tools"]}
+                for tool in entries:
+                    known = old.get(tool["id"])
+                    if (tool["adapter"] == "claude_cli" and not tool["available"] and not tool["models"]
+                            and known is not None and known["models"]):
+                        tool["models"] = copy.deepcopy(known["models"])
+                        tool["modelSource"] = "CACHE"
             stable = [{k: row[k] for k in ("id", "label", "adapter", "billingMode", "models")} for row in entries]
             identity = {"registry": tools, "capabilities": stable}
             self.cached = {"schemaVersion": 1, "catalogRevision": hashlib.sha256(encode(identity)).hexdigest(), "tools": entries}
             self.cached_until = time.monotonic()+20
-            return self.cached
+            return self.overlay_claude_cooldown(self.cached)
 
-    def validate_selection(self, selection, catalog):
+    def validate_selection(self, selection, catalog, *, check_available=True):
         if not isinstance(selection, dict) or set(selection) != {"toolId", "model", "effort", "catalogRevision"}:
             raise Problem("AI_INVALID_SELECTION", 400)
         if (not isinstance(selection["toolId"], str) or not TOOL_ID.fullmatch(selection["toolId"])
@@ -934,7 +1145,7 @@ class Bridge:
         if selection["catalogRevision"] != catalog["catalogRevision"]:
             raise Problem("AI_CATALOG_STALE", 409)
         tool = next((v for v in catalog["tools"] if v["id"] == selection["toolId"]), None)
-        if tool is not None and not tool["available"]:
+        if check_available and tool is not None and not tool["available"]:
             raise Problem(tool["code"] or "AI_TOOL_UNAVAILABLE")
         model = next((v for v in tool["models"] if v["id"] == selection["model"]), None) if tool else None
         if model is None or (selection["effort"] not in model["efforts"] if model["efforts"] else selection["effort"] is not None):
@@ -945,11 +1156,16 @@ class Bridge:
         if not isinstance(body, dict) or set(body) != {"selection", "result"} or not isinstance(body["result"], dict):
             raise Problem("AI_INVALID_REQUEST", 400)
         selection = body["selection"]
-        # Registry changes (ports/executables included) invalidate a previously
-        # displayed selection before a subprocess may execute.
+        # This is only the previously displayed structural snapshot. It must
+        # never query all providers or grant permission for model execution.
         with self.catalog_lock:
-            self.validate_selection(selection, self.capabilities(fresh=True))
-            expected_registry = self.registry_digest or ""
+            if self.cached is None or self.registry_digest is None:
+                raise Problem("AI_CATALOG_STALE", 409)
+            current_registry = hashlib.sha256(encode(load_registry(self.registry_path))).hexdigest()
+            if current_registry != self.registry_digest:
+                raise Problem("AI_CATALOG_STALE", 409)
+            self.validate_selection(selection, self.cached, check_available=False)
+            expected_registry = current_registry
         if not self.lock.acquire(blocking=False):
             raise Problem("AI_BUSY", 429)
         try:
@@ -968,6 +1184,9 @@ class Bridge:
                         raise Problem("AI_EXECUTION_FAILED")
                     value = decode(output)
                     if process.returncode or "code" in value:
+                        if value.get("code") == "AI_RATE_LIMITED":
+                            self.claude_metadata_positive = None
+                            self.cached_until = 0
                         raise Problem(value.get("code", "AI_EXECUTION_FAILED"), execution=value.get("execution"))
                     return value
                 except subprocess.TimeoutExpired:
@@ -993,7 +1212,7 @@ class Bridge:
             raise Problem("AI_INVALID_SELECTION", 400)
         # Fresh selected-tool proof is repeated immediately before every model
         # request. No prior cached availability can authorize inference.
-        current = self.probe(tool)
+        current = self.probe(tool, for_execution=True)
         self.validate_selection(selection, {"catalogRevision": selection["catalogRevision"], "tools": [current]})
         started = utc()
         receipt = {"toolId": tool["id"], "requestedModel": selection["model"], "requestedEffort": selection["effort"],

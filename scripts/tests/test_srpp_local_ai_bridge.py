@@ -1,6 +1,8 @@
 """Task 592 isolated tests. No real credentials, accounts or inference requests."""
 import copy
 import base64
+import contextlib
+import http.server
 import importlib.util
 import json
 import os
@@ -74,6 +76,11 @@ class Fixture(unittest.TestCase):
             call(*args, **kwargs)
         self.assertEqual(code, found.exception.code)
         return found.exception
+
+    def preload_catalog(self, catalog=None):
+        self.bridge.cached = copy.deepcopy(catalog or self.catalog())
+        self.bridge.registry_digest = b.hashlib.sha256(b.encode(b.load_registry(self.registry))).hexdigest()
+        self.bridge.cached_until = time.monotonic()+20
 
 
 class BillingTests(Fixture):
@@ -211,6 +218,7 @@ class ContractTests(Fixture):
         self.assertEqual("actual-model", result["execution"]["actualModel"])
 
     def test_busy_does_not_start_process(self):
+        self.preload_catalog()
         self.bridge.lock.acquire()
         try:
             with mock.patch.object(self.bridge, "capabilities", return_value=self.catalog()), mock.patch.object(b.subprocess, "Popen") as popen:
@@ -220,6 +228,7 @@ class ContractTests(Fixture):
             self.bridge.lock.release()
 
     def test_worker_timeout_kills_process_group_releases_slot(self):
+        self.preload_catalog()
         process = mock.Mock(pid=12345, returncode=None)
         process.communicate.side_effect = subprocess.TimeoutExpired("fixture", 120)
         with mock.patch.object(self.bridge, "capabilities", return_value=self.catalog()), mock.patch.object(b.subprocess, "Popen", return_value=process), mock.patch.object(b.os, "killpg") as killpg:
@@ -745,6 +754,7 @@ class CodexAuthSyncTests(Fixture):
         self.assertFalse(projected.exists())
 
     def test_outer_hard_timeout_cleans_parent_root_even_child_finally_cannot_run(self):
+        self.preload_catalog()
         roots, processes = [], []
         original = b.subprocess.Popen
         program = ("import os,pathlib,time;root=pathlib.Path(os.environ['SRPP_AI_OPERATION_ROOT']);"
@@ -991,6 +1001,265 @@ class ClaudeDiscoveryTests(Fixture):
         with mock.patch.object(b, "run_process") as run:
             self.assert_code("AI_TIMEOUT", self.bridge.claude_proof, self.tools[0], deadline=time.monotonic()-1)
             run.assert_not_called()
+
+
+class ClaudeUsageBackoffTests(Fixture):
+    def setUp(self):
+        super().setUp()
+        self.access = "FIXTURE_CLAUDE_ACCESS_A"
+        self.auth = {"loggedIn":True,"authMethod":"claude.ai","subscriptionType":"pro"}
+
+    @contextlib.contextmanager
+    def native(self):
+        def result(argv, **kwargs):
+            value = {"claudeAiOauth":{"accessToken":self.access}} if argv[0] == "/usr/bin/security" else self.auth
+            return b.encode(value)
+        with mock.patch.object(b,"run_process",side_effect=result) as run:
+            yield run
+
+    @contextlib.contextmanager
+    def usage_server(self, status=200, retry_after=None, delay=0):
+        class UsageHandler(http.server.BaseHTTPRequestHandler):
+            def log_message(self,*args):pass
+            def do_GET(self):
+                self.server.calls += 1
+                if self.server.delay:time.sleep(self.server.delay)
+                self.send_response(self.server.response_status)
+                if self.server.retry_after is not None:self.send_header("Retry-After",self.server.retry_after)
+                payload = b.encode(self.server.usage)
+                self.send_header("Content-Length",str(len(payload)));self.end_headers();self.wfile.write(payload)
+        server = http.server.HTTPServer(("127.0.0.1",0),UsageHandler)
+        server.calls, server.response_status, server.retry_after, server.delay = 0,status,retry_after,delay
+        server.usage = {"extra_usage":{"is_enabled":False},"spend":{"enabled":False},"five_hour":{"utilization":1},"seven_day":{"utilization":2}}
+        thread = threading.Thread(target=lambda:server.serve_forever(poll_interval=.01),daemon=True)
+        thread.start()
+        url = f"http://127.0.0.1:{server.server_port}/usage"
+        try:
+            with mock.patch.object(b,"CLAUDE_USAGE_URL",url):yield server,url
+        finally:
+            server.shutdown();server.server_close();thread.join(timeout=1)
+
+    def proof(self, fresh=False):
+        self.bridge.claude_proof(self.tools[0],fresh=fresh)
+
+    def test_real_synthetic_429_cooldown_zero_http_then_valid_200_recovers(self):
+        clock = [1000.0]
+        with self.native(), self.usage_server(429,"60") as (server,_), mock.patch.object(b.time,"time",side_effect=lambda:clock[0]), mock.patch.object(b.random,"uniform",return_value=0):
+            self.assert_code("AI_RATE_LIMITED",self.proof)
+            self.assertEqual(1,server.calls)
+            for _ in range(3):self.assert_code("AI_RATE_LIMITED",self.proof,True)
+            self.assertEqual(1,server.calls)
+            server.response_status=200;clock[0]=1061
+            self.proof(True)
+            self.assertEqual(2,server.calls)
+        self.assertFalse((self.path/"claude-usage-backoff.json").exists())
+
+    def test_metadata_positive_ttl_identity_invalidation_and_fresh_worker(self):
+        monotonic = [100.0]
+        with self.native(), self.usage_server() as (server,_), mock.patch.object(b.time,"monotonic",side_effect=lambda:monotonic[0]):
+            self.proof();self.proof()
+            self.assertEqual(1,server.calls)
+            monotonic[0]=159;self.proof();self.assertEqual(1,server.calls)
+            monotonic[0]=161;self.proof();self.assertEqual(2,server.calls)
+            self.access="FIXTURE_CLAUDE_ACCESS_B";self.proof();self.assertEqual(3,server.calls)
+            self.proof(True);self.assertEqual(4,server.calls)
+            self.auth["authMethod"]="api_key"
+            self.assert_code("AI_SUBSCRIPTION_REQUIRED",self.proof)
+            self.assertEqual(4,server.calls)
+            self.assertIsNone(self.bridge.claude_metadata_positive)
+
+    def test_host_alias_metadata_threads_are_single_flight(self):
+        with self.native(), self.usage_server(delay=.05) as (server,_):
+            with b.concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                list(pool.map(lambda _:self.proof(),range(4)))
+            self.assertEqual(1,server.calls)
+
+    def test_429_invalidates_positive_and_preserves_only_private_negative_state(self):
+        with self.native(),self.usage_server() as (server,_):
+            self.proof();self.assertIsNotNone(self.bridge.claude_metadata_positive)
+            server.response_status=429
+            self.assert_code("AI_RATE_LIMITED",self.proof,True)
+            self.assertIsNone(self.bridge.claude_metadata_positive)
+            path=self.path/"claude-usage-backoff.json"
+            self.assertEqual(0o600,path.stat().st_mode & 0o777)
+            data=json.loads(path.read_text())
+            self.assertEqual({"schemaVersion","failureCount","recordedAt","nextAllowedAt"},set(data))
+            self.assertNotIn(self.access,path.read_text())
+            self.assertNotIn("fingerprint",path.read_text())
+            self.assert_code("AI_RATE_LIMITED",self.proof)
+            self.assertEqual(2,server.calls)
+
+    def test_deferred_retry_once_per_probe_exp_jitter_and_long_server_deadline(self):
+        now=[1000.0]
+        with mock.patch.object(b.time,"time",side_effect=lambda:now[0]),mock.patch.object(b.random,"uniform",return_value=6):
+            previous=None
+            for expected in (66,126,246,486,900,900):
+                self.bridge.record_claude_429(previous,None)
+                state=self.bridge.read_claude_backoff()
+                self.assertEqual(expected,float(state["nextAllowedAt"])-now[0])
+                now[0]=float(state["nextAllowedAt"])+1;previous=state
+            self.bridge.record_claude_429(previous,now[0]+86400)
+            self.assertEqual(now[0]+86400,float(self.bridge.read_claude_backoff()["nextAllowedAt"]))
+
+    def test_retry_after_seconds_date_and_invalid_headers(self):
+        self.assertEqual(4600,b.retry_after_time("3600",1000))
+        date=b.email.utils.format_datetime(b.dt.datetime.fromtimestamp(5000,b.dt.timezone.utc),usegmt=True)
+        self.assertEqual(5000,b.retry_after_time(date,1000))
+        self.assertEqual(1000,b.retry_after_time("0",1000))
+        for value in (None,"-1","NaN","Infinity","garbage","1.2","9"*129):
+            self.assertIsNone(b.retry_after_time(value,1000))
+
+    def test_generic_http_429_is_not_relabelled_for_other_adapters(self):
+        with self.usage_server(429,"60") as (_,url):
+            self.assert_code("AI_TOOL_UNAVAILABLE",b.http_json,url)
+        self.assertFalse((self.path/"claude-usage-backoff.json").exists())
+
+    def test_bad_schema_auth_network_or_403_never_clear_negative_or_reuse_positive(self):
+        now=[1000.0]
+        with mock.patch.object(b.time,"time",side_effect=lambda:now[0]),mock.patch.object(b.random,"uniform",return_value=0):
+            self.bridge.record_claude_429(None,None);now[0]=1061
+            with self.native(),self.usage_server(403) as (server,_):
+                self.assert_code("AI_BILLING_UNVERIFIED",self.proof,True)
+                self.assertEqual(1,server.calls)
+                server.response_status=200;server.usage={}
+                self.assert_code("AI_BILLING_UNVERIFIED",self.proof,True)
+                self.assertTrue((self.path/"claude-usage-backoff.json").exists())
+                server.usage={"extra_usage":{"is_enabled":True}}
+                self.assert_code("AI_EXTRA_USAGE_ENABLED",self.proof,True)
+                self.assertTrue((self.path/"claude-usage-backoff.json").exists())
+                self.assertIsNone(self.bridge.claude_metadata_positive)
+
+    def test_clock_rollback_and_corrupt_state_do_not_allow_query(self):
+        with mock.patch.object(b.time,"time",return_value=1000),mock.patch.object(b.random,"uniform",return_value=0):
+            self.bridge.record_claude_429(None,None)
+        with self.native() as native,self.usage_server() as (server,_),mock.patch.object(b.time,"time",return_value=900):
+            self.assert_code("AI_RATE_LIMITED",self.proof)
+            native.assert_not_called();self.assertEqual(0,server.calls)
+        path=self.path/"claude-usage-backoff.json";path.write_text("not-json")
+        with self.native() as native,self.usage_server() as (server,_):
+            self.assert_code("AI_BILLING_UNVERIFIED",self.proof)
+            native.assert_not_called();self.assertEqual(0,server.calls)
+
+    def test_unsafe_state_files_and_lock_rejected_without_http(self):
+        state=self.path/"claude-usage-backoff.json"
+        target=self.path/"some-file";target.write_text("{}");target.chmod(0o600)
+        state.symlink_to(target)
+        self.assert_code("AI_BILLING_UNVERIFIED",self.bridge.claude_cooldown)
+        state.unlink();os.mkfifo(state,0o600)
+        self.assert_code("AI_BILLING_UNVERIFIED",self.bridge.claude_cooldown)
+        state.unlink();state.write_text("{}");state.chmod(0o644)
+        self.assert_code("AI_BILLING_UNVERIFIED",self.bridge.claude_cooldown)
+        state.unlink()
+        lock=self.path/"claude-usage.lock";lock.symlink_to(target)
+        with self.native(),self.usage_server() as (server,_):
+            self.assert_code("AI_BILLING_UNVERIFIED",self.proof)
+            self.assertEqual(0,server.calls)
+
+    def test_bad_state_schema_nonfinite_and_wrong_owner_fail_closed(self):
+        path=self.path/"claude-usage-backoff.json"
+        for data in ({},[],{"schemaVersion":1,"failureCount":1,"recordedAt":1000,"nextAllowedAt":999},
+                     {"schemaVersion":1,"failureCount":True,"recordedAt":1000,"nextAllowedAt":1060}):
+            path.write_bytes(b.encode(data));path.chmod(0o600)
+            self.assert_code("AI_BILLING_UNVERIFIED",self.bridge.read_claude_backoff)
+        path.write_text('{"schemaVersion":1,"failureCount":1,"recordedAt":1,"nextAllowedAt":1e9999}')
+        self.assert_code("AI_BILLING_UNVERIFIED",self.bridge.read_claude_backoff)
+        original=b.os.fstat
+        def owner(fd):
+            info=original(fd);values=list(info);values[4]=os.getuid()+1;return os.stat_result(values)
+        with mock.patch.object(b.os,"fstat",side_effect=owner):
+            self.assert_code("AI_BILLING_UNVERIFIED",self.bridge.read_claude_backoff)
+
+    def test_capability_cache_overlay_preserves_models_and_other_tools(self):
+        catalog=self.catalog()
+        other=copy.deepcopy(catalog["tools"][0]);other.update(id="codex",adapter="codex_cli")
+        catalog["tools"].append(other);self.preload_catalog(catalog)
+        self.bridge.record_claude_429(None,None)
+        with mock.patch.object(self.bridge,"probe") as probe:
+            out=self.bridge.capabilities()
+        probe.assert_not_called()
+        self.assertFalse(out["tools"][0]["available"])
+        self.assertEqual("AI_RATE_LIMITED",out["tools"][0]["code"])
+        self.assertEqual(catalog["tools"][0]["models"],out["tools"][0]["models"])
+        self.assertTrue(out["tools"][1]["available"])
+
+    def test_cached_unavailable_recovers_on_next_allowed_probe_not_ttl_reset(self):
+        clock=[1000.0]
+        with mock.patch.object(b.time,"time",side_effect=lambda:clock[0]),mock.patch.object(b.random,"uniform",return_value=0):
+            self.bridge.record_claude_429(None,None)
+            self.preload_catalog(self.catalog(available=False,code="AI_RATE_LIMITED"))
+            clock[0]=1061
+            with self.native(),self.usage_server() as (server,_),mock.patch.object(self.bridge,"claude_models",return_value=[model()]):
+                out=self.bridge.capabilities()
+                self.assertTrue(out["tools"][0]["available"]);self.assertEqual(1,server.calls)
+
+    def test_fresh_worker_429_denial_is_once_and_zero_inference(self):
+        with self.native(),self.usage_server(429,"600") as (server,_),mock.patch.object(self.bridge,"infer") as infer:
+            self.assert_code("AI_RATE_LIMITED",self.bridge.execute_inline,self.body())
+            self.assertEqual(1,server.calls);infer.assert_not_called()
+            self.assert_code("AI_RATE_LIMITED",self.bridge.execute_inline,self.body())
+            self.assertEqual(1,server.calls);infer.assert_not_called()
+
+    def child_proof_script(self,url):
+        return ("import importlib.util,pathlib,sys,time,json\n"
+                +f"p=pathlib.Path({str(ROOT/'scripts/srpp-local-ai-bridge.py')!r})\n"
+                +"s=importlib.util.spec_from_file_location('isolated_usage',p);b=importlib.util.module_from_spec(s);sys.modules[s.name]=b;s.loader.exec_module(b)\n"
+                +f"b.CLAUDE_USAGE_URL={url!r}\n"
+                +"b.run_process=lambda argv,**kw:b.encode({'claudeAiOauth':{'accessToken':'FIXTURE_PROCESS_TOKEN'}} if argv[0]=='/usr/bin/security' else {'loggedIn':True,'authMethod':'claude.ai','subscriptionType':'pro'})\n"
+                +f"bridge=b.Bridge(pathlib.Path({str(self.registry)!r}),pathlib.Path({str(self.path)!r}))\n"
+                +"tool=b.load_registry(bridge.registry_path)[0]\n"
+                +"try:bridge.claude_proof(tool,deadline=time.monotonic()+3,fresh=True);print('VERIFIED')\n"
+                +"except b.Problem as e:print(e.code)\n")
+
+    def test_cross_process_singleflight_and_restart_share_negative_cooldown(self):
+        with self.usage_server(429,"600",delay=.05) as (server,url):
+            script=self.child_proof_script(url)
+            children=[subprocess.Popen([sys.executable,"-B","-c",script],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,env=b.clean_environment()) for _ in range(3)]
+            try:
+                results=[p.communicate(timeout=5)[0].decode().strip() for p in children]
+                self.assertEqual(["AI_RATE_LIMITED"]*3,results);self.assertEqual(1,server.calls)
+                restarted=subprocess.run([sys.executable,"-B","-c",script],capture_output=True,env=b.clean_environment(),timeout=5)
+                self.assertEqual("AI_RATE_LIMITED",restarted.stdout.decode().strip());self.assertEqual(1,server.calls)
+            finally:
+                for process in children:
+                    if process.poll() is None:process.kill()
+                    process.wait()
+
+    def test_cross_process_lock_wait_is_bounded_without_fake_429(self):
+        lock=self.path/"claude-usage.lock"
+        fd=os.open(lock,os.O_CREAT|os.O_RDWR,0o600);b.fcntl.flock(fd,b.fcntl.LOCK_EX)
+        with self.usage_server() as (server,url):
+            script=self.child_proof_script(url).replace("time.monotonic()+3","time.monotonic()+.15")
+            try:
+                child=subprocess.run([sys.executable,"-B","-c",script],capture_output=True,env=b.clean_environment(),timeout=2)
+                self.assertEqual("AI_TIMEOUT",child.stdout.decode().strip());self.assertEqual(0,server.calls)
+            finally:b.fcntl.flock(fd,b.fcntl.LOCK_UN);os.close(fd)
+
+    def test_parent_missing_or_changed_catalog_is_stale_without_probe(self):
+        with mock.patch.object(self.bridge,"probe") as probe:
+            self.assert_code("AI_CATALOG_STALE",self.bridge.execute,self.body())
+            self.preload_catalog();self.tools[0]["label"]="changed";self.save()
+            self.assert_code("AI_CATALOG_STALE",self.bridge.execute,self.body())
+            probe.assert_not_called()
+
+    def test_expired_parent_snapshot_codex_does_not_query_claude_claude_worker_once(self):
+        claude=self.tools[0];codex={"id":"codex","label":"Codex","adapter":"codex_cli","executable":"/fixture/codex"}
+        self.tools=[claude,codex];self.save()
+        catalog=self.catalog();other=copy.deepcopy(catalog["tools"][0]);other.update(id="codex",adapter="codex_cli");catalog["tools"].append(other)
+        self.preload_catalog(catalog);self.bridge.cached_until=0
+        original=b.subprocess.Popen
+        with self.usage_server() as (server,url):
+            script=self.child_proof_script(url).split("try:bridge.claude_proof")[0]
+            script+=(f"bridge.codex_rpc=lambda tool,**kw:({limits()!r},{{'data':[{{'id':'test-model','model':'test-model','displayName':'Test','supportedReasoningEfforts':[{{'reasoningEffort':'low'}}],'defaultReasoningEffort':'low'}}]}})\n"
+                     +f"bridge.claude_models=lambda tool,deadline:[{model()!r}]\n"
+                     +"bridge.infer=lambda *args:('synthetic interpretation',None)\n"
+                     +f"print(b.encode(bridge.execute_inline(b.decode(sys.stdin.buffer.read()),{self.bridge.registry_digest!r})).decode())\n")
+            def worker(argv,**kwargs):return original([sys.executable,"-B","-c",script],**kwargs)
+            with mock.patch.object(b.subprocess,"Popen",side_effect=worker),mock.patch.object(self.bridge,"probe") as parent_probe:
+                body=self.body();body["selection"]["toolId"]="codex"
+                self.assertEqual("SUCCEEDED",self.bridge.execute(body)["execution"]["status"])
+                self.assertEqual(0,server.calls)
+                self.assertEqual("SUCCEEDED",self.bridge.execute(self.body())["execution"]["status"])
+                self.assertEqual(1,server.calls);parent_probe.assert_not_called()
 
 
 class InstallTests(Fixture):
