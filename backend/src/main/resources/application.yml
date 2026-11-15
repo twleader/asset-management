@@ -130,6 +130,7 @@ trading-radar:
 srpp:
   settings:
     worker-url: ${SRPP_SETTINGS_WORKER_URL:http://srpp-simulator:8080}
+    ai-token-file: /run/secrets/srpp_local_ai_token
   producer-cron: ${SRPP_PRODUCER_CRON:0 */5 * * * *}
   retention-cron: ${SRPP_RETENTION_CRON:0 25 3 * * *}
   retention-days: ${SRPP_RETENTION_DAYS:7}

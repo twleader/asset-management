@@ -69,7 +69,9 @@ public class SrppSettingsService {
         ArrayNode ds=out.putArray("drafts");drafts.findTop20ByOwnerUserIdOrderByUpdatedAtDesc(owner).forEach(d->ds.add(draftTree(d)));
         ArrayNode rs=out.putArray("simulations");runs.findTop20ByOwnerUserIdOrderByCreatedAtDesc(owner).forEach(r->rs.add(runSummaryTree(r)));
         ArrayNode rel=out.putArray("releases");releases.findTop20ByOwnerUserIdOrderByCreatedAtDesc(owner).forEach(r->rel.add(releaseTree(r,catalog)));
-        out.put("canPublish",user.isAdmin()).put("aiAvailable",ai.available());return SettingsCanonicalJson.bind(out,CenterResponse.class);
+        AiCapabilities caps=ai.capabilities();if(caps==null)caps=new AiCapabilities(1,null,List.of());
+        out.put("canPublish",user.isAdmin()).put("aiAvailable",caps.tools().stream().anyMatch(AiTool::available));
+        out.set("aiTools",SettingsCanonicalJson.tree(caps.tools()));out.put("aiCatalogRevision",caps.catalogRevision());return SettingsCanonicalJson.bind(out,CenterResponse.class);
     }
     public DraftResponse create(String raw) {
         long owner=owner();JsonNode body=body(raw,Set.of("name","baseBundleSha256","values"));String name=name(body);String base=hash(body,"baseBundleSha256");ensureBase(base);
@@ -87,22 +89,30 @@ public class SrppSettingsService {
         return SettingsCanonicalJson.bind(draftTree(Objects.requireNonNull(d)),DraftResponse.class);
     }
     public RunResponse simulate(UUID id,String raw) {
-        long owner=owner();JsonNode body=body(raw,Set.of("revision","mode","seed","simulations"));long revision=revision(body);
+        long owner=owner();JsonNode body=body(raw,Set.of("revision","mode","seed","simulations","aiSelection"));long revision=revision(body);
         String mode=text(body,"mode");if(!Set.of("LOCAL","AI").contains(mode))throw bad("分析模式必須是 LOCAL 或 AI");
+        AiSelection selection=null;
+        if(mode.equals("AI"))selection=SettingsAiSelection.parse(body.get("aiSelection"));
+        else if(body.hasNonNull("aiSelection"))throw new SrppSettingsProblem(400,"AI_INVALID_SELECTION","不呼叫 AI 時不能指定 AI 工具");
+        // Ownership/CAS precedes any host capability I/O; locked validation is repeated at insertion.
+        SrppSettingsDraft owned=drafts.findByIdAndOwnerUserId(id,owner).orElseThrow(SrppSettingsService::notFound);
+        checkRevision(owned,revision);
+        if(selection!=null)ai.validateSelection(selection);
+        final AiSelection frozenSelection=selection;
         int seed=integer(body,"seed",0,Integer.MAX_VALUE,20261114),count=integer(body,"simulations",100,100000,1000);JsonNode cat=catalog();
         ObjectNode input=F.objectNode();try{var latest=assets.getLatestForOwner(owner);if(latest==null)throw new IllegalStateException();input.set("latestAssets",mapper.valueToTree(latest));}catch(RuntimeException unavailable){throw new SrppSettingsProblem(503,"ASSETS_UNAVAILABLE","目前缺少可驗證的資產資料，無法模擬");}input.put("capturedAt",clock.instant().toString());
         String inputHash=SettingsCanonicalJson.hash(input);
         SrppSettingsRun run=tx.execute(s->{SrppSettingsDraft d=lockedDraft(id,owner);checkRevision(d,revision);ensureDraftCurrent(d,cat);
             ObjectNode request=F.objectNode();request.put("schemaVersion",1).put("baseBundleSha256",d.getBaseBundleSha256()).put("configSha256",d.getConfigSha256()).put("catalogVersion",d.getCatalogVersion()).put("seed",seed).put("simulations",count);request.set("values",SettingsCanonicalJson.parse(d.getValuesJson()));request.set("input",input);request.put("inputSha256",inputHash);
-            SrppSettingsRun r=new SrppSettingsRun();r.setId(UUID.randomUUID());r.setOwnerUserId(owner);r.setDraftId(id);r.setDraftRevision(revision);r.setMode(mode);r.setStatus("PROCESSING");r.setAiStatus(mode.equals("AI")?"PENDING":"NOT_REQUESTED");r.setConfigSha256(d.getConfigSha256());r.setInputSha256(inputHash);r.setRequestJson(SettingsCanonicalJson.canonical(request));r.setChangesJson(d.getChangesJson());r.setCreatedAt(clock.instant());return runs.saveAndFlush(r);});
+            SrppSettingsRun r=new SrppSettingsRun();r.setId(UUID.randomUUID());r.setOwnerUserId(owner);r.setDraftId(id);r.setDraftRevision(revision);r.setMode(mode);r.setStatus("PROCESSING");r.setAiStatus(mode.equals("AI")?"PENDING":"NOT_REQUESTED");r.setConfigSha256(d.getConfigSha256());r.setInputSha256(inputHash);r.setRequestJson(SettingsCanonicalJson.canonical(request));r.setAiSelectionJson(frozenSelection==null?null:SettingsCanonicalJson.canonical(SettingsCanonicalJson.tree(frozenSelection)));r.setChangesJson(d.getChangesJson());r.setCreatedAt(clock.instant());return runs.saveAndFlush(r);});
         Objects.requireNonNull(run);UUID runId=run.getId();
-        FutureTask<Void> task=new FutureTask<>(()->{executeRun(runId,owner,run.getRequestJson(),mode);return null;});tasks.put(runId,task);
+        FutureTask<Void> task=new FutureTask<>(()->{executeRun(runId,owner,run.getRequestJson(),mode,frozenSelection);return null;});tasks.put(runId,task);
         ScheduledFuture<?> timeout=deadlines.schedule(()->{Future<?> active=tasks.remove(runId);if(active!=null)active.cancel(true);finish(owner,runId,r->{if(r.getResultJson()!=null){r.setStatus("SUCCEEDED");if("PENDING".equals(r.getAiStatus()))r.setAiStatus("FAILED");}else r.setStatus("FAILED");r.setErrorCode("SIMULATION_TIMEOUT");});},175,TimeUnit.SECONDS);
         try{executor.execute(()->{try{task.run();}finally{timeout.cancel(false);tasks.remove(runId);}});}
         catch(RejectedExecutionException full){timeout.cancel(false);tasks.remove(runId);finish(owner,runId,r->{r.setStatus("FAILED");r.setAiStatus(mode.equals("AI")?"FAILED":"NOT_REQUESTED");r.setErrorCode("QUEUE_FULL");});throw new SrppSettingsProblem(429,"QUEUE_FULL","目前模擬工作較多，請稍後重試");}
         return SettingsCanonicalJson.bind(runTree(run),RunResponse.class);
     }
-    private void executeRun(UUID id,long owner,String raw,String mode) {
+    private void executeRun(UUID id,long owner,String raw,String mode,AiSelection selection) {
         try {
             JsonNode request=SettingsCanonicalJson.parse(raw),result=worker.simulate(request);
             for(String key:List.of("baseBundleSha256","configSha256","inputSha256"))if(!request.path(key).equals(result.path(key)))throw new SrppSettingsProblem(503,"SIMULATION_IDENTITY_MISMATCH","模擬結果身分不一致");
@@ -112,13 +122,18 @@ public class SrppSettingsService {
             String encoded=SettingsCanonicalJson.canonical(decimalResult),digest=SettingsCanonicalJson.hash(decimalResult);
             if(!digest.equals(SettingsCanonicalJson.hash(result)))throw new SrppSettingsProblem(503,"SIMULATION_IDENTITY_MISMATCH","模擬金額編碼或欄位無法精確保存");
             if(!mutate(owner,id,r->{r.setResultJson(encoded);r.setResultSha256(digest);})||Thread.currentThread().isInterrupted())return;
-            String aiStatus="NOT_REQUESTED",interpretation=null,error=null;
+            String aiStatus="NOT_REQUESTED",interpretation=null,error=null,execution=null;
             if(mode.equals("AI")) {
-                if(!ai.available())aiStatus="NOT_CONFIGURED";
-                else try{interpretation=ai.interpret(decimalResult.deepCopy());aiStatus="SUCCEEDED";}catch(Exception failure){aiStatus="FAILED";error="AI_FAILED";}
+                try {
+                    AiResult response=ai.interpret(decimalResult.deepCopy(),selection);
+                    interpretation=response.text();execution=SettingsCanonicalJson.canonical(SettingsCanonicalJson.tree(response.execution()));aiStatus="SUCCEEDED";
+                }catch(SrppSettingsAiFailure failure){
+                    aiStatus="FAILED";error=failure.code();
+                    if(failure.execution()!=null)execution=SettingsCanonicalJson.canonical(SettingsCanonicalJson.tree(failure.execution()));
+                }catch(Exception failure){aiStatus="FAILED";error="AI_EXECUTION_FAILED";}
             }
-            final String finalAi=aiStatus,finalText=interpretation,finalError=error;
-            finish(owner,id,r->{r.setStatus("SUCCEEDED");r.setAiStatus(finalAi);r.setAiInterpretation(finalText);r.setErrorCode(finalError);});
+            final String finalAi=aiStatus,finalText=interpretation,finalError=error,finalExecution=execution;
+            finish(owner,id,r->{r.setStatus("SUCCEEDED");r.setAiStatus(finalAi);r.setAiInterpretation(finalText);r.setAiExecutionJson(finalExecution);r.setErrorCode(finalError);});
         } catch(Exception failure){String code=failure instanceof SrppSettingsProblem p?p.code():"SIMULATION_FAILED";finish(owner,id,r->{r.setStatus(r.getResultJson()==null?"FAILED":"SUCCEEDED");r.setAiStatus(mode.equals("AI")?"FAILED":"NOT_REQUESTED");r.setErrorCode(code);});}
     }
     static void validateResult(JsonNode result) {
@@ -234,7 +249,7 @@ public class SrppSettingsService {
         ObjectNode summary=runTree(r,false);summary.putNull("presentation");return summary;
     }
     private ObjectNode runTree(SrppSettingsRun r){return runTree(r,true);}
-    private ObjectNode runTree(SrppSettingsRun r,boolean includeResult){ObjectNode n=F.objectNode();n.put("id",r.getId().toString()).put("draftId",r.getDraftId().toString()).put("draftRevision",r.getDraftRevision()).put("mode",r.getMode()).put("status",r.getStatus()).put("configSha256",r.getConfigSha256()).put("inputSha256",r.getInputSha256()).put("resultSha256",r.getResultSha256()).put("aiStatus",r.getAiStatus()).put("aiInterpretation",r.getAiInterpretation()).put("errorCode",r.getErrorCode()).put("createdAt",r.getCreatedAt().toString());if(r.getCompletedAt()==null)n.putNull("completedAt");else n.put("completedAt",r.getCompletedAt().toString());n.set("deterministicResult",!includeResult||r.getResultJson()==null?NullNode.instance:SettingsCanonicalJson.parse(r.getResultJson()));n.set("changes",SettingsCanonicalJson.parse(r.getChangesJson()));SrppSettingsDraft d=drafts.findByIdAndOwnerUserId(r.getDraftId(),r.getOwnerUserId()).orElse(null);eligibility(n,d,r);return n;}
+    private ObjectNode runTree(SrppSettingsRun r,boolean includeResult){ObjectNode n=F.objectNode();n.put("id",r.getId().toString()).put("draftId",r.getDraftId().toString()).put("draftRevision",r.getDraftRevision()).put("mode",r.getMode()).put("status",r.getStatus()).put("configSha256",r.getConfigSha256()).put("inputSha256",r.getInputSha256()).put("resultSha256",r.getResultSha256()).put("aiStatus",r.getAiStatus()).put("aiInterpretation",r.getAiInterpretation()).put("errorCode",r.getErrorCode()).put("createdAt",r.getCreatedAt().toString());if(r.getCompletedAt()==null)n.putNull("completedAt");else n.put("completedAt",r.getCompletedAt().toString());n.set("deterministicResult",!includeResult||r.getResultJson()==null?NullNode.instance:SettingsCanonicalJson.parse(r.getResultJson()));n.set("aiSelection",r.getAiSelectionJson()==null?NullNode.instance:SettingsCanonicalJson.parse(r.getAiSelectionJson()));n.set("aiExecution",r.getAiExecutionJson()==null?NullNode.instance:SettingsCanonicalJson.parse(r.getAiExecutionJson()));n.set("changes",SettingsCanonicalJson.parse(r.getChangesJson()));SrppSettingsDraft d=drafts.findByIdAndOwnerUserId(r.getDraftId(),r.getOwnerUserId()).orElse(null);eligibility(n,d,r);return n;}
     private void eligibility(ObjectNode n,SrppSettingsDraft d,SrppSettingsRun r){ArrayNode reasons=blocked(d,r,user.isAdmin());n.put("publishEligible",reasons.isEmpty());n.set("blockedReasons",reasons);}
     private ArrayNode blocked(SrppSettingsDraft d,SrppSettingsRun r,boolean admin){ArrayNode reasons=F.arrayNode();if(!admin)reason(reasons,"ADMIN_REQUIRED","正式發布需要管理者權限");if(d==null){reason(reasons,"DRAFT_CHANGED","草稿已不存在");return reasons;}if(!authority.policy().bundleHash().equals(d.getBaseBundleSha256()))reason(reasons,"BASE_POLICY_CHANGED","正式規則已更新，請以新基準建立草稿");try {CatalogAuthority current=catalogAuthority();
             if(!current.sha256().equals(d.getCatalogSha256())||!current.document().path("catalogVersion").asText().equals(d.getCatalogVersion())

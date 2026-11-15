@@ -1,0 +1,46 @@
+{
+  "scope": "HOST_BRIDGE_SUBSCRIPTION_SMOKE",
+  "cases": [
+    {
+      "syntheticInput": true,
+      "tool": "codex",
+      "execution": {
+        "actualModel": null,
+        "adapterVersion": "1",
+        "billingMode": "SUBSCRIPTION",
+        "code": null,
+        "completedAt": "2026-11-15T10:42:21.565806Z",
+        "modelEvidence": "REQUESTED_ONLY",
+        "requestedEffort": "low",
+        "requestedModel": "gpt-6-luna",
+        "startedAt": "2026-11-15T10:42:14.878230Z",
+        "status": "SUCCEEDED",
+        "toolId": "codex"
+      },
+      "textLength": 203,
+      "textPresent": true
+    },
+    {
+      "syntheticInput": true,
+      "tool": "claude",
+      "execution": {
+        "actualModel": null,
+        "adapterVersion": "1",
+        "billingMode": "SUBSCRIPTION",
+        "code": null,
+        "completedAt": "2026-11-15T10:38:26.947991Z",
+        "modelEvidence": "REQUESTED_ONLY",
+        "requestedEffort": "low",
+        "requestedModel": "claude-sonnet-5-5",
+        "startedAt": "2026-11-15T10:38:17.879002Z",
+        "status": "SUCCEEDED",
+        "toolId": "claude"
+      },
+      "textLength": 523,
+      "textPresent": true
+    }
+  ],
+  "noApiKey": true,
+  "freshBillingPreflightRequired": true,
+  "fullModelTextRetained": false
+}

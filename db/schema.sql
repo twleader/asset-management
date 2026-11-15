@@ -263,10 +263,11 @@ CREATE FUNCTION public.guard_srpp_settings_run_update() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
- IF ROW(NEW.id,NEW.owner_user_id,NEW.draft_id,NEW.draft_revision,NEW.mode,NEW.config_sha256,NEW.input_sha256,NEW.request_json,NEW.changes_json,NEW.created_at)
- IS DISTINCT FROM ROW(OLD.id,OLD.owner_user_id,OLD.draft_id,OLD.draft_revision,OLD.mode,OLD.config_sha256,OLD.input_sha256,OLD.request_json,OLD.changes_json,OLD.created_at)
+ IF ROW(NEW.id,NEW.owner_user_id,NEW.draft_id,NEW.draft_revision,NEW.mode,NEW.config_sha256,NEW.input_sha256,NEW.request_json,NEW.changes_json,NEW.created_at,NEW.ai_selection_json)
+ IS DISTINCT FROM ROW(OLD.id,OLD.owner_user_id,OLD.draft_id,OLD.draft_revision,OLD.mode,OLD.config_sha256,OLD.input_sha256,OLD.request_json,OLD.changes_json,OLD.created_at,OLD.ai_selection_json)
  OR OLD.status <> 'PROCESSING'
- OR (OLD.result_json IS NOT NULL AND ROW(NEW.result_json,NEW.result_sha256) IS DISTINCT FROM ROW(OLD.result_json,OLD.result_sha256)) THEN
+ OR (OLD.result_json IS NOT NULL AND ROW(NEW.result_json,NEW.result_sha256) IS DISTINCT FROM ROW(OLD.result_json,OLD.result_sha256))
+ OR (OLD.ai_execution_json IS NOT NULL AND NEW.ai_execution_json IS DISTINCT FROM OLD.ai_execution_json) THEN
  RAISE EXCEPTION 'SRPP settings run evidence is immutable' USING ERRCODE='23514'; END IF;
  RETURN NEW;
 END $$;
@@ -2728,6 +2729,8 @@ CREATE TABLE public.srpp_settings_run (
     error_code character varying(80),
     created_at timestamp with time zone NOT NULL,
     completed_at timestamp with time zone,
+    ai_selection_json text,
+    ai_execution_json text,
     CONSTRAINT srpp_settings_run_ai_status_check CHECK (((ai_status)::text = ANY ((ARRAY['NOT_REQUESTED'::character varying, 'PENDING'::character varying, 'SUCCEEDED'::character varying, 'FAILED'::character varying, 'NOT_CONFIGURED'::character varying])::text[]))),
     CONSTRAINT srpp_settings_run_config_sha256_check CHECK (((config_sha256)::text ~ '^[a-f0-9]{64}$'::text)),
     CONSTRAINT srpp_settings_run_draft_revision_check CHECK ((draft_revision > 0)),

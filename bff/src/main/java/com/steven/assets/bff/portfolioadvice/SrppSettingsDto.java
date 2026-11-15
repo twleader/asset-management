@@ -31,8 +31,8 @@ public final class SrppSettingsDto {
     @JsonInclude(JsonInclude.Include.ALWAYS)
     public record CenterResponse(CatalogResponse catalog,CurrentResponse current,List<DraftResponse> drafts,
             List<RunResponse> simulations,List<ReleaseResponse> releases,boolean canPublish,boolean aiAvailable,
-            List<FieldGroup> fieldGroups) implements Response {
-        public CenterResponse {drafts=list(drafts);simulations=list(simulations);releases=list(releases);fieldGroups=list(fieldGroups);}
+            List<FieldGroup> fieldGroups,List<AiTool> aiTools,String aiCatalogRevision) implements Response {
+        public CenterResponse {drafts=list(drafts);simulations=list(simulations);releases=list(releases);fieldGroups=list(fieldGroups);aiTools=list(aiTools);}
     }
     @JsonInclude(JsonInclude.Include.ALWAYS)
     public record BlockReason(String code,String message) {}
@@ -53,9 +53,31 @@ public final class SrppSettingsDto {
     public record RunResponse(String id,String draftId,long draftRevision,String mode,String status,String configSha256,
             String inputSha256,String resultSha256,String aiStatus,String aiInterpretation,String errorCode,String createdAt,
             String completedAt,SimulationEnvelope deterministicResult,List<ChangeResponse> changes,boolean publishEligible,
-            List<BlockReason> blockedReasons,Presentation presentation) implements Response {
+            List<BlockReason> blockedReasons,Presentation presentation,AiSelection aiSelection,AiExecution aiExecution) implements Response {
         public RunResponse {changes=list(changes);blockedReasons=list(blockedReasons);}
     }
+    /** Infrastructure protocol capabilities; not investment business classifications. */
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record AiModel(String id,String label,List<String> efforts,String defaultEffort) {
+        public AiModel {efforts=list(efforts);}
+    }
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record AiTool(String id,String label,String adapter,String billingMode,boolean available,String code,
+            String modelSource,List<AiModel> models) {
+        public AiTool {models=list(models);}
+    }
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record AiCapabilities(int schemaVersion,String catalogRevision,List<AiTool> tools) {
+        public AiCapabilities {tools=list(tools);}
+    }
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record AiSelection(String toolId,String model,String effort,String catalogRevision) {}
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record AiExecution(String toolId,String requestedModel,String requestedEffort,String actualModel,
+            String modelEvidence,String billingMode,String adapterVersion,String startedAt,String completedAt,
+            String status,String code) {}
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    public record AiResult(String text,AiExecution execution) {}
     @JsonInclude(JsonInclude.Include.ALWAYS)
     public record ReleaseResponse(String id,String draftId,String simulationId,String requestSha256,String configSha256,
             String baseBundleSha256,String createdAt,String status) implements Response {}

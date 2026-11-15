@@ -22,6 +22,8 @@ public class SrppSettingsRun {
     @Column(name="request_json",nullable=false,columnDefinition="text") private String requestJson;
     @Column(name="result_json",columnDefinition="text") private String resultJson;
     @Column(name="changes_json",nullable=false,columnDefinition="text") private String changesJson;
+    @Column(name="ai_selection_json",columnDefinition="text") private String aiSelectionJson;
+    @Column(name="ai_execution_json",columnDefinition="text") private String aiExecutionJson;
     @Column(name="ai_status",nullable=false,length=20) private String aiStatus;
     @Column(name="ai_interpretation",columnDefinition="text") private String aiInterpretation;
     @Column(name="error_code",length=80) private String errorCode;

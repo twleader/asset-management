@@ -6941,7 +6941,7 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 1. 頁面提供 SRPP 設定中心，顯示來源 bundle、model、catalog 身分與當前值；原配置建議及個人理財條件保留為既有功能，不將其固定報酬逐年試算誤稱完整 SRPP 模型。catalog 由 SRPP 維護、同步為資產端唯讀產物；欄位含 id、台灣繁體中文 label/group/unit、type、bounds、default/current value、simulationSupported、formalSupported、impact 與限制說明。有限欄位涵退休日期／終點年齡、分齡生活費／長照、大額支出、通膨、既有標的配置、股票部位上下界、債券買價回撤／溢價／每日每週額度與 KD 買賣門檻。六項風險類別／上限與交易禁止邊界維持唯讀；總分審慎／防禦門檻以新 V2 model-driven rubric 正式可調，保留 V1 原樣；新增公式不藉任意 JSON/code 輸入執行。
 2. 已登入使用者僅能讀寫自己的草稿、模擬及發布請求；全域正式發布限 ADMIN，BFF 與 business 皆檢查。ID 不作授權，依 owner 查詢；無身份拒絕。草稿名長度 1..100，值必須符合 catalog 白名單／型別／範圍及跨欄位一致性；配置鍵限既有標的、非負有限數、合計為 1。revision CAS 拒絕覆蓋較新修改，base bundle 漂移不得發布。
 3. 每次模擬凍結 owner 最新資產來源及 as-of、完整設定、revision、bundle/model/catalog/config/input hashes、seed、path count 與引擎版本。baseline 與 scenario 使用同一輸入及相同亂數；回傳成功率／資產分位路徑／資金缺口等實際可算結果及模型限制。未被退休模型表示的日頻門檻明示 NOT_MODELED，以獨立規則預覽呈現其改動，不編造退休成功率效果。必要資產／來源缺漏回具名 unavailable/failed，不取另一owner、不用過期快取假裝本輪資料、不手動重跑正式報告。
-4. 模式僅 LOCAL／AI。LOCAL 完全不建立 AI client、不檢查 AI key、不發 AI 或網路搜尋請求；兩模式共用同一 deterministic result。AI 僅解讀凍結結果，沿既有模型設定與 SDK，不修改計算數值、規則或發動發布。AI 缺 key／失敗須明示並保留可驗證計算結果；不得把本機文字冒充 AI。耗時計算經有界背景工作與 timeout，前端可查進度，重啟中斷可辨識。
+4. 模式僅 LOCAL／AI。LOCAL 完全不建立 AI client、不檢查 AI key、不發 AI 或網路搜尋請求；兩模式共用同一 deterministic result。AI 僅解讀凍結結果，執行工具、模型及思考程度依 Task 592 的訂閱／本機契約選擇，不修改計算數值、規則或發動發布。AI 不可用／失敗須明示並保留可驗證計算結果；不得把本機文字冒充 AI。耗時計算經有界背景工作與 timeout，前端可查進度，重啟中斷可辨識。
 5. 儲存、模擬與正式發布是不同動作。發布須綁當下成功模擬的 draft revision/config hash，產生不可變 PENDING_RELEASE 請求及可下載的封閉 payload（包含 base bundle/model/catalog/config/result/request hashes），可重複讀取且不得由瀏覽器宣稱 ACTIVE。Unsupported formal changes 具名拒絕。頁面顯示正式與草稿差異及限制。
 6. 受控 host CLI 驗證 request 身分、白名單／型別／base bundle、原始來源乾淨及 managed feature worktree，產生確定性的來源變更和發布收據；不給 business 容器 Docker socket、Git 憑證或任意 shell/code 執行。正式採用沿雙 repo 規則／runtime／manifest／authority／golden／insert-only registry／no-ff Git／部署流程，驗證不通過就保持待發布。ACTIVE 只能由部署內嵌收據與目前 bundle/model/config、registry exact row 及 authority 全部相符推導，歷史發布不得隨便再稱現行。此次功能部署保留現有投資數值，不能為示範任意改正式投資決策。
 7. 實作需有獨立 spec/arch 審查、owner／ADMIN／CAS／hash／invalid field／stale run／LOCAL 零 AI／AI failure／release receipt／canonical 模型測試與前端 build；部署重建並 recreate 必要服務，實際操作新 API 與畫面。DB 增量需冪等、同步 schema.sql；riskMode 文字契約與新門檻同步且走完整renderer／identity／registry發布鏈；本中心只用登入 BFF，不新增公網／9090 路由、不改排程／寄信／券商狀態。
@@ -7009,3 +7009,16 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 - [ ] 210.3 D220（policy 2.68.0／model 3.24.0、VOO_BRIDGE_D220）VOO暫時替代：美元偏貴且TWSE與0050/00881各自符合至少20%重挫，可用全部尚未投入VOO目標缺口各半暫配兩檔，須固定獨立wave/額度/歸屬及另設暫時symbol容量；不得把核心持股重標為暫時額度，股票/資金硬上限不變。美元不再偏貴後，仍待原台股合格賣出，再以已交割資金分批轉VOO。
 - [ ] 210.4 本次bridge只同步規則與離線診斷依據，不新增正式API執行bridge量的能力；既有API BLOCKED/UNAVAILABLE/零量不得由本機Python診斷覆寫。配置可讀取不等於bridge金融採用；正式採用與新hash API可用性須分別報告。
 - [ ] 210.5 不新增HTTP路由、DTO、DB schema、行情來源、排程、報告、交易或郵件；本階段僅在獨立feature worktree準備具體可審閱結果，commit/merge/push、正式registry與部署待主代理凍結最終來源後另行協調。
+
+
+### Task 592：訂閱／本機 AI 工具、模型與思考程度（Requirement 208 修訂）
+
+使用者希望情境模擬可選可擴充的 AI 執行工具、model 與 effort，沿用既有訂閱或本機模型，禁止額外 API 計費。本修訂取代原 AI 直接 Anthropic SDK／共用 PortfolioAdvice 模型設定；其他功能的既有 AI 設定不在本次變更範圍。
+
+1. 中心回傳 typed 工具清單、可用狀態與原因、模型與每模型 effort 清單、billingMode、catalogRevision。工具註冊由 host 設定檔維護，可新增相同 adapter 的工具與模型，不將三個工具或模型寫死於前端。首批支援 Codex CLI、Claude CLI、Ollama 與本機 OpenAI 相容服務（例如 LM Studio）；未安裝／未啟動可列出但不可選為可用。無 effort 能力者僅接受 null，顯示不適用，不能把 temperature 當 effort。
+2. AI 模式提交明示 aiSelection={toolId,model,effort,catalogRevision}，後端及 host 均精確驗證，不接受任意指令／URL／額外參數。不合組合於模型執行前拒絕；LOCAL 不呼叫 bridge／AI，也不接受非空 aiSelection。歷史 run 缺選擇欄位可讀且標未記錄。
+3. CLI 僅接受可證實的個人訂閱登入，使用乾淨環境與隔離工作目錄、禁用工具／MCP／hook／搜尋，排除 API key、apiKeyHelper、proxy、自訂provider與付費fallback。每次執行須重新驗證登入、費用證據與選擇；有 API-only／無訂閱／不明費用／可自動超額付費者，零模型請求並具名拒絕。僅登入成功不構成無額外費用證明。Codex若credits.hasCredits或unlimited為true或未知即拒絕；Claude若extra_usage.is_enabled非明確false即拒絕。不得修改使用者帳戶計費設定。
+4. 本機模型 adapter 僅連線固定 loopback IP及管理端設定的固定port，禁止remote URL、redirect、proxy及雲端模型（含Ollama remote/cloud）。模型實際本機存在方可用；能力不明之effort不得提供。沒有任何自動換工具／模型／付款／買點數／API fallback。
+5. host bridge只綁127.0.0.1，token保護，Docker業務端透過host.docker.internal連線；token不回瀏覽器、不寫Git或日誌，host設定也不允許瀏覽器寫入。bridge只接受受控JSON與凍結結果，不讀帳戶庫存／DB、不改檔案或規則、不交易；設請求／回應大小上限、有限併發、逾時與子程序群組終止。瀏覽器沿原頁BFF，不新增9090／公網入口。
+6. 選擇及執行收據（所選工具／model／effort、billingMode、adapter版本、開始／完成時間、狀態／原因）為不可由後續設定覆寫的歷史證據；實際回報model與所選model分開，無provider證據時不宣稱已驗證實際模型。與deterministicResult及其hash完全分離；AI失敗保留數值及具名錯誤，不生成冒充AI文字。
+7. 實作驗證須涵蓋費用預檢拒絕且零模型請求、環境／設定隔離、非法選擇、非本機endpoint／cloud模型拒絕、LOCAL零AI、owner隔離、選擇收據與hash不變、AI失敗保留數值、逾時清理與無fallback。完成frontend測試／build、獨立spec與arch審查、host服務及必要容器rebuild/recreate、實際模型解讀與登入頁面流程驗證後，兩段式commit／merge main／push。若CLI因費用證據不能安全執行，須正確顯示不可用並實測拒絕路徑；本機模型成功證據不得冒稱CLI成功。只改本系統解讀功能，不改SRPP規則包／正式發布路徑／報告排程。

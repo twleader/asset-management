@@ -14040,3 +14040,14 @@ Java正式計算已從同版model讀高股息目標/組上限、分配目標及�
 VOO暫時替代規則仍是SRPP saved-evidence budget diagnostics：尚無正式9090 module/closed-fact contract、歸屬與pending/settlement執行證據整合，本次不擴充該wire或偽造執行量。即使model中enabled為true，也只代表使用者採用該條件政策，不代表API可產生正數bridge leg。核心目標與額外暫時容量不能混為一欄；既有正式BLOCKED及零量保留。
 
 本階段不修改Swagger/路由/DB/排程，不執行正式registry SQL或部署；最終source hash凍結且主代理驗收後才以獨立後續release步驟處理雙repoGit、insert-only登錄、受控服務重建與精確hash業務API回讀，任何缺口必須保留原狀態。
+
+
+## Task 592：訂閱／本機 AI 解讀架構
+
+既有 SrppSettingsAiPort 改為 capabilities、validateSelection 與 interpret(frozenResult,selection)，由 SrppSettingsLocalAi HTTP adapter 取代 SrppSettingsAnthropicAi；不影響 PortfolioAdviceService 的其他功能。backend與BFF的CenterResponse均增加 typed aiTools 與 aiCatalogRevision，RunResponse均增加 aiSelection、aiExecution，SrppSettingsPresentation.center/run必須完整攜帶新欄位與舊列null；部署重建business-services、bff、frontend。舊 aiAvailable 保留為工具至少一組可用的摘要。simulate body 增 aiSelection，其他CAS／owner／deterministic engine 契約不變。選擇先驗證，再排隊；執行時再次驗證。LOCAL path 不探測 AI。
+
+新增 host Python bridge，以標準函式庫實作，固定 GET /capabilities 與 POST /interpret，兩者均驗 Bearer token。bind 127.0.0.1:8766，後端固定host.docker.internal:8766；token以只讀檔案mount給business，host從0600檔讀取。管理用host JSON registry定義工具id／label／adapter／固定執行檔與模型設定，不接受網頁傳入命令／endpoint；新增同adapter工具不需修改前端。API tree用不可變typed DTO完整驗證；回應錯誤僅輸出具名code，不洩漏CLI原始stderr／token。
+
+Codex adapter從無推論的app-server model/list取得slug與supportedReasoningEfforts（不可用時得讀本機models_cache.json並標CACHE），限定subscription可用且非hidden模型；Claude從明示host模型能力清單取得，標示CONFIGURED，執行錯誤不得暗換。Ollama /api/tags + /api/show驗本機模型與capabilities，local_openai /v1/models驗本機模型，可配置已驗的effort能力；不支援時null。未知adapter不可用。CLI使用argv而非shell，乾淨環境、隔離cwd、無工具/MCP/hooks，強制subscription auth；依Requirement208修訂每次讀費用證據，未知即關閉。Ollama及local_openai只允許numeric loopback端點、不跟redirect、不使用環境proxy、不發雲端model或工具請求。
+
+SrppSettingsRun新增可空ai_selection_json與ai_execution_json（text）保存獨立歷史snapshot，屬歷史執行證據例外，不保存可推導業務分類。既有列null合法；selection與execution均不進worker request、不進input/config/result hashes或release payload。Liquibase增量須冪等，部署後重產db/schema.sql。橋接的timeout小於既有整體175秒deadline，CLI process group與HTTP timeout有界，host只允許一個模型執行、滿載回具名BUSY。host服務以使用者LaunchAgent持續運行，安裝腳本保留既有registry／token、路徑指向授權部署來源；不掛載整個home或CLI憑證到Docker。
