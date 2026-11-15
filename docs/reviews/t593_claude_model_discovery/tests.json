@@ -1,0 +1,20 @@
+{
+  "scope": "TASK593_PYTHON_VERIFICATION",
+  "testCommand": "python3 -B -m unittest discover -s scripts/tests -p test_srpp_local_ai_bridge.py",
+  "tests": 59,
+  "failures": 0,
+  "errors": 0,
+  "sourceSha256": "1e6ef93837540172a655da292533140458ff8f8184e72bc66c61a19074ba6d89",
+  "metadataFixtureSha256": "b9d372fac228eec5ba31518d2b8480d149ecfb61de7852b6aeaa2ed07a6db5e3",
+  "specReview": "PASS (0 critical/major, 1 minor task-template formatting)",
+  "archReview": "PASS (0 findings)",
+  "sourceConstraints": [
+    "initialize control request only; no user prompt or model turn",
+    "CLI resolvedModel and supportedEffortLevels; no fixed three-model seed",
+    "fourth safe-version model fixture accepted",
+    "legacy registry models preserved but not used to constrain discovery",
+    "Fable/context/unknown fee/schema rejected without inference",
+    "shared deadline and process/pipe cleanup",
+    "extra complete or partial stdout events rejected"
+  ]
+}

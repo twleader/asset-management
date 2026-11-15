@@ -7022,3 +7022,15 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 5. host bridge只綁127.0.0.1，token保護，Docker業務端透過host.docker.internal連線；token不回瀏覽器、不寫Git或日誌，host設定也不允許瀏覽器寫入。bridge只接受受控JSON與凍結結果，不讀帳戶庫存／DB、不改檔案或規則、不交易；設請求／回應大小上限、有限併發、逾時與子程序群組終止。瀏覽器沿原頁BFF，不新增9090／公網入口。
 6. 選擇及執行收據（所選工具／model／effort、billingMode、adapter版本、開始／完成時間、狀態／原因）為不可由後續設定覆寫的歷史證據；實際回報model與所選model分開，無provider證據時不宣稱已驗證實際模型。與deterministicResult及其hash完全分離；AI失敗保留數值及具名錯誤，不生成冒充AI文字。
 7. 實作驗證須涵蓋費用預檢拒絕且零模型請求、環境／設定隔離、非法選擇、非本機endpoint／cloud模型拒絕、LOCAL零AI、owner隔離、選擇收據與hash不變、AI失敗保留數值、逾時清理與無fallback。完成frontend測試／build、獨立spec與arch審查、host服務及必要容器rebuild/recreate、實際模型解讀與登入頁面流程驗證後，兩段式commit／merge main／push。若CLI因費用證據不能安全執行，須正確顯示不可用並實測拒絕路徑；本機模型成功證據不得冒稱CLI成功。只改本系統解讀功能，不改SRPP規則包／正式發布路徑／報告排程。
+
+
+### Task 593：Claude CLI 模型與 effort 自動探索（Requirement 208 修訂）
+
+本修訂取代Task592中Claude採固定三個CONFIGURED模型的部分：Claude工具與Codex一樣，從已安裝CLI取得執行時模型metadata，不由host預配置模型清單限制選項。
+
+1. 使用既有隔離環境、空tools/MCP/hooks與既有訂閱登入，以Claude CLI stream-json的initialize control protocol取得SDK supportedModels()同源的models；只送控制初始化，零user prompt／零模型推論。模型及supportedEffortLevels由實際CLI回傳，不在程式碼／registry預設寫死三個model或共用effort。來源標RUNTIME。
+2. 使用CLI resolvedModel作可驗證的具體模型id，依同id去重；default／opusplan等會隱含路由或切換的行為模式不作獨立模型。對未知或不完整metadata安全拒絕，不拼湊effort；supportsEffort明確false為[]/null。只提供CLI明確支援的effort，預設由metadata或該已回報effort清單內的固定選擇規則取得，不能發明能力。
+3. 原Task592的無額外費用限制完整保留。訂閱模型目錄不等於免費權限：新增Fable／extended-context等可能需要usage credits的條目，必須有可查證的subscription included證據才可執行；已標需付費或無法證明者不得因自動探索而開放推論。不能單靠名稱、API models目錄或extra_usage=false推論每個模型已包含於方案，也不能移除付費修飾後當免費同名模型。若CLI目前安全可用模型恰為三個，須如實回報，不能為湊數放寬費用。
+4. 原有registry的Claude models鍵作相容性讀取但不再決定可選模型或effort，不改寫使用者registry／token；新建registry不再產生Claude固定models。探索失敗、未知協定、逾時或空清單均具名不可用，禁止回退固定清單／付費API／改模型。只允初始化控制回應，發現模型回合或工具執行事件即拒絕。
+5. canonical模型／effort及必要CLI設定變化納catalogRevision，額度／時間不納。既有20秒能力快取保留，每次解讀前立即重新驗證當前模型／effort及費用；過期或移除的選擇拒絕，舊run收據仍可讀。初始化程序／輸出／timeout均有界，必須關閉pipe並清理子程序，不拖垮現有BFF讀取期限。
+6. 不新增DB、9090、公網API或SRPP規則變更；既有typed capabilities及modelSource=RUNTIME即可承載。須測真實metadata結構、超過三模型fixture、去重／費用／非法effort／未知schema／timeout／零推論／舊registry相容、其他工具及既有費用閘門回歸，並完成host服務與業務API實機回讀、至少一個訂閱內Claude model／effort解讀成功、獨立spec/arch審查、commit／main no-ff merge／push及main來源部署驗證。
