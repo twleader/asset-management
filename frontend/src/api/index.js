@@ -440,7 +440,34 @@ export const bffApi = {
         skipErrorToast: true
       }),
       publishDraft: (id, payload) => api.post(`/bff/portfolio-advice/srpp/drafts/${encodeURIComponent(id)}/publish`, payload, { skipErrorToast: true }),
-      releasePayload: (id) => api.get(`/bff/portfolio-advice/srpp/releases/${encodeURIComponent(id)}/payload`, { skipErrorToast: true })
+      releasePayload: (id) => api.get(`/bff/portfolio-advice/srpp/releases/${encodeURIComponent(id)}/payload`, { skipErrorToast: true }),
+      claudeAuth: {
+        state: (toolId, { signal } = {}) => api.get('/bff/portfolio-advice/srpp/ai-auth/claude/state', {
+          params: { toolId }, signal, headers: { 'Cache-Control': 'no-store' },
+          skipAuthRedirect: true, skipErrorToast: true
+        }),
+        start: (toolId, csrfToken, { signal } = {}) => api.post('/bff/portfolio-advice/srpp/ai-auth/claude/start', { toolId }, {
+          signal,
+          headers: { 'X-SRPP-AI-Auth-CSRF': csrfToken, 'Cache-Control': 'no-store' },
+          skipAuthRedirect: true, skipErrorToast: true
+        }),
+        status: (flowId, { signal } = {}) => api.get(
+          `/bff/portfolio-advice/srpp/ai-auth/claude/sessions/${encodeURIComponent(flowId)}`,
+          { signal, headers: { 'Cache-Control': 'no-store' }, skipAuthRedirect: true, skipErrorToast: true }
+        ),
+        complete: (flowId, code, csrfToken, { signal } = {}) => api.post(
+          `/bff/portfolio-advice/srpp/ai-auth/claude/sessions/${encodeURIComponent(flowId)}/complete`,
+          { code },
+          { signal, headers: { 'X-SRPP-AI-Auth-CSRF': csrfToken, 'Cache-Control': 'no-store' },
+            skipAuthRedirect: true, skipErrorToast: true }
+        ),
+        cancel: (flowId, csrfToken, { signal } = {}) => api.post(
+          `/bff/portfolio-advice/srpp/ai-auth/claude/sessions/${encodeURIComponent(flowId)}/cancel`,
+          {},
+          { signal, headers: { 'X-SRPP-AI-Auth-CSRF': csrfToken, 'Cache-Control': 'no-store' },
+            skipAuthRedirect: true, skipErrorToast: true }
+        )
+      }
     }
   },
 

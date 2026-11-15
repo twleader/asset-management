@@ -1,0 +1,31 @@
+{
+  "source": "https://localhost",
+  "deployedProductionAssets": true,
+  "sourceRevision": "feature-reviewed",
+  "frontendImageDigest": "sha256:737d5a4583245d1af6ccbf00442f9d86f9fd79d58e436f5c1551e3214d536ff6",
+  "syntheticAuthAndBffOnly": true,
+  "realLogin": false,
+  "realInference": false,
+  "realApiWrites": 0,
+  "checks": {
+    "expiredPromptsWithoutStartingLogin": true,
+    "dismissedPromptDoesNotReopen": true,
+    "normalPopupDoesNotShowFalseBlockedFallbackOnPoll": true,
+    "officialPopupRequiresUserGesture": true,
+    "codeSubmittedOnceAndCleared": true,
+    "authOnlyPolling": true,
+    "successReloadsCenterOnce": true,
+    "loginDoesNotClearRateLimit": true,
+    "blockedPopupHasSafeOfficialLink": true,
+    "cancelled": true,
+    "expiryStopsCodeEntry": true,
+    "ownerChangeIgnoresLateResponseAndOfficialNavigation": true,
+    "privilegedLoginHiddenForOtherAdminAndImpersonation": true
+  },
+  "pageErrors": [],
+  "unexpectedApiRequests": [],
+  "externalAttempts": [],
+  "syntheticAuthMutations": 6,
+  "authCodeOrUrlSaved": false,
+  "status": "PASS"
+}

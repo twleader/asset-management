@@ -1,0 +1,17 @@
+{
+  "business-services": {
+    "configuredEnvironmentKeysCompared": 47,
+    "allValuesMatchMain": true,
+    "bindMountSourcesMatchMain": true
+  },
+  "bff": {
+    "configuredEnvironmentKeysCompared": 9,
+    "allValuesMatchMain": true,
+    "bindMountSourcesMatchMain": true
+  },
+  "frontend": {
+    "configuredEnvironmentKeysCompared": 4,
+    "allValuesMatchMain": true,
+    "bindMountSourcesMatchMain": true
+  }
+}

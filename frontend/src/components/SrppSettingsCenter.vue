@@ -395,6 +395,18 @@
                 <p v-else class="ai-tool-status-empty">目前尚未載入工具資料；可重新載入工具清單。</p>
               </el-collapse-item>
             </el-collapse>
+            <div v-if="canManageClaudeSubscriptionUi" class="claude-auth-inline" data-testid="claude-auth-state">
+              <div>
+                <strong>Claude 本機登入</strong>
+                <span>{{ claudeAuthLoginStateText }}</span>
+                <small v-if="claudeAuthLocalState?.code">{{ safeClaudeAuthMessage(claudeAuthLocalState.code) }}</small>
+                <small v-else-if="claudeAuthStateError">{{ claudeAuthStateError }}</small>
+              </div>
+              <el-button size="small" :disabled="claudeAuthActionBusy" data-testid="claude-auth-open"
+                @click="openClaudeAuthDialog">
+                {{ claudeAuthOpenButtonText }}
+              </el-button>
+            </div>
           </div>
 
           <div v-if="runMode === 'AI'" class="ai-selection-panel">
@@ -911,6 +923,53 @@
         </el-table>
       </el-card>
     </template>
+
+    <el-dialog v-model="claudeAuthDialogVisible" title="Claude 訂閱登入" width="min(520px, calc(100vw - 32px))"
+      :close-on-click-modal="false" :close-on-press-escape="false" :show-close="!claudeAuthActionBusy"
+      @close="handleClaudeAuthDialogClose">
+      <div class="claude-auth-dialog-content" data-testid="claude-auth-dialog">
+        <p>此流程只確認本機 Claude CLI 登入，不會呼叫模型；費用狀態仍由工具清單獨立確認。</p>
+        <p class="claude-auth-flow-status" data-testid="claude-auth-flow-status">
+          {{ claudeAuthFlowStatusText }}
+        </p>
+        <p v-if="claudeAuthFlow?.code" class="claude-auth-message">
+          {{ safeClaudeAuthMessage(claudeAuthFlow.code) }}
+        </p>
+        <p v-if="claudeAuthActionError" class="claude-auth-message" role="alert">
+          {{ claudeAuthActionError }}
+        </p>
+
+        <div v-if="claudeAuthPopupBlocked && claudeAuthSafeAuthorizationUrl" class="claude-auth-fallback">
+          <span>登入視窗未開啟時，請使用此連結前往官方 Claude 登入頁：</span>
+          <a :href="claudeAuthSafeAuthorizationUrl" target="_blank" rel="noopener noreferrer"
+            data-testid="claude-auth-authorize-link">開啟官方 Claude 登入頁</a>
+        </div>
+
+        <form v-if="claudeAuthFlow?.status === 'WAITING_FOR_CODE'" class="claude-auth-code-form"
+          @submit.prevent="submitClaudeAuthCode">
+          <label class="control-label" for="claude-auth-code-input">完整授權碼</label>
+          <el-input id="claude-auth-code-input" v-model="claudeAuthCodeInput" type="textarea" :rows="2"
+            maxlength="4096" resize="vertical" autocomplete="off" spellcheck="false"
+            placeholder="貼上官方頁面提供的完整授權碼（code#state）"
+            data-testid="claude-auth-code-input" />
+          <span class="control-hint">只貼上完整授權碼；不要輸入密碼或 API token。</span>
+          <el-button type="primary" native-type="submit" :loading="claudeAuthActionBusy"
+            :disabled="!claudeAuthCodeInput.trim()" data-testid="claude-auth-submit">
+            確認登入
+          </el-button>
+        </form>
+      </div>
+      <template #footer>
+        <el-button v-if="isClaudeAuthFlowActive(claudeAuthFlow?.status)" :disabled="claudeAuthActionBusy"
+          data-testid="claude-auth-cancel" @click="cancelClaudeAuthFlow(true)">取消登入</el-button>
+        <template v-else>
+          <el-button v-if="claudeAuthFlow?.status !== 'SUCCEEDED'" type="primary"
+            :disabled="claudeAuthActionBusy" data-testid="claude-auth-start"
+            @click="startClaudeAuthFlow">{{ claudeAuthFlow ? '重新開始' : claudeAuthStartButtonText }}</el-button>
+          <el-button :disabled="claudeAuthActionBusy" @click="claudeAuthDialogVisible = false">關閉</el-button>
+        </template>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -941,6 +1000,19 @@ import {
   validateSrppAiSelection
 } from '@/utils/srppSettingsCenterAi'
 import {
+  canManageClaudeSubscription,
+  claudeAuthFlowStatusLabel,
+  claudeAuthLoginStateLabel,
+  isClaudeAuthFlowActive,
+  isClaudeAuthFlowTerminal,
+  isOfficialClaudeAuthorizationUrl,
+  isValidClaudeAuthorizationCode,
+  normalizeClaudeAuthBootstrap,
+  normalizeClaudeAuthFlow,
+  safeClaudeAuthMessage,
+  shouldPromptClaudeSubscriptionLogin
+} from '@/utils/srppClaudeAuth'
+import {
   formatMoneyText,
   formatPreciseDecimal,
   inspectWeightTotal,
@@ -952,6 +1024,20 @@ import {
 
 const auth = useAuthStore()
 const ownerIdentity = computed(() => `${auth.effectiveUserId ?? ''}|${auth.me?.email || ''}`)
+const claudeAuthOwnerIdentity = computed(() => [
+  auth.effectiveUserId ?? auth.me?.id ?? '',
+  auth.me?.email || '',
+  auth.isConfiguredAdmin,
+  auth.isActive,
+  auth.isImpersonating
+].join('|'))
+const canManageClaudeSubscriptionUi = computed(() => canManageClaudeSubscription({
+  configuredAdmin: auth.isConfiguredAdmin,
+  active: auth.isActive,
+  impersonating: auth.isImpersonating,
+  effectiveUserId: auth.effectiveUserId,
+  email: auth.me?.email
+}))
 const loadingRoot = ref(false)
 const rootData = ref(null)
 const rootError = ref('')
@@ -977,6 +1063,15 @@ const aiSelection = ref(createEmptySrppAiSelection())
 const aiSelectionNotice = ref('')
 const rejectedAiCatalogRevision = ref('')
 const aiCatalogRefreshRequired = ref(false)
+const claudeAuthBootstrap = ref(null)
+const claudeAuthStateError = ref('')
+const claudeAuthDialogVisible = ref(false)
+const claudeAuthFlow = ref(null)
+const claudeAuthFlowOwnerIdentity = ref('')
+const claudeAuthCodeInput = ref('')
+const claudeAuthPopupBlocked = ref(false)
+const claudeAuthActionError = ref('')
+const claudeAuthActionBusy = ref(false)
 const seed = ref(20261114)
 const simulationCount = ref(1000)
 const publishing = ref(false)
@@ -995,6 +1090,17 @@ let publishRequestSequence = 0
 let downloadRequestSequence = 0
 let disposed = false
 let initialized = false
+let claudeAuthStateRequestSequence = 0
+let claudeAuthFlowRequestSequence = 0
+let claudeAuthPollGeneration = 0
+let claudeAuthPollTimer = null
+let claudeAuthStateController = null
+let claudeAuthFlowController = null
+let claudeAuthFlowControllerPurpose = ''
+let claudeAuthPopupWindow = null
+let claudeAuthPopupNavigated = false
+let claudeAuthHandledSuccessFlowId = ''
+const claudeAuthPromptedOwners = new Set()
 
 const catalog = computed(() => rootData.value?.catalog || null)
 const aiTools = computed(() => srppAiTools(rootData.value?.aiTools))
@@ -1016,6 +1122,25 @@ const aiCatalogStatusSummary = computed(() => {
   if (!aiCatalogRevision.value && loadingRoot.value) return '正在讀取可用工具清單。'
   if (!aiTools.value.length) return '目前沒有可用工具資料；可重新載入查看狀態。'
   return `目前沒有可選工具：${aiToolAvailabilityDetail(aiTools.value[0])}`
+})
+const claudeAuthLocalState = computed(() => claudeAuthBootstrap.value?.login || null)
+const claudeAuthLoginStateText = computed(() => claudeAuthLocalState.value
+  ? claudeAuthLoginStateLabel(claudeAuthLocalState.value.loginState)
+  : '尚未確認本機登入狀態。')
+const claudeAuthOpenButtonText = computed(() => {
+  if (claudeAuthLocalState.value?.loginState === 'AUTHENTICATING') return '查看目前登入流程'
+  if (claudeAuthLocalState.value?.loginState === 'VALID') return '重新登入 Claude'
+  return '登入 Claude'
+})
+const claudeAuthStartButtonText = computed(() => claudeAuthLocalState.value?.loginState === 'AUTHENTICATING'
+  ? '接續目前登入流程'
+  : '開始登入')
+const claudeAuthFlowStatusText = computed(() => claudeAuthFlow.value
+  ? claudeAuthFlowStatusLabel(claudeAuthFlow.value.status)
+  : claudeAuthActionError.value || '按下「開始登入」後，系統才會開啟官方 Claude 登入頁。')
+const claudeAuthSafeAuthorizationUrl = computed(() => {
+  const value = claudeAuthFlow.value?.authorizationUrl
+  return isOfficialClaudeAuthorizationUrl(value) ? value : ''
 })
 const aiSelectionError = computed(() => {
   if (runMode.value !== 'AI' || aiSelectionReady.value || !hasSrppAiSelection(aiSelection.value)) return ''
@@ -1195,6 +1320,372 @@ watch(ownerIdentity, (next, previous) => {
   casConflict.value = false
   void loadRoot()
 })
+watch(claudeAuthOwnerIdentity, (next, previous) => {
+  if (previous == null || next === previous) return
+  resetClaudeAuthForOwnerChange()
+  if (canManageClaudeSubscriptionUi.value) void refreshClaudeAuthState()
+})
+
+function isClaudeAuthOwnerCurrent(ownerIdentityAtRequest) {
+  return !disposed && canManageClaudeSubscriptionUi.value &&
+    ownerIdentityAtRequest === claudeAuthOwnerIdentity.value
+}
+
+function isClaudeAuthAbort(error) {
+  return error?.code === 'ERR_CANCELED' || error?.name === 'CanceledError' || error?.name === 'AbortError'
+}
+
+function safeClaudeAuthError(error) {
+  const code = error?.response?.data?.code
+  return safeClaudeAuthMessage(typeof code === 'string' ? code : null)
+}
+
+function closeClaudeAuthPopupIfBlank() {
+  const popup = claudeAuthPopupWindow
+  const navigated = claudeAuthPopupNavigated
+  claudeAuthPopupWindow = null
+  claudeAuthPopupNavigated = false
+  if (!popup || navigated) return
+  try {
+    if (!popup.closed) popup.close()
+  } catch {
+    // Popup state is deliberately not reported; never expose its URL.
+  }
+}
+
+function clearClaudeAuthPollTimer() {
+  if (claudeAuthPollTimer) clearTimeout(claudeAuthPollTimer)
+  claudeAuthPollTimer = null
+}
+
+function stopClaudeAuthPolling() {
+  clearClaudeAuthPollTimer()
+  claudeAuthPollGeneration += 1
+  if (claudeAuthFlowControllerPurpose === 'poll') {
+    claudeAuthFlowController?.abort()
+    claudeAuthFlowController = null
+    claudeAuthFlowControllerPurpose = ''
+  }
+}
+
+function resetClaudeAuthForOwnerChange() {
+  claudeAuthStateRequestSequence += 1
+  claudeAuthFlowRequestSequence += 1
+  claudeAuthStateController?.abort()
+  claudeAuthStateController = null
+  claudeAuthFlowController?.abort()
+  claudeAuthFlowController = null
+  claudeAuthFlowControllerPurpose = ''
+  stopClaudeAuthPolling()
+  closeClaudeAuthPopupIfBlank()
+  claudeAuthBootstrap.value = null
+  claudeAuthStateError.value = ''
+  claudeAuthFlow.value = null
+  claudeAuthFlowOwnerIdentity.value = ''
+  claudeAuthCodeInput.value = ''
+  claudeAuthPopupBlocked.value = false
+  claudeAuthActionError.value = ''
+  claudeAuthActionBusy.value = false
+  claudeAuthHandledSuccessFlowId = ''
+  claudeAuthDialogVisible.value = false
+}
+
+async function refreshClaudeAuthState({ prompt = true } = {}) {
+  const owner = claudeAuthOwnerIdentity.value
+  if (!isClaudeAuthOwnerCurrent(owner)) return
+  claudeAuthStateController?.abort()
+  const controller = new AbortController()
+  const requestSequence = ++claudeAuthStateRequestSequence
+  claudeAuthStateController = controller
+  try {
+    const response = await bffApi.portfolioAdvice.srpp.claudeAuth.state('claude', { signal: controller.signal })
+    if (!isClaudeAuthOwnerCurrent(owner) || requestSequence !== claudeAuthStateRequestSequence) return
+    const bootstrap = normalizeClaudeAuthBootstrap(response, 'claude')
+    if (!bootstrap) {
+      claudeAuthStateError.value = safeClaudeAuthMessage('AI_TOOL_UNAVAILABLE')
+      return
+    }
+    claudeAuthBootstrap.value = bootstrap
+    claudeAuthStateError.value = ''
+    if (prompt && shouldPromptClaudeSubscriptionLogin(bootstrap.login.loginState) &&
+      !claudeAuthPromptedOwners.has(owner) && !isClaudeAuthFlowActive(claudeAuthFlow.value?.status)) {
+      claudeAuthPromptedOwners.add(owner)
+      claudeAuthActionError.value = ''
+      claudeAuthDialogVisible.value = true
+    }
+  } catch (error) {
+    if (!isClaudeAuthOwnerCurrent(owner) || requestSequence !== claudeAuthStateRequestSequence || isClaudeAuthAbort(error)) return
+    claudeAuthStateError.value = safeClaudeAuthError(error)
+  } finally {
+    if (claudeAuthStateController === controller) claudeAuthStateController = null
+  }
+}
+
+function openClaudeAuthDialog() {
+  if (!canManageClaudeSubscriptionUi.value || disposed) return
+  claudeAuthActionError.value = ''
+  claudeAuthDialogVisible.value = true
+  if (!claudeAuthBootstrap.value) void refreshClaudeAuthState()
+}
+
+function handleClaudeAuthDialogClose() {
+  if (claudeAuthFlowOwnerIdentity.value !== claudeAuthOwnerIdentity.value ||
+    !isClaudeAuthFlowActive(claudeAuthFlow.value?.status)) return
+  void cancelClaudeAuthFlow(false)
+}
+
+function navigateClaudeAuthPopup(flow) {
+  const authorizationUrl = flow?.authorizationUrl
+  if (!isOfficialClaudeAuthorizationUrl(authorizationUrl) || claudeAuthPopupNavigated) return
+  const popup = claudeAuthPopupWindow
+  if (popup && !claudeAuthPopupNavigated) {
+    try {
+      if (!popup.closed) {
+        popup.location.replace(authorizationUrl)
+        claudeAuthPopupNavigated = true
+        claudeAuthPopupBlocked.value = false
+        return
+      }
+    } catch {
+      // The fallback remains a safe, validated official link.
+    }
+  }
+  claudeAuthPopupBlocked.value = true
+}
+
+function beginClaudeAuthPolling(flow, owner) {
+  stopClaudeAuthPolling()
+  const generation = claudeAuthPollGeneration
+  scheduleClaudeAuthPoll(flow.flowId, owner, generation)
+}
+
+function scheduleClaudeAuthPoll(flowId, owner, generation) {
+  if (!isClaudeAuthOwnerCurrent(owner) || generation !== claudeAuthPollGeneration ||
+    claudeAuthFlowOwnerIdentity.value !== owner || !isClaudeAuthFlowActive(claudeAuthFlow.value?.status)) return
+  clearClaudeAuthPollTimer()
+  claudeAuthPollTimer = setTimeout(() => {
+    claudeAuthPollTimer = null
+    void pollClaudeAuthFlow(flowId, owner, generation)
+  }, 2000)
+}
+
+async function pollClaudeAuthFlow(flowId, owner, generation) {
+  if (!isClaudeAuthOwnerCurrent(owner) || generation !== claudeAuthPollGeneration ||
+    claudeAuthFlowOwnerIdentity.value !== owner || claudeAuthFlow.value?.flowId !== flowId) return
+  const controller = new AbortController()
+  claudeAuthFlowController?.abort()
+  claudeAuthFlowController = controller
+  claudeAuthFlowControllerPurpose = 'poll'
+  const requestSequence = ++claudeAuthFlowRequestSequence
+  try {
+    const response = await bffApi.portfolioAdvice.srpp.claudeAuth.status(flowId, { signal: controller.signal })
+    if (!isClaudeAuthOwnerCurrent(owner) || generation !== claudeAuthPollGeneration ||
+      requestSequence !== claudeAuthFlowRequestSequence || claudeAuthFlowOwnerIdentity.value !== owner) return
+    const flow = normalizeClaudeAuthFlow(response, 'claude')
+    if (!flow || flow.flowId !== flowId) {
+      claudeAuthActionError.value = safeClaudeAuthMessage('AUTH_FAILED')
+      stopClaudeAuthPolling()
+      return
+    }
+    await acceptClaudeAuthFlow(flow, owner, generation)
+  } catch (error) {
+    if (!isClaudeAuthOwnerCurrent(owner) || generation !== claudeAuthPollGeneration ||
+      requestSequence !== claudeAuthFlowRequestSequence || isClaudeAuthAbort(error)) return
+    claudeAuthActionError.value = safeClaudeAuthError(error)
+    stopClaudeAuthPolling()
+  } finally {
+    if (claudeAuthFlowController === controller) {
+      claudeAuthFlowController = null
+      claudeAuthFlowControllerPurpose = ''
+    }
+  }
+}
+
+async function acceptClaudeAuthFlow(flow, owner, generation = null) {
+  if (!isClaudeAuthOwnerCurrent(owner) || flow.toolId !== 'claude') return
+  claudeAuthFlow.value = flow
+  claudeAuthFlowOwnerIdentity.value = owner
+  claudeAuthActionError.value = flow.code ? safeClaudeAuthMessage(flow.code) : ''
+  if (flow.authorizationUrl) navigateClaudeAuthPopup(flow)
+  if (isClaudeAuthFlowActive(flow.status)) {
+    if (generation == null) beginClaudeAuthPolling(flow, owner)
+    else scheduleClaudeAuthPoll(flow.flowId, owner, generation)
+    return
+  }
+  stopClaudeAuthPolling()
+  closeClaudeAuthPopupIfBlank()
+  if (flow.status === 'SUCCEEDED' && claudeAuthHandledSuccessFlowId !== flow.flowId) {
+    claudeAuthHandledSuccessFlowId = flow.flowId
+    claudeAuthCodeInput.value = ''
+    void refreshClaudeAuthState()
+    void loadRoot()
+  }
+}
+
+async function startClaudeAuthFlow() {
+  const owner = claudeAuthOwnerIdentity.value
+  const bootstrap = claudeAuthBootstrap.value
+  if (!isClaudeAuthOwnerCurrent(owner)) return
+  if (!bootstrap?.csrfToken) {
+    claudeAuthActionError.value = safeClaudeAuthMessage('AI_TOOL_UNAVAILABLE')
+    void refreshClaudeAuthState()
+    return
+  }
+  if (claudeAuthActionBusy.value) return
+
+  closeClaudeAuthPopupIfBlank()
+  let popup = null
+  try {
+    popup = window.open('about:blank', '_blank')
+    if (popup) {
+      popup.opener = null
+      if (popup.opener !== null) {
+        popup.close()
+        popup = null
+      }
+    }
+  } catch {
+    try { popup?.close() } catch { /* Do not expose popup details. */ }
+    popup = null
+  }
+  claudeAuthPopupWindow = popup
+  claudeAuthPopupNavigated = false
+  claudeAuthPopupBlocked.value = !popup
+  claudeAuthActionError.value = ''
+  claudeAuthCodeInput.value = ''
+  claudeAuthDialogVisible.value = true
+  stopClaudeAuthPolling()
+  claudeAuthFlow.value = null
+  claudeAuthFlowOwnerIdentity.value = owner
+  claudeAuthActionBusy.value = true
+  const requestSequence = ++claudeAuthFlowRequestSequence
+  const controller = new AbortController()
+  claudeAuthFlowController?.abort()
+  claudeAuthFlowController = controller
+  claudeAuthFlowControllerPurpose = 'start'
+  try {
+    const response = await bffApi.portfolioAdvice.srpp.claudeAuth.start('claude', bootstrap.csrfToken, { signal: controller.signal })
+    if (!isClaudeAuthOwnerCurrent(owner) || requestSequence !== claudeAuthFlowRequestSequence) return
+    const flow = normalizeClaudeAuthFlow(response, 'claude')
+    if (!flow) {
+      claudeAuthActionError.value = safeClaudeAuthMessage('AUTH_FAILED')
+      closeClaudeAuthPopupIfBlank()
+      return
+    }
+    await acceptClaudeAuthFlow(flow, owner)
+  } catch (error) {
+    if (!isClaudeAuthOwnerCurrent(owner) || requestSequence !== claudeAuthFlowRequestSequence || isClaudeAuthAbort(error)) return
+    claudeAuthActionError.value = safeClaudeAuthError(error)
+    closeClaudeAuthPopupIfBlank()
+  } finally {
+    if (claudeAuthFlowController === controller) {
+      claudeAuthFlowController = null
+      claudeAuthFlowControllerPurpose = ''
+    }
+    if (isClaudeAuthOwnerCurrent(owner) && requestSequence === claudeAuthFlowRequestSequence) {
+      claudeAuthActionBusy.value = false
+    }
+  }
+}
+
+async function submitClaudeAuthCode() {
+  let submittedCode = claudeAuthCodeInput.value
+  claudeAuthCodeInput.value = ''
+  const owner = claudeAuthOwnerIdentity.value
+  const flow = claudeAuthFlow.value
+  const bootstrap = claudeAuthBootstrap.value
+  claudeAuthActionError.value = ''
+  if (!isClaudeAuthOwnerCurrent(owner) || !flow || flow.status !== 'WAITING_FOR_CODE' || !bootstrap?.csrfToken) {
+    submittedCode = ''
+    claudeAuthActionError.value = safeClaudeAuthMessage('AUTH_SESSION_NOT_FOUND')
+    return
+  }
+  if (!isValidClaudeAuthorizationCode(submittedCode)) {
+    submittedCode = ''
+    claudeAuthActionError.value = safeClaudeAuthMessage('AUTH_INVALID_CODE')
+    return
+  }
+  if (claudeAuthActionBusy.value) {
+    submittedCode = ''
+    return
+  }
+
+  stopClaudeAuthPolling()
+  claudeAuthActionBusy.value = true
+  const requestSequence = ++claudeAuthFlowRequestSequence
+  const controller = new AbortController()
+  claudeAuthFlowController?.abort()
+  claudeAuthFlowController = controller
+  claudeAuthFlowControllerPurpose = 'complete'
+  try {
+    const response = await bffApi.portfolioAdvice.srpp.claudeAuth.complete(
+      flow.flowId, submittedCode, bootstrap.csrfToken, { signal: controller.signal })
+    if (!isClaudeAuthOwnerCurrent(owner) || requestSequence !== claudeAuthFlowRequestSequence) return
+    const nextFlow = normalizeClaudeAuthFlow(response, 'claude')
+    if (!nextFlow || nextFlow.flowId !== flow.flowId) {
+      claudeAuthActionError.value = safeClaudeAuthMessage('AUTH_FAILED')
+      return
+    }
+    await acceptClaudeAuthFlow(nextFlow, owner)
+  } catch (error) {
+    if (!isClaudeAuthOwnerCurrent(owner) || requestSequence !== claudeAuthFlowRequestSequence || isClaudeAuthAbort(error)) return
+    claudeAuthActionError.value = safeClaudeAuthError(error)
+  } finally {
+    submittedCode = ''
+    claudeAuthCodeInput.value = ''
+    if (claudeAuthFlowController === controller) {
+      claudeAuthFlowController = null
+      claudeAuthFlowControllerPurpose = ''
+    }
+    if (isClaudeAuthOwnerCurrent(owner) && requestSequence === claudeAuthFlowRequestSequence) {
+      claudeAuthActionBusy.value = false
+    }
+  }
+}
+
+async function cancelClaudeAuthFlow(closeDialogAfter = false) {
+  const owner = claudeAuthOwnerIdentity.value
+  const flow = claudeAuthFlow.value
+  const bootstrap = claudeAuthBootstrap.value
+  if (!isClaudeAuthOwnerCurrent(owner) || !flow || !isClaudeAuthFlowActive(flow.status) || !bootstrap?.csrfToken) {
+    if (closeDialogAfter) claudeAuthDialogVisible.value = false
+    return
+  }
+  if (claudeAuthActionBusy.value) return
+  stopClaudeAuthPolling()
+  closeClaudeAuthPopupIfBlank()
+  claudeAuthCodeInput.value = ''
+  claudeAuthActionError.value = ''
+  claudeAuthActionBusy.value = true
+  const requestSequence = ++claudeAuthFlowRequestSequence
+  const controller = new AbortController()
+  claudeAuthFlowController?.abort()
+  claudeAuthFlowController = controller
+  claudeAuthFlowControllerPurpose = 'cancel'
+  try {
+    const response = await bffApi.portfolioAdvice.srpp.claudeAuth.cancel(
+      flow.flowId, bootstrap.csrfToken, { signal: controller.signal })
+    if (!isClaudeAuthOwnerCurrent(owner) || requestSequence !== claudeAuthFlowRequestSequence) return
+    const cancelledFlow = normalizeClaudeAuthFlow(response, 'claude')
+    if (!cancelledFlow || cancelledFlow.flowId !== flow.flowId) {
+      claudeAuthActionError.value = safeClaudeAuthMessage('AUTH_FAILED')
+      return
+    }
+    await acceptClaudeAuthFlow(cancelledFlow, owner)
+    if (closeDialogAfter) claudeAuthDialogVisible.value = false
+  } catch (error) {
+    if (!isClaudeAuthOwnerCurrent(owner) || requestSequence !== claudeAuthFlowRequestSequence || isClaudeAuthAbort(error)) return
+    claudeAuthActionError.value = safeClaudeAuthError(error)
+  } finally {
+    if (claudeAuthFlowController === controller) {
+      claudeAuthFlowController = null
+      claudeAuthFlowControllerPurpose = ''
+    }
+    if (isClaudeAuthOwnerCurrent(owner) && requestSequence === claudeAuthFlowRequestSequence) {
+      claudeAuthActionBusy.value = false
+    }
+  }
+}
 
 function copyJson(value) {
   if (value == null) return value
@@ -2428,10 +2919,14 @@ watch(() => rootData.value?.releases, next => {
   selectedRelease.value = refreshed || selectedRelease.value || next[0]
 }, { immediate: true })
 
-onMounted(() => loadRoot())
+onMounted(() => {
+  void loadRoot()
+  if (canManageClaudeSubscriptionUi.value) void refreshClaudeAuthState()
+})
 onUnmounted(() => {
   disposed = true
   stopPolling()
+  resetClaudeAuthForOwnerChange()
 })
 </script>
 
@@ -2498,6 +2993,18 @@ onUnmounted(() => {
 .ai-catalog-summary-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .ai-catalog-summary-heading strong { display: block; color: #334155; font-size: 12px; }
 .ai-catalog-summary-heading span { display: block; margin-top: 3px; color: #64748b; font-size: 11px; line-height: 1.5; }
+.claude-auth-inline { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; padding: 9px 10px; border: 1px solid #dbeafe; border-radius: 7px; background: #fff; }
+.claude-auth-inline > div { min-width: 0; display: grid; gap: 3px; }
+.claude-auth-inline strong { color: #334155; font-size: 11px; }
+.claude-auth-inline span, .claude-auth-inline small { color: #64748b; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.claude-auth-inline small { color: #9a3412; }
+.claude-auth-dialog-content > p { margin: 0 0 10px; color: #64748b; font-size: 12px; line-height: 1.7; }
+.claude-auth-dialog-content .claude-auth-flow-status { color: #334155; font-size: 13px; font-weight: 650; }
+.claude-auth-dialog-content .claude-auth-message { color: #9a3412; }
+.claude-auth-fallback { display: grid; gap: 6px; margin: 12px 0; padding: 10px; border: 1px solid #fde68a; border-radius: 7px; background: #fffbeb; color: #78350f; font-size: 12px; line-height: 1.6; }
+.claude-auth-fallback a { width: fit-content; color: #1d4ed8; text-decoration: underline; }
+.claude-auth-code-form { display: grid; gap: 8px; margin-top: 14px; }
+.claude-auth-code-form .el-button { justify-self: end; }
 .ai-tool-status-list { display: grid; gap: 8px; }
 .ai-tool-status-item { padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; }
 .ai-tool-status-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -2562,6 +3069,7 @@ onUnmounted(() => {
 }
 @media (max-width: 700px) {
   .version-cards { grid-template-columns: 1fr; }
+  .claude-auth-inline { align-items: flex-start; }
   .ai-selection-grid { grid-template-columns: 1fr; }
   .field-grid, .limitations-grid { grid-template-columns: 1fr; }
   .weights-grid { grid-template-columns: 1fr; }

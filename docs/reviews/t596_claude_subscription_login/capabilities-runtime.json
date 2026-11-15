@@ -1,0 +1,40 @@
+{
+  "hostStatus": 200,
+  "businessStatus": 200,
+  "matches": true,
+  "tools": [
+    {
+      "id": "codex",
+      "available": true,
+      "code": null,
+      "modelSource": "RUNTIME",
+      "modelCount": 8
+    },
+    {
+      "id": "claude",
+      "available": false,
+      "code": "AI_RATE_LIMITED",
+      "modelSource": "RUNTIME",
+      "modelCount": 0
+    },
+    {
+      "id": "ollama",
+      "available": true,
+      "code": null,
+      "modelSource": "RUNTIME",
+      "modelCount": 2
+    },
+    {
+      "id": "lmstudio",
+      "available": false,
+      "code": "AI_TOOL_UNAVAILABLE",
+      "modelSource": "RUNTIME",
+      "modelCount": 0
+    }
+  ],
+  "backoffStateUnchanged": true,
+  "nextAllowedAt": 1794766018.423195,
+  "readBeforeProviderDeadline": true,
+  "claudeUsageRequestsIssued": 0,
+  "modelRequestsIssued": 0
+}

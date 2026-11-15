@@ -25,6 +25,7 @@ public class PublicApiErrorCaptureWebFilter implements WebFilter, Ordered {
         exchange.getAttributes().putIfAbsent(CAPTURE_ATTRIBUTE, new Capture(throwable, Instant.now()));
     }
     @Override public Mono<Void> filter(ServerWebExchange exchange,WebFilterChain chain){
+        if(exchange.getRequest().getPath().value().startsWith("/api/bff/portfolio-advice/srpp/ai-auth/claude"))return chain.filter(exchange);
         if(OpenApiRouteCatalog.isReadOnlyReport(exchange.getRequest().getMethod().name(),exchange.getRequest().getPath().value())
             || OpenApiRouteCatalog.isObservationIngress(exchange.getRequest().getMethod().name(),exchange.getRequest().getPath().value()))
             return chain.filter(exchange);

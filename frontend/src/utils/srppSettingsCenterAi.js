@@ -17,6 +17,7 @@ const SAFE_AI_CODE_MESSAGES = Object.freeze({
   AI_EXECUTION_FAILED: 'AI 解讀未成功；情境數值仍已保留。',
   AI_AUTH_REQUIRED: '無法取得此工具的安全登入資訊；若此為 Codex 工具，請先在一般 Codex CLI 登入。',
   AI_AUTH_EXPIRED: '此工具的登入已失效或需要更新；若此為 Codex 工具，請在一般 Codex CLI 重新登入。',
+  AI_AUTH_IN_PROGRESS: 'Claude 登入正在進行，請先完成目前登入流程。',
   AI_TOOL_USE_FORBIDDEN: 'AI 嘗試使用非解讀工具，系統已拒絕；情境數值仍已保留。',
   TOOL_NOT_FOUND: '找不到此工具，請重新載入工具清單。',
   TOOL_UNAVAILABLE: '此工具目前無法使用，請稍後重新載入工具清單。',
