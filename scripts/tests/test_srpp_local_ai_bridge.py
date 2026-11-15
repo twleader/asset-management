@@ -1,5 +1,6 @@
 """Task 592 isolated tests. No real credentials, accounts or inference requests."""
 import copy
+import base64
 import importlib.util
 import json
 import os
@@ -101,12 +102,13 @@ class BillingTests(Fixture):
         self.assert_code("AI_PAID_CREDITS_ENABLED", b.Bridge.check_codex_billing, value)
 
     def test_codex_api_key_or_unknown_auth_rejected(self):
-        home = self.path/"codex-home"
-        home.mkdir(mode=0o700)
-        auth = home/"auth.json"
+        home = self.path/"normal-home"
+        (home/".codex").mkdir(parents=True, mode=0o700)
+        auth = home/".codex/auth.json"
         auth.write_bytes(b.encode({"auth_mode": "apikey", "OPENAI_API_KEY": "TEST_SECRET"}))
         auth.chmod(0o600)
-        self.assert_code("AI_SUBSCRIPTION_REQUIRED", self.bridge.codex_home)
+        with mock.patch.object(b.pathlib.Path, "home", return_value=home):
+            self.assert_code("AI_SUBSCRIPTION_REQUIRED", b.read_codex_auth_snapshot)
 
     def test_codex_rejected_billing_never_calls_inference(self):
         self.tools = [{"id": "test", "label": "Test", "adapter": "codex_cli", "executable": "/test/codex"}]
@@ -373,6 +375,395 @@ class HttpTests(Fixture):
         self.assertEqual(400, error.exception.code)
         error.exception.close()
         execute.assert_not_called()
+
+
+class CodexAuthSyncTests(Fixture):
+    def setUp(self):
+        super().setUp()
+        self.normal_home = self.path/"normal-home"
+        self.source_directory = self.normal_home/".codex"
+        self.source_directory.mkdir(parents=True, mode=0o700)
+        self.source = self.source_directory/"auth.json"
+        self.home_patch = mock.patch.object(b.pathlib.Path, "home", return_value=self.normal_home)
+        self.home_patch.start()
+        self.addCleanup(self.home_patch.stop)
+        self.write_source()
+
+    def token(self, account="fixture-account-a", extra=None):
+        claims = {"exp": int(time.time())+3600, "https://api.openai.com/auth": {"chatgpt_account_id": account}}
+        claims.update(extra or {})
+        part = lambda value:base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip("=")
+        return part({"alg": "RS256"})+"."+part(claims)+".fixture-signature"
+
+    def write_source(self, account="fixture-account-a", extra_claims=None, **updates):
+        value = {"auth_mode": "chatgpt", "OPENAI_API_KEY": None,
+                 "tokens": {"access_token": self.token(account, extra_claims), "account_id": account,
+                            "refresh_token": "FIXTURE_REFRESH_SECRET", "id_token": "FIXTURE_ORIGINAL_ID_TOKEN",
+                            "oauth_provenance": {"issuer": "fixture-authority", "client_id": "fixture"}},
+                 "last_refresh": "2026-01-01T00:00:00Z", "unrelated": "DO_NOT_COPY"}
+        value.update(updates)
+        self.source.write_bytes(b.encode(value))
+        self.source.chmod(0o600)
+        return value
+
+    def codex_catalog(self):
+        return {"data": [{"id": "test-model", "model": "test-model", "displayName": "Test Model",
+                          "supportedReasoningEfforts": [{"reasoningEffort": "low"}], "defaultReasoningEffort": "low"}]}
+
+    def fake_rpc_cli(self, mode="success", error=None):
+        executable = self.path/"codex-rpc-fixture"
+        recorded = self.path/"rpc-projection-metadata.json"
+        program = ("#!"+sys.executable+"\nimport os,sys,json,pathlib,time\n"
+                   +"root=pathlib.Path(os.environ['CODEX_HOME'])\n"
+                   +"a=json.loads((root/'auth.json').read_text())\n"
+                   +f"pathlib.Path({str(recorded)!r}).write_text(json.dumps({{'mode':a['auth_mode'],'refreshPresent':bool(a['tokens']['refresh_token']),'sameJwt':a['tokens']['access_token']==a['tokens']['id_token']}}))\n"
+                   +"def emit(v): print(json.dumps(v),flush=True)\n")
+        if mode == "timeout":
+            program += "time.sleep(30)\n"
+        elif mode == "invalid":
+            program += "print('not-json',flush=True);time.sleep(30)\n"
+        elif mode == "oversize":
+            program += f"sys.stdout.write('x'*{b.MAX_BODY+1});sys.stdout.flush();time.sleep(30)\n"
+        else:
+            program += "for line in sys.stdin:\n request=json.loads(line)\n ident=request.get('id')\n"
+            program += " if ident==1:\n  emit({'id':1,'result':{}})\n"
+            if mode == "duplicate-init":
+                program += "  emit({'id':1,'result':{}})\n"
+            if mode == "refresh":
+                program += "  emit({'id':'refresh-fixture','method':'account/chatgptAuthTokens/refresh','params':{}})\n"
+            if mode == "error":
+                program += f" elif ident==2: emit({{'id':2,'error':{error!r}}})\n"
+            else:
+                program += f" elif ident==2: emit({{'id':2,'result':{limits()!r}}})\n"
+                if mode == "duplicate-result":
+                    program += f" elif ident==3:\n  emit({{'id':2,'result':{limits()!r}}})\n  emit({{'id':3,'result':{self.codex_catalog()!r}}})\n"
+                else:
+                    program += f" elif ident==3: emit({{'id':3,'result':{self.codex_catalog()!r}}})\n"
+        executable.write_text(program)
+        executable.chmod(0o700)
+        return {"id": "codex", "label": "Codex", "adapter": "codex_cli", "executable": str(executable)}, recorded
+
+    def rpc_with_cleanup_assertions(self, tool, seconds=1):
+        processes, directories, group_settings = [], [], []
+        original = b.subprocess.Popen
+        def capture(*args, **kwargs):
+            directories.append(pathlib.Path(kwargs["env"]["CODEX_HOME"]))
+            group_settings.append(kwargs.get("start_new_session"))
+            process = original(*args, **kwargs)
+            processes.append(process)
+            return process
+        with mock.patch.object(b.subprocess, "Popen", side_effect=capture), mock.patch.object(b, "CODEX_METADATA_SECONDS", seconds):
+            try:
+                return self.bridge.codex_rpc(tool)
+            finally:
+                self.assertEqual(1, len(processes))
+                self.assertEqual([True], group_settings)
+                self.assertIsNotNone(processes[0].poll())
+                self.assertTrue(processes[0].stdin.closed)
+                self.assertTrue(processes[0].stdout.closed)
+                self.assertFalse(directories[0].exists())
+
+    def test_projection_access_only_private_and_normal_source_unchanged(self):
+        before, mode = self.source.read_bytes(), self.source.stat().st_mode
+        with self.bridge.codex_session() as env:
+            home = pathlib.Path(env["CODEX_HOME"])
+            projection = json.loads((home/"auth.json").read_text())
+            self.assertEqual(0o700, home.stat().st_mode & 0o777)
+            self.assertEqual(0o600, (home/"auth.json").stat().st_mode & 0o777)
+            self.assertEqual("chatgptAuthTokens", projection["auth_mode"])
+            self.assertEqual("", projection["tokens"]["refresh_token"])
+            self.assertEqual(projection["tokens"]["access_token"], projection["tokens"]["id_token"])
+            self.assertEqual({"access_token", "id_token", "refresh_token", "account_id"}, set(projection["tokens"]))
+            self.assertNotIn("OPENAI_API_KEY", projection)
+            for secret in ("FIXTURE_REFRESH_SECRET", "FIXTURE_ORIGINAL_ID_TOKEN", "DO_NOT_COPY"):
+                self.assertNotIn(secret, json.dumps(projection))
+        self.assertFalse(home.exists())
+        self.assertEqual(before, self.source.read_bytes())
+        self.assertEqual(mode, self.source.stat().st_mode)
+
+    def test_latest_source_used_each_operation_not_old_private_copy(self):
+        old = self.path/"codex-home"
+        old.mkdir(mode=0o700)
+        (old/"auth.json").write_text('{"auth_mode":"apikey","OPENAI_API_KEY":"DO_NOT_USE"}')
+        with self.bridge.codex_session() as env:
+            a = json.loads((pathlib.Path(env["CODEX_HOME"])/"auth.json").read_text())
+        self.write_source(account="fixture-account-b")
+        with self.bridge.codex_session() as env:
+            newer = json.loads((pathlib.Path(env["CODEX_HOME"])/"auth.json").read_text())
+        self.assertNotEqual(a["tokens"]["access_token"], newer["tokens"]["access_token"])
+        self.assertEqual("fixture-account-b", newer["tokens"]["account_id"])
+        self.assertIn("DO_NOT_USE", (old/"auth.json").read_text())
+
+    def test_missing_normal_source_never_falls_back_to_old_copy(self):
+        old = self.path/"codex-home"
+        old.mkdir(mode=0o700)
+        (old/"auth.json").write_bytes(self.source.read_bytes())
+        self.source.unlink()
+        self.assert_code("AI_AUTH_REQUIRED", b.read_codex_auth_snapshot)
+
+    def test_environment_codex_home_does_not_redirect_normal_source(self):
+        with mock.patch.dict(os.environ, {"CODEX_HOME": "/untrusted-home", "OPENAI_API_KEY": "UNTRUSTED"}):
+            snapshot = b.read_codex_auth_snapshot()
+        self.assertEqual("fixture-account-a", snapshot.account_id)
+        self.assertNotIn(snapshot.access_token, repr(snapshot))
+        self.assertNotIn(snapshot.account_id, repr(snapshot))
+
+    def test_source_file_symlink_rejected(self):
+        target = self.source.with_name("real-auth.json")
+        self.source.rename(target)
+        self.source.symlink_to(target)
+        self.assert_code("AI_AUTH_REQUIRED", b.read_codex_auth_snapshot)
+
+    def test_source_directory_symlink_rejected(self):
+        target = self.source_directory.with_name("real-codex")
+        self.source_directory.rename(target)
+        self.source_directory.symlink_to(target, target_is_directory=True)
+        self.assert_code("AI_AUTH_REQUIRED", b.read_codex_auth_snapshot)
+
+    def test_non_private_source_mode_and_writable_parent_rejected(self):
+        self.source.chmod(0o644)
+        self.assert_code("AI_AUTH_REQUIRED", b.read_codex_auth_snapshot)
+        self.source.chmod(0o600)
+        self.source_directory.chmod(0o777)
+        self.assert_code("AI_AUTH_REQUIRED", b.read_codex_auth_snapshot)
+
+    def test_standard_non_writable_0755_parent_is_preserved(self):
+        self.source_directory.chmod(0o755)
+        b.read_codex_auth_snapshot()
+        self.assertEqual(0o755, self.source_directory.stat().st_mode & 0o777)
+
+    def test_other_owner_rejected(self):
+        original = b.os.fstat
+        def wrong_owner(fd):
+            info = original(fd)
+            if b.stat.S_ISREG(info.st_mode):
+                values = list(info)
+                values[4] = os.getuid()+1
+                return os.stat_result(values)
+            return info
+        with mock.patch.object(b.os, "fstat", side_effect=wrong_owner):
+            self.assert_code("AI_AUTH_REQUIRED", b.read_codex_auth_snapshot)
+
+    def test_fifo_and_directory_refused_without_blocking(self):
+        self.source.unlink()
+        os.mkfifo(self.source, 0o600)
+        started = time.monotonic()
+        self.assert_code("AI_AUTH_REQUIRED", b.read_codex_auth_snapshot)
+        self.assertLess(time.monotonic()-started, .5)
+        self.source.unlink()
+        self.source.mkdir(mode=0o700)
+        self.assert_code("AI_AUTH_REQUIRED", b.read_codex_auth_snapshot)
+
+    def test_oversize_empty_or_malformed_source_rejected(self):
+        for raw in (b"x"*(b.AUTH_MAX_BYTES+1), b"", b"not-json", b"[]"):
+            self.source.write_bytes(raw)
+            self.assert_code("AI_AUTH_REQUIRED", b.read_codex_auth_snapshot)
+
+    def test_expired_or_too_near_expiry_is_auth_expired(self):
+        for expires in (int(time.time())-1, int(time.time())+30):
+            self.write_source(extra_claims={"exp": expires})
+            self.assert_code("AI_AUTH_EXPIRED", b.read_codex_auth_snapshot)
+
+    def test_invalid_expiry_not_before_or_account_is_auth_required(self):
+        for extra in ({"exp": None}, {"exp": True}, {"exp": "never"}, {"nbf": int(time.time())+3600},
+                      {"nbf": True}, {"https://api.openai.com/auth": {}},
+                      {"https://api.openai.com/auth": {"chatgpt_account_id": "other-account"}}):
+            self.write_source(extra_claims=extra)
+            self.assert_code("AI_AUTH_REQUIRED", b.read_codex_auth_snapshot)
+
+    def test_missing_access_or_invalid_jwt_cannot_use_original_id_token(self):
+        for access in (None, "", "invalid", "a.%%%.b", "a.e30.b"):
+            auth = self.write_source()
+            auth["tokens"]["access_token"] = access
+            self.source.write_bytes(b.encode(auth))
+            self.assert_code("AI_AUTH_REQUIRED", b.read_codex_auth_snapshot)
+
+    def test_api_key_source_separately_rejected(self):
+        self.write_source(OPENAI_API_KEY="FIXTURE_API_KEY")
+        self.assert_code("AI_SUBSCRIPTION_REQUIRED", b.read_codex_auth_snapshot)
+
+    def test_source_atomic_replace_reopens_latest_consistent_snapshot(self):
+        original = b.os.read
+        replaced = []
+        def rotate(fd, size):
+            raw = original(fd, size)
+            if not replaced:
+                auth = json.loads(raw)
+                auth["tokens"].update(access_token=self.token("fixture-account-b"), account_id="fixture-account-b")
+                pending = self.source.with_suffix(".new")
+                pending.write_bytes(b.encode(auth));pending.chmod(0o600);os.replace(pending, self.source)
+                replaced.append(True)
+            return raw
+        with mock.patch.object(b.os, "read", side_effect=rotate):
+            snapshot = b.read_codex_auth_snapshot()
+        self.assertEqual("fixture-account-b", snapshot.account_id)
+
+    def test_continually_replaced_source_fails_without_unbounded_retry(self):
+        original = b.os.read
+        reads = []
+        def rotate(fd, size):
+            raw = original(fd, size)
+            reads.append(True)
+            pending = self.source.with_suffix(".new")
+            pending.write_bytes(raw);pending.chmod(0o600);os.replace(pending, self.source)
+            return raw
+        with mock.patch.object(b.os, "read", side_effect=rotate):
+            self.assert_code("AI_AUTH_REQUIRED", b.read_codex_auth_snapshot)
+        self.assertEqual(2, len(reads))
+
+    def test_session_exception_removes_projection_and_preserves_source(self):
+        before = self.source.read_bytes()
+        home = None
+        with self.assertRaises(b.Problem):
+            with self.bridge.codex_session() as env:
+                home = pathlib.Path(env["CODEX_HOME"])
+                raise b.Problem("AI_AUTH_EXPIRED")
+        self.assertFalse(home.exists())
+        self.assertEqual(before, self.source.read_bytes())
+
+    def test_concurrent_operations_have_independent_private_projections(self):
+        barrier = threading.Barrier(2)
+        def enter():
+            with self.bridge.codex_session() as env:
+                home = pathlib.Path(env["CODEX_HOME"])
+                barrier.wait(timeout=3)
+                self.assertTrue((home/"auth.json").is_file())
+                return home
+        with b.concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            homes = list(pool.map(lambda _:enter(), range(2)))
+        self.assertNotEqual(homes[0], homes[1])
+        self.assertTrue(all(not home.exists() for home in homes))
+
+    def test_same_snapshot_proof_and_exec_despite_normal_login_rotation(self):
+        paths = []
+        def proof(tool, env):
+            paths.append(pathlib.Path(env["CODEX_HOME"]))
+            before = json.loads((paths[0]/"auth.json").read_text())
+            self.assertEqual("fixture-account-a", before["tokens"]["account_id"])
+            self.write_source("fixture-account-b")
+            return limits(), self.codex_catalog()
+        def execute(argv, **kwargs):
+            home = pathlib.Path(kwargs["env"]["CODEX_HOME"])
+            self.assertEqual(paths[0], home)
+            self.assertEqual("fixture-account-a", json.loads((home/"auth.json").read_text())["tokens"]["account_id"])
+            pathlib.Path(argv[argv.index("--output-last-message")+1]).write_text("合成文字")
+            return b'\n'.join(b.encode(v) for v in [{"type":"turn.started"},{"type":"item.completed","item":{"type":"agent_message","text":"fixture"}},{"type":"turn.completed"}])
+        with mock.patch.object(self.bridge, "codex_rpc", side_effect=proof), mock.patch.object(b, "run_process", side_effect=execute):
+            text, actual = self.bridge.infer({"adapter":"codex_cli","executable":"/fixture/codex"}, {"model":"test-model","effort":"low"}, "fixture")
+        self.assertEqual("合成文字", text)
+        self.assertIsNone(actual)
+        self.assertFalse(paths[0].exists())
+        self.assertEqual("fixture-account-b", b.read_codex_auth_snapshot().account_id)
+
+    def test_final_pinned_billing_or_model_failure_is_zero_exec(self):
+        paid = limits()
+        paid["rateLimits"]["credits"]["hasCredits"] = True
+        tool = {"adapter":"codex_cli","executable":"/fixture/codex"}
+        for value, models, code in [(paid, self.codex_catalog(), "AI_PAID_CREDITS_ENABLED"),
+                                    ({}, self.codex_catalog(), "AI_BILLING_UNVERIFIED"),
+                                    (limits(), {"data":[]}, "AI_MODEL_UNAVAILABLE")]:
+            with mock.patch.object(self.bridge, "codex_rpc", return_value=(value, models)), mock.patch.object(b, "run_process") as execute:
+                self.assert_code(code, self.bridge.infer, tool, {"model":"test-model","effort":"low"}, "fixture")
+                execute.assert_not_called()
+
+    def test_rpc_success_projection_cleanup_and_no_refresh_material(self):
+        tool, recorded = self.fake_rpc_cli()
+        value, models = self.rpc_with_cleanup_assertions(tool)
+        self.bridge.check_codex_billing(value)
+        self.assertEqual(1, len(models["data"]))
+        self.assertEqual({"mode":"chatgptAuthTokens","refreshPresent":False,"sameJwt":True}, json.loads(recorded.read_text()))
+
+    def test_rpc_auth_401_expired_and_external_refresh_have_distinct_code(self):
+        for error in ({"code":-32000,"message":"HTTP 401 Unauthorized: access token has expired"},
+                      {"code":401,"message":"fixture"}, {"code":"token_expired","message":"fixture"}):
+            tool, _ = self.fake_rpc_cli(mode="error", error=error)
+            self.assert_code("AI_AUTH_EXPIRED", self.rpc_with_cleanup_assertions, tool)
+        tool, _ = self.fake_rpc_cli(mode="refresh")
+        self.assert_code("AI_AUTH_EXPIRED", self.rpc_with_cleanup_assertions, tool)
+
+    def test_rpc_network_unknown_and_rate_limit_remain_billing_unverified(self):
+        for error in ({"code":429,"message":"Rate limit reached"},{"code":500,"message":"Service unavailable"},
+                      {"code":403,"message":"Forbidden"},{"code":-32000,"message":"Unknown provider response"}):
+            tool, _ = self.fake_rpc_cli(mode="error", error=error)
+            self.assert_code("AI_BILLING_UNVERIFIED", self.rpc_with_cleanup_assertions, tool)
+
+    def test_rpc_unknown_or_repeated_handshake_is_bounded_and_cleaned(self):
+        for mode in ("duplicate-init", "duplicate-result", "invalid"):
+            tool, _ = self.fake_rpc_cli(mode=mode)
+            self.assert_code("AI_BILLING_UNVERIFIED", self.rpc_with_cleanup_assertions, tool)
+
+    def test_rpc_timeout_cleans_process_group_pipes_and_projection(self):
+        tool, _ = self.fake_rpc_cli(mode="timeout")
+        started = time.monotonic()
+        self.assert_code("AI_BILLING_UNVERIFIED", self.rpc_with_cleanup_assertions, tool, seconds=.15)
+        self.assertLess(time.monotonic()-started, 1)
+
+    def test_exec_structured_auth_failure_is_classified_even_nonzero_exit(self):
+        for event in ({"type":"error","message":"HTTP 401 Unauthorized"},
+                      {"type":"turn.failed","error":{"code":"token_expired","message":"fixture"}},
+                      {"method":"account/chatgptAuthTokens/refresh","id":"fixture"}):
+            raw = b.encode(event)
+            self.assert_code("AI_AUTH_EXPIRED", self.bridge.validate_codex_events, raw)
+            program = "import sys;sys.stdout.buffer.write("+repr(raw)+");sys.stdout.flush();sys.exit(1)"
+            self.assert_code("AI_AUTH_EXPIRED", b.run_process, [sys.executable,"-c",program],
+                             failure_classifier=self.bridge.codex_exec_auth_error, own_process_group=True)
+
+    def test_stderr_model_text_or_unknown_diagnostics_are_not_auth_evidence(self):
+        self.assertIsNone(self.bridge.codex_auth_error({"type":"item.completed","item":{"type":"agent_message","text":"401 token expired"}}))
+        self.assertIsNone(self.bridge.codex_auth_error({"message":"401"}))
+        program = "import sys;print('401 Unauthorized token expired',file=sys.stderr);sys.exit(1)"
+        self.assert_code("AI_EXECUTION_FAILED", b.run_process, [sys.executable,"-c",program],
+                         failure_classifier=self.bridge.codex_exec_auth_error, own_process_group=True)
+        self.assert_code("AI_EXECUTION_FAILED", self.bridge.validate_codex_events, b'{"type":"error","message":"unknown safety configuration"}')
+
+    def test_nonblocking_stdin_timeout_cleans_owned_process_and_pipes(self):
+        processes = []
+        original = b.subprocess.Popen
+        def capture(*args, **kwargs):
+            process = original(*args, **kwargs);processes.append(process);return process
+        with mock.patch.object(b.subprocess, "Popen", side_effect=capture):
+            self.assert_code("AI_TIMEOUT", b.run_process, [sys.executable,"-c","import time;time.sleep(30)"],
+                             data=b"x"*b.MAX_BODY, timeout=.15, own_process_group=True)
+        self.assertIsNotNone(processes[0].poll())
+        self.assertTrue(processes[0].stdin.closed)
+        self.assertTrue(processes[0].stdout.closed)
+
+    def test_private_parent_marker_is_not_forwarded_by_clean_environment(self):
+        with mock.patch.dict(os.environ, {"SRPP_AI_OPERATION_ROOT":"/untrusted"}):
+            self.assertNotIn("SRPP_AI_OPERATION_ROOT", b.clean_environment())
+            self.assert_code("AI_AUTH_REQUIRED", b.parent_operation_root)
+
+    def test_worker_projection_lives_until_parent_group_cleanup(self):
+        root = self.path/"operation-root"
+        root.mkdir(mode=0o700)
+        with mock.patch.dict(os.environ, {"SRPP_AI_OPERATION_ROOT":str(root),"TMPDIR":str(root)}), mock.patch.object(b.os,"getpgrp",return_value=os.getpid()):
+            with self.bridge.codex_session() as env:
+                projected = pathlib.Path(env["CODEX_HOME"])
+            self.assertTrue(projected.is_relative_to(root))
+            self.assertTrue((projected/"auth.json").exists())
+        b.shutil.rmtree(root)
+        self.assertFalse(projected.exists())
+
+    def test_outer_hard_timeout_cleans_parent_root_even_child_finally_cannot_run(self):
+        roots, processes = [], []
+        original = b.subprocess.Popen
+        program = ("import os,pathlib,time;root=pathlib.Path(os.environ['SRPP_AI_OPERATION_ROOT']);"
+                   "p=root/'access';p.mkdir(mode=0o700);f=p/'auth.json';f.write_text('SYNTHETIC_ONLY');f.chmod(0o600);"
+                   "os.fork();time.sleep(30)")
+        def fixture_child(argv, **kwargs):
+            root = pathlib.Path(kwargs["env"]["SRPP_AI_OPERATION_ROOT"])
+            self.assertEqual(str(root), kwargs["env"]["TMPDIR"])
+            self.assertEqual(0o700, root.stat().st_mode & 0o777)
+            roots.append(root)
+            process = original([sys.executable,"-c",program], **kwargs)
+            processes.append(process)
+            return process
+        with mock.patch.object(self.bridge,"capabilities",return_value=self.catalog()), mock.patch.object(b.subprocess,"Popen",side_effect=fixture_child), mock.patch.object(b,"DEADLINE",.2):
+            self.assert_code("AI_TIMEOUT", self.bridge.execute, self.body())
+        self.assertFalse(roots[0].exists())
+        self.assertIsNotNone(processes[0].poll())
+        self.assertTrue(processes[0].stdin.closed)
+        self.assertTrue(processes[0].stdout.closed)
 
 
 class ClaudeDiscoveryTests(Fixture):

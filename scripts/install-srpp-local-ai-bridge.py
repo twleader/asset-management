@@ -23,6 +23,7 @@ def load_bridge(root):
         raise ValueError("BRIDGE_SOURCE_UNAVAILABLE")
     spec = importlib.util.spec_from_file_location("srpp_local_ai_install", path)
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 

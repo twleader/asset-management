@@ -6,7 +6,7 @@
 
 | Adapter | 使用方式 | 每次解讀前的限制 |
 |---|---|---|
-| `codex_cli` | host 的 Codex CLI／既有個人 ChatGPT 訂閱 | 強制 `chatgpt` 登入、固定 OpenAI provider；`account/rateLimits/read` 必須證明個人訂閱且可使用方案額度，所有回傳 pool 的 `credits.hasCredits=false`、`credits.unlimited=false`。付費點數可用、額度耗盡或未知均拒絕。 |
+| `codex_cli` | host 的 Codex CLI／既有個人 ChatGPT 訂閱 | 每次操作唯讀同步正常 CLI 最新登入，以不含 refresh secret 的暫存投影執行；固定 OpenAI provider。真正 exec 與其即時 `account/rateLimits/read`／`model/list` 共用同一投影，必須證明個人訂閱及可用方案額度，所有 pool 的 `credits.hasCredits=false`、`credits.unlimited=false`。登入失效、付費點數可用、額度耗盡或費用未知均拒絕。 |
 | `claude_cli` | host 的 Claude CLI／既有 Claude 訂閱 | 乾淨環境的 `auth status` 必須是 `claude.ai` 訂閱；唯讀 OAuth usage 的 `extra_usage.is_enabled` 必須明確為 false。模型與 effort 直接取 CLI 的 initialize metadata，再套用下述訂閱費用政策；額外付費開啟、費用未知或探索失敗均拒絕。 |
 | `ollama` | numeric loopback 上已安裝的本機模型 | 僅使用本機 inventory；排除 cloud／remote 模型，解讀前再次驗證所選模型 metadata。 |
 | `local_openai` | numeric loopback 上的 LM Studio 相容服務 | 要求 `/api/v1/models` 原生庫存中的本機 `llm` 模型及 `gguf`／`mlx` 格式；一般雲端 API proxy 的 `/v1/models` 清單不足以通過驗證。 |
@@ -35,12 +35,12 @@ python3 -B scripts/install-srpp-local-ai-bridge.py --install
 - `bridge.token`：原始連線 token，0600。
 - `registry.json`：管理者設定，0600；新增工具時可重用任何已支援 adapter，前端無須新增固定選項。
 - `docker-token/bridge.token`：原 token 的唯讀 Docker 投影檔，0444；父目錄為 host 0700。僅 mount 此單一檔案，不能 mount home、CLI 設定目錄或原始憑證。
-- `codex-home/`：0700；首次複用 host 的 `~/.codex/auth.json`，之後由這個專屬 CLI home 自行 refresh。憑證始終留在 host，不回傳瀏覽器、不寫日誌、不加入 Git。重新登入後若專屬登入過期，先停止本 bridge，再由管理者將新登入 `auth.json` 更新到此私有目錄並維持 0600，不能改用 API key。
+- `codex-home/`：早期版本的狀態目錄。Task 594 起不再讀取其中的 `auth.json`、不以舊登入 fallback，也不再使用其 refresh secret。既有檔案不自動刪改，無須人工更新副本；正常登入只在一般 Codex CLI 維護。舊模型快取若有仍僅供不可用時的展示，不構成登入或費用授權。
 - `bridge.log`／`bridge-error.log`：不記錄請求、持股、提示、token 或模型全文。
 
 LaunchAgent label 為 `com.steven.srpp-local-ai-bridge`，監聽位置固定 `127.0.0.1:8766`。Docker 的 business service 使用 `http://host.docker.internal:8766` 與專屬 token 唯讀檔。API 不掛 9090，不對公網發布；瀏覽器仍經原資產配置建議頁面的 BFF。
 
-重新部署後，必須重建並 recreate `business-services`、`bff`、`frontend` 容器（BFF 同步更新的雙層 DTO 也必須載入），確認實際畫面與功能；health 僅代表服務存活，不代表已執行模型或費用限制已驗證。
+重新部署時依實際改動重建並 recreate 受影響容器；涉及 BFF 雙層 DTO 的變更也須重建 `bff`。Task 594 修改安全碼白名單與畫面文案，需重建 `business-services`、`frontend`，BFF wire 保持既有契約。另重新安裝 host bridge 以載入程式；health 僅代表服務存活，不代表已執行模型或費用限制已驗證。
 
 ## 狀態、停止與安全查核
 
@@ -55,6 +55,29 @@ python3 -B scripts/install-srpp-local-ai-bridge.py --stop
 `GET /capabilities` 與 `POST /interpret` 均需 `Authorization: Bearer <token>`。不要在命令列或日誌列印 token；操作程式應從私有檔在記憶體中讀取。HTTP 路徑為 exact match，拒絕 query token、redirect、proxy 及遠端地址。body 最大 2 MiB，輸出最多 20,000 字元，同時僅一個解讀工作。推論 worker 最長 120 秒，逾時終止整個程序群組；CLI／本機模型均沒有自動 fallback。
 
 能力 metadata 最多並行 16 個管理者設定工具，短暫快取 20 秒。catalogRevision 涵蓋工具設定（含 executable／port）與模型能力，不涵蓋額度、時間或可用狀態。請求使用過期清單會回 `AI_CATALOG_STALE`，重新載入後才能選擇。
+
+## Codex 最新登入同步與登入錯誤
+
+bridge 只從目前 host 使用者正常 `~/.codex/auth.json` 讀取登入，不沿用早期私有副本，也不跟隨 HTTP 請求、registry 或 `CODEX_HOME` 環境變數改讀任意來源。來源必須是同使用者擁有、0600、非 symlink 的 regular file，最大 64 KiB；`.codex` 目錄必須同使用者擁有且不可由群組／其他人寫入，正常 0755 可保留。開啟時使用 no-follow／nonblocking，先 fstat 拒絕 FIFO／目錄等不合法來源，再核對讀取前後與目前路徑 identity；正常 CLI 正在原子替換時至多重讀一次，不能無限等待或使用部分檔案。bridge 不會 chmod、覆寫、refresh、logout 或更改正常登入。
+
+access JWT 的 exp、nbf 與 account claim 只作本機負向檢查：過期、距離期限不足 180 秒、尚未生效、格式未知或與來源 account ID 不一致均拒絕。這些未自行驗簽的 claims 不能證明訂閱或費用，仍須取得原生 CLI 的最新費用 readback。
+
+每次能力探測建立新的 0700 暫存 `CODEX_HOME` 與 0600 `auth.json`，採 CLI 支援的 `chatgptAuthTokens` 外部 access 模式。投影只保留最新 access JWT、已核對的 account identity，並以同一 access JWT 作 schema 所需的 id_token；refresh_token 固定空字串，不複製原 id_token、refresh secret、API key、provenance、helper 或一般設定。此模式不自行做 managed OAuth refresh，收到外部刷新要求立即停止。並行操作各用獨立投影。
+
+真正解讀會重新讀正常來源，在同一不可變投影上先取得 `account/rateLimits/read` 與 `model/list`、驗證費用與選定組合，再啟動 exec。即使一般 CLI 在中間更新登入，也不會出現「檢查帳戶 A、執行帳戶 B」。20 秒能力快取可能使畫面狀態短暫落後，但不能授權推論；失效後下一次操作必須使用正常 CLI 新的登入。
+
+能力探測在成功、錯誤、逾時時會先終止並等待所屬程序群組、關閉 pipes／selector，再刪除投影。解讀 worker 的投影位於監護 parent 持有的私有 operation root；worker、RPC、exec 保持同一程序群組。parent 在正常完成或 120 秒硬逾時後先 killpg／wait／關管線，再移除整個 root，因此 worker 被 SIGKILL、來不及執行自己的 finally，也不會留下暫存登入。exec 的 105 秒內部 deadline 同時涵蓋非阻塞 stdin、stdout 與程序退出。
+
+| 安全碼 | 使用者看到的原因與處理方式 |
+|---|---|
+| `AI_AUTH_REQUIRED` | 尚未登入、來源缺失／不安全／格式無效或帳戶不一致。請在一般 Codex CLI 重新登入；bridge 不使用舊副本。 |
+| `AI_AUTH_EXPIRED` | access 已過期或需要更新，或原生 RPC／exec 的結構化錯誤明確指出 401／token 失效，或要求外部 token 刷新。請在一般 Codex CLI 更新登入，再重新載入工具狀態。 |
+| `AI_SUBSCRIPTION_REQUIRED` | 使用 API key、其他登入方式或非允許的個人訂閱；不能藉此另外計費。 |
+| `AI_BILLING_UNVERIFIED` | 沒有明確登入失效證據，但網路、429／5xx、未知 RPC／費用資料使訂閱內使用無法確認。未發模型請求，稍後重試或檢查服務。 |
+
+只從原生 RPC／exec 的結構化 error 位置辨識登入失效；模型文字或任意 stderr 裡的「401」不當作證據。未知安全診斷仍拒絕，原始錯誤、token、帳號與登入內容都不回傳瀏覽器／日誌／測試收據。bridge 不獨立刷新、不重試付費路徑、不購買點數。
+
+官方依據：[外部 ChatGPT access token 模式與刷新要求](https://developers.openai.com/codex/app-server/)、[TokenData 及 JWT 解析／序列化](https://github.com/openai/codex/blob/main/codex-rs/login/src/token_data.rs)、[AuthDotJson schema](https://github.com/openai/codex/blob/main/codex-rs/login/src/auth/storage.rs)、[Codex auth manager](https://github.com/openai/codex/blob/main/codex-rs/login/src/auth/manager.rs)。auth manager 的 `from_external_access_token` 使用同一 access JWT 作 token info 並將 refresh_token 設為空字串；`proactive_refresh_reason` 只處理 managed Chatgpt，外部 ChatgptAuthTokens 不做該刷新。外部模式仍是實驗能力，若未來 CLI 無法接受或無法讀回費用證據，功能應停止而非回退 API。
 
 ## 新增或調整工具
 
@@ -88,6 +111,6 @@ Codex 不可用時仍僅展示標 `CACHE` 的 CLI 模型快取，無權靠快取
 python3 -B -m unittest scripts/tests/test_srpp_local_ai_bridge.py
 ```
 
-單元測試使用隔離 fixture，涵蓋付費／未知狀態零推論、憑證隔離、組合驗證、版本過期、單工作鎖、逾時 killpg、拒絕遠端模型、token 驗證及安裝冪等。Claude 自動探索另驗真實去識別 initialize 結構、動態第四模型、能力矛盾、未知 effort、原始付費 context 拒絕、legacy 配置不裁切、共同 deadline、成功／失敗／輸出超限的程序與管線清理。fixture 只保存合成 request_id 與公開 model metadata，不含 account、email、org、憑證、commands 或 skills 來源。整體驗收另外應經正式頁面 BFF 執行 LOCAL 與所選 AI，確認數值雜湊一致、文字解讀與收據保留、未選模型及工具不被呼叫。
+單元測試使用隔離 fixture，涵蓋付費／未知狀態零推論、憑證隔離、組合驗證、版本過期、單工作鎖、逾時 killpg、拒絕遠端模型、token 驗證及安裝冪等。Codex 同步測試只用合成 JWT，覆蓋登入輪替、同 snapshot proof／exec、來源安全讀取、過期／錯帳、舊副本不可 fallback、401 與費用未知分流、並行投影及外層硬逾時清理；不讀寫真實登入、不發模型推論。Claude 自動探索另驗真實去識別 initialize 結構、動態第四模型、能力矛盾、未知 effort、原始付費 context 拒絕、legacy 配置不裁切、共同 deadline、成功／失敗／輸出超限的程序與管線清理。fixture 只保存合成 request_id 與公開 model metadata，不含真實 account、email、org、憑證、commands 或 skills 來源。整體驗收另外應經正式頁面 BFF 執行 LOCAL 與所選 AI，確認數值雜湊一致、文字解讀與收據保留、未選模型及工具不被呼叫。
 
 參考官方說明：[Codex app-server](https://developers.openai.com/codex/app-server/)、[Codex 額外 credits](https://help.openai.com/en/articles/12642688-using-credits-for-flexible-usage-in-chatgpt-plus-pro)、[Claude Code CLI](https://code.claude.com/docs/en/cli-reference)、[Claude 額外用量](https://support.claude.com/en/articles/12429409-manage-usage-credits-for-paid-claude-plans)、[LM Studio 本機庫存](https://lmstudio.ai/docs/developer/rest/list)。

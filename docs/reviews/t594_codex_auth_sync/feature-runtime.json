@@ -1,0 +1,325 @@
+{
+  "schemaVersion": 1,
+  "scope": "FEATURE_PREMERGE_RUNTIME_ACCEPTANCE",
+  "verifiedAt": "2026-11-15T15:59:25.574235+00:00",
+  "sourceBranch": "codex/srpp-codex-auth-sync",
+  "sourceRoot": "/Users/steven/.codex/worktrees/srpp-codex-auth-sync/asset-management",
+  "baseMainSha": "d7a8d2a8853965269eb5ec3d28f8bef22d1d0ed0",
+  "hostInstaller": {
+    "label": "com.steven.srpp-local-ai-bridge",
+    "mode": "INSTALLED",
+    "jobLoaded": true,
+    "sourceRoot": "/Users/steven/.codex/worktrees/srpp-codex-auth-sync/asset-management",
+    "bind": "127.0.0.1:8766",
+    "tokenPreserved": true,
+    "registryPreserved": true,
+    "tokenAndRegistryBytesAndModesPreserved": true,
+    "sourceAuthBytesAndModeUnchanged": true
+  },
+  "deployment": {
+    "servicesRebuiltAndRecreated": [
+      "business-services",
+      "frontend"
+    ],
+    "bffRebuiltOrRecreated": false,
+    "featureEnvMatchesMain": true,
+    "fubonSecretsBoundToMain": true,
+    "effectiveConfig": {
+      "business-services": {
+        "effectiveEnvironmentMatchesMain": true,
+        "composeWorkingDirectory": "/Users/steven/.codex/worktrees/srpp-codex-auth-sync/asset-management",
+        "image": "sha256:475bc877d62bfb64fae44ae7dbd9691a285415a1cc6ef59c57b1f701872cf488",
+        "restartCount": 0
+      },
+      "frontend": {
+        "effectiveEnvironmentMatchesMain": true,
+        "composeWorkingDirectory": "/Users/steven/.codex/worktrees/srpp-codex-auth-sync/asset-management",
+        "image": "sha256:f63c8c80a530a79f7dbd70006fd53bb55155f332b6b301b7e9d99394cb929950",
+        "restartCount": 0
+      }
+    }
+  },
+  "codexSyntheticInterpretation": {
+    "httpStatus": 200,
+    "elapsedSeconds": 10.7,
+    "selection": {
+      "toolId": "codex",
+      "model": "gpt-6-luna",
+      "effort": "low",
+      "catalogRevision": "e583500a840c4e241944a81ce0765857310ea5179d76cbb6269e2f31ba4f9ef6"
+    },
+    "execution": {
+      "actualModel": null,
+      "adapterVersion": "1",
+      "billingMode": "SUBSCRIPTION",
+      "code": null,
+      "completedAt": "2026-11-15T15:58:56.724722Z",
+      "modelEvidence": "REQUESTED_ONLY",
+      "requestedEffort": "low",
+      "requestedModel": "gpt-6-luna",
+      "startedAt": "2026-11-15T15:58:49.298771Z",
+      "status": "SUCCEEDED",
+      "toolId": "codex"
+    },
+    "code": null,
+    "textPresent": true,
+    "textLength": 123,
+    "syntheticInput": true,
+    "modelRequestsIssued": 1,
+    "fallbackUsed": false,
+    "sourceAuthBytesAndModeUnchanged": true,
+    "capabilities": {
+      "status": 200,
+      "elapsedSeconds": 1.953,
+      "codex": {
+        "adapter": "codex_cli",
+        "available": true,
+        "billingMode": "SUBSCRIPTION",
+        "code": null,
+        "id": "codex",
+        "label": "Codex CLI",
+        "modelSource": "RUNTIME",
+        "models": [
+          {
+            "defaultEffort": "low",
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max",
+              "ultra"
+            ],
+            "id": "gpt-6.1-sol",
+            "label": "GPT-6.1-Sol"
+          },
+          {
+            "defaultEffort": "medium",
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max",
+              "ultra"
+            ],
+            "id": "gpt-6-astra",
+            "label": "GPT-6-Astra"
+          },
+          {
+            "defaultEffort": "low",
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max",
+              "ultra"
+            ],
+            "id": "gpt-6.1-terra",
+            "label": "GPT-6.1 Terra"
+          },
+          {
+            "defaultEffort": "medium",
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max",
+              "ultra"
+            ],
+            "id": "gpt-6-sol",
+            "label": "GPT-6-Sol"
+          },
+          {
+            "defaultEffort": "medium",
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "id": "gpt-6-luna",
+            "label": "GPT-6-Luna"
+          },
+          {
+            "defaultEffort": "low",
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max",
+              "ultra"
+            ],
+            "id": "gpt-5.6-sol",
+            "label": "GPT-5.6-Sol"
+          },
+          {
+            "defaultEffort": "medium",
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max",
+              "ultra"
+            ],
+            "id": "gpt-5.6-terra",
+            "label": "GPT-5.6-Terra"
+          },
+          {
+            "defaultEffort": "medium",
+            "efforts": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "id": "gpt-5.6-luna",
+            "label": "GPT-5.6-Luna"
+          }
+        ]
+      }
+    },
+    "businessCenter": {
+      "status": 200,
+      "codexMatchesHost": true
+    }
+  },
+  "sourceAuthentication": {
+    "bytesAndModeUnchangedAcrossInstall": true,
+    "bytesAndModeUnchangedAcrossCapabilityAndInference": true,
+    "sourceNotWrittenByAcceptance": true,
+    "sourceCredentialDataOrHashesInReceipt": false,
+    "projectionRefreshToken": "empty by implementation and regression tests; no source refresh token copied"
+  },
+  "infrastructure": {
+    "oldRuns": {
+      "local": {
+        "id": "5d4213dc-b7f5-41ce-adc6-6a3603734639",
+        "status": "SUCCEEDED",
+        "aiStatus": "NOT_REQUESTED",
+        "resultSha256": "65757660328b41f04c4f26a842b1253ca083ccc296668dbcf4a2a56a3b984a4c",
+        "hashVerified": true,
+        "aiSelection": null,
+        "aiExecution": null
+      },
+      "ai": {
+        "id": "4d15edde-cebf-45c5-b60c-2aaf4230b9a9",
+        "status": "SUCCEEDED",
+        "aiStatus": "SUCCEEDED",
+        "resultSha256": "02125b3865f3020224cd90e2d5704ae16b6d71bc7cc25f4da3aa830655dfe261",
+        "hashVerified": true,
+        "aiSelection": {
+          "toolId": "ollama",
+          "model": "gemma4:31b",
+          "effort": null,
+          "catalogRevision": "d4a11f928f74df82ce8e4d23321162ffaa7a37b40aae66ec87ce23bd284d2c46"
+        },
+        "aiExecution": {
+          "toolId": "ollama",
+          "requestedModel": "gemma4:31b",
+          "requestedEffort": null,
+          "actualModel": "gemma4:31b",
+          "modelEvidence": "PROVIDER_REPORTED",
+          "billingMode": "LOCAL",
+          "adapterVersion": "1",
+          "startedAt": "2026-11-15T10:41:00.736449Z",
+          "completedAt": "2026-11-15T10:41:50.226475Z",
+          "status": "SUCCEEDED",
+          "code": null
+        }
+      }
+    },
+    "containers": {
+      "business-services": {
+        "image": "sha256:475bc877d62bfb64fae44ae7dbd9691a285415a1cc6ef59c57b1f701872cf488",
+        "startedAt": "2026-11-15T15:58:03.86763447Z",
+        "restartCount": 0,
+        "health": "healthy"
+      },
+      "bff": {
+        "image": "sha256:36d9fa4e6b53631651d9e6f163bc4542a63b33b4d2b1c3a8564c3c69d34f8b5e",
+        "startedAt": "2026-11-15T10:52:01.651066388Z",
+        "restartCount": 0,
+        "health": "healthy"
+      },
+      "frontend": {
+        "image": "sha256:f63c8c80a530a79f7dbd70006fd53bb55155f332b6b301b7e9d99394cb929950",
+        "startedAt": "2026-11-15T15:58:14.747795711Z",
+        "restartCount": 0,
+        "health": null
+      }
+    },
+    "unchangedBff": true,
+    "safe9090": {
+      "quotes": 200,
+      "marketIndex": 200
+    },
+    "formalDomainTlsSystemTrustAndHostnameVerified": true
+  },
+  "browser": {
+    "source": "https://localhost",
+    "deployedProductionAssets": true,
+    "syntheticAuthAndBffDataOnly": true,
+    "realLogin": false,
+    "realInference": false,
+    "apiWrites": 0,
+    "checks": {
+      "codexAvailable": true,
+      "codexToolSelectable": true,
+      "modelSelectable": true,
+      "effortSelectable": true,
+      "optionShowsAvailableStatus": true,
+      "pageErrors": 0,
+      "externalRequestsBlocked": true,
+      "unexpectedApiRequests": 0
+    },
+    "authRequired": {
+      "executed": true,
+      "safeMessageVisible": true,
+      "rawCodeHidden": true,
+      "toolUnavailable": true,
+      "aiDisabled": true
+    },
+    "authExpired": {
+      "executed": true,
+      "safeMessageVisible": true,
+      "rawCodeHidden": true,
+      "toolUnavailable": true,
+      "aiDisabled": true
+    },
+    "billingUnverified": {
+      "executed": true,
+      "safeMessageVisible": true,
+      "rawCodeHidden": true,
+      "toolUnavailable": true,
+      "aiDisabled": true
+    },
+    "screenshots": {
+      "availableBaseline": "/tmp/t594-acceptance/codex-selectors-baseline.png"
+    }
+  },
+  "testCounts": {
+    "python": 91,
+    "backend": 65,
+    "frontend": 192,
+    "allPassed": true
+  },
+  "review": {
+    "spec": "PASS",
+    "arch": "PASS"
+  },
+  "limitations": [
+    "Model inference used synthetic figures via the protected host bridge; no new financial draft or simulation was created.",
+    "Provider did not report the actual model, so the successful CLI receipt remains REQUESTED_ONLY.",
+    "Browser authentication, capabilities and error cases used synthetic response fixtures against production HTTPS assets; no real OIDC session was used.",
+    "Source auth byte/mode comparison is a point-in-time read-only check and cannot lock unrelated CLI sessions."
+  ],
+  "noFallbackNoExtraApiBilling": true,
+  "noPublishNoMailNoTrade": true
+}

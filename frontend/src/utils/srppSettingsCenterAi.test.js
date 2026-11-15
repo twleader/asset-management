@@ -105,6 +105,19 @@ test('LOCAL 狀態可明確清空 AI 選擇，未知 safe code 不會原樣顯�
   assert.equal(safeSrppAiCodeMessage('__proto__'), 'AI 工具回報暫時無法處理；情境數值仍已保留。')
 })
 
+test('登入必要與登入過期文案不會混淆費用未知或未呼叫模型', () => {
+  const authRequired = safeSrppAiCodeMessage('AI_AUTH_REQUIRED')
+  const authExpired = safeSrppAiCodeMessage('AI_AUTH_EXPIRED')
+  const billingUnverified = safeSrppAiCodeMessage('AI_BILLING_UNVERIFIED')
+
+  assert.equal(authRequired, '無法取得此工具的安全登入資訊；若此為 Codex 工具，請先在一般 Codex CLI 登入。')
+  assert.equal(authExpired, '此工具的登入已失效或需要更新；若此為 Codex 工具，請在一般 Codex CLI 重新登入。')
+  assert.equal(billingUnverified, '無法確認這次使用不會產生額外費用，因此系統未呼叫模型。')
+  assert.notEqual(authRequired, authExpired)
+  assert.notEqual(authRequired, billingUnverified)
+  assert.notEqual(authExpired, billingUnverified)
+})
+
 test('收據只在有供應者回報證據時顯示實際模型，並翻譯有限狀態與來源', () => {
   assert.equal(srppAiActualModelLabel({ modelEvidence: 'REQUESTED_ONLY', actualModel: null }), '未回報實際模型（僅記錄要求模型）')
   assert.equal(srppAiActualModelLabel({ modelEvidence: 'PROVIDER_REPORTED', actualModel: 'model-live-2' }), 'model-live-2')

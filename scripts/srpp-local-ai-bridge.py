@@ -7,6 +7,7 @@ financial writes are accepted by this bridge. Credentials never leave the host.
 from __future__ import annotations
 
 import argparse
+import base64
 import concurrent.futures
 import contextlib
 import datetime as dt
@@ -32,6 +33,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 
 sys.dont_write_bytecode = True
 VERSION = "1"
@@ -39,6 +41,9 @@ MAX_BODY = 2 * 1024 * 1024
 MAX_TEXT = 20000
 DEADLINE = 120
 CLAUDE_METADATA_SECONDS = 7.5
+CODEX_METADATA_SECONDS = 6
+AUTH_MAX_BYTES = 64 * 1024
+AUTH_MIN_VALID_SECONDS = 180
 STATE = pathlib.Path.home() / ".local/share/srpp-local-ai"
 ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+\-]{0,159}\Z")
 TOOL_ID = re.compile(r"[a-z0-9][a-z0-9_\-]{0,63}\Z")
@@ -57,6 +62,8 @@ MESSAGES = {
     "AI_CATALOG_STALE": "AI 模型清單已更新，請重新載入後選擇",
     "AI_TOOL_UNAVAILABLE": "AI 工具尚未啟動或無法連線",
     "AI_SUBSCRIPTION_REQUIRED": "需要有效的既有訂閱登入，不能使用 API 金鑰",
+    "AI_AUTH_REQUIRED": "無法讀取有效的 Codex 訂閱登入，請在一般 Codex CLI 重新登入",
+    "AI_AUTH_EXPIRED": "Codex 登入已失效或需要更新，請在一般 Codex CLI 重新登入",
     "AI_BILLING_UNVERIFIED": "無法確認僅使用訂閱額度，已停止呼叫",
     "AI_PAID_CREDITS_ENABLED": "帳戶可使用額外付費點數，已停止呼叫",
     "AI_EXTRA_USAGE_ENABLED": "帳戶已開啟額外付費用量，已停止呼叫",
@@ -78,6 +85,13 @@ class Problem(Exception):
     def body(self):
         return {"code": self.code, "message": MESSAGES.get(self.code, MESSAGES["AI_EXECUTION_FAILED"]),
                 "execution": self.execution}
+
+
+@dataclass(frozen=True, repr=False)
+class CodexAuthSnapshot:
+    access_token: str
+    account_id: str
+    expires_at: int
 
 
 def utc():
@@ -128,6 +142,97 @@ def secure_directory(path):
     return path
 
 
+def read_codex_auth_snapshot():
+    """Read only the normal CLI source; never the former bridge auth copy."""
+    directory = pathlib.Path.home()/".codex"
+    directory_fd = None
+    try:
+        directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+        directory_info = os.fstat(directory_fd)
+        if directory_info.st_uid != os.getuid() or directory_info.st_mode & 0o022:
+            raise Problem("AI_AUTH_REQUIRED")
+        raw = None
+        for _ in range(2):
+            fd = os.open("auth.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, dir_fd=directory_fd)
+            try:
+                before = os.fstat(fd)
+                if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid()
+                        or stat.S_IMODE(before.st_mode) != 0o600 or not 0 < before.st_size <= AUTH_MAX_BYTES):
+                    raise Problem("AI_AUTH_REQUIRED")
+                candidate = os.read(fd, AUTH_MAX_BYTES+1)
+                after = os.fstat(fd)
+                current = os.stat("auth.json", dir_fd=directory_fd, follow_symlinks=False)
+                root_current = directory.lstat()
+                if (root_current.st_dev, root_current.st_ino) != (directory_info.st_dev, directory_info.st_ino):
+                    raise Problem("AI_AUTH_REQUIRED")
+                def identity(info):
+                    return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+                if identity(before) == identity(after) == identity(current) and len(candidate) == before.st_size:
+                    raw = candidate
+                    break
+            finally:
+                os.close(fd)
+        if raw is None:
+            raise Problem("AI_AUTH_REQUIRED")
+        auth = decode(raw)
+        if not isinstance(auth, dict):
+            raise Problem("AI_AUTH_REQUIRED")
+        if auth.get("OPENAI_API_KEY") or auth.get("auth_mode") in {"apikey", "apiKey"}:
+            raise Problem("AI_SUBSCRIPTION_REQUIRED")
+        if auth.get("auth_mode") not in {"chatgpt", "chatgptAuthTokens"}:
+            raise Problem("AI_AUTH_REQUIRED")
+        tokens = auth.get("tokens")
+        if not isinstance(tokens, dict):
+            raise Problem("AI_AUTH_REQUIRED")
+        access, account = tokens.get("access_token"), tokens.get("account_id")
+        if not isinstance(access, str) or not isinstance(account, str) or not 1 <= len(account) <= 256:
+            raise Problem("AI_AUTH_REQUIRED")
+        parts = access.split(".")
+        if len(parts) != 3 or any(not value for value in parts):
+            raise Problem("AI_AUTH_REQUIRED")
+        payload = base64.b64decode(parts[1]+"="*(-len(parts[1]) % 4), altchars=b"-_", validate=True)
+        claims = decode(payload)
+        if not isinstance(claims, dict):
+            raise Problem("AI_AUTH_REQUIRED")
+        expiry, not_before = claims.get("exp"), claims.get("nbf")
+        if not isinstance(expiry, int) or isinstance(expiry, bool):
+            raise Problem("AI_AUTH_REQUIRED")
+        now = time.time()
+        if expiry <= now+AUTH_MIN_VALID_SECONDS:
+            raise Problem("AI_AUTH_EXPIRED")
+        if not_before is not None and (not isinstance(not_before, int) or isinstance(not_before, bool) or not_before > now):
+            raise Problem("AI_AUTH_REQUIRED")
+        identity_claim = claims.get("https://api.openai.com/auth")
+        if not isinstance(identity_claim, dict) or identity_claim.get("chatgpt_account_id") != account:
+            raise Problem("AI_AUTH_REQUIRED")
+        return CodexAuthSnapshot(access, account, expiry)
+    except Problem as error:
+        if error.code in {"AI_AUTH_REQUIRED", "AI_AUTH_EXPIRED", "AI_SUBSCRIPTION_REQUIRED"}:
+            raise
+        raise Problem("AI_AUTH_REQUIRED") from None
+    except (OSError, ValueError, TypeError, KeyError):
+        raise Problem("AI_AUTH_REQUIRED") from None
+    finally:
+        if directory_fd is not None:
+            os.close(directory_fd)
+
+
+def parent_operation_root():
+    value = os.environ.get("SRPP_AI_OPERATION_ROOT")
+    if value is None:
+        return None
+    root = pathlib.Path(value)
+    try:
+        info = root.lstat()
+        if (not root.is_absolute() or not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+                or stat.S_IMODE(info.st_mode) != 0o700 or os.environ.get("TMPDIR") != value
+                or os.getpgrp() != os.getpid()):
+            raise Problem("AI_AUTH_REQUIRED")
+    except OSError:
+        raise Problem("AI_AUTH_REQUIRED") from None
+    return root
+
+
 def clean_environment():
     # OS login-session identity is needed for macOS Keychain; no service settings,
     # API keys, provider overrides, proxies, helpers, or SDK variables are copied.
@@ -140,23 +245,45 @@ def clean_environment():
     return env
 
 
-def run_process(argv, *, env=None, cwd=None, data=None, timeout=7, limit=MAX_BODY):
-    """Bounded pipes. Caller owns the process group for the full interpretation."""
+def run_process(argv, *, env=None, cwd=None, data=None, timeout=7, limit=MAX_BODY,
+                failure_classifier=None, own_process_group=False):
+    """One deadline covers nonblocking stdin, stdout and child exit."""
+    end = time.monotonic()+timeout
     process = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                               stderr=subprocess.DEVNULL, env=env, cwd=cwd)
+                               stderr=subprocess.DEVNULL, env=env, cwd=cwd, start_new_session=own_process_group)
+    sel = selectors.DefaultSelector()
     try:
-        if data is not None:
-            process.stdin.write(data)
-        process.stdin.close()
-        chunks, size, end = [], 0, time.monotonic() + timeout
-        sel = selectors.DefaultSelector()
-        sel.register(process.stdout, selectors.EVENT_READ)
+        input_bytes, input_offset = data or b"", 0
+        os.set_blocking(process.stdout.fileno(), False)
+        sel.register(process.stdout, selectors.EVENT_READ, "output")
+        if input_bytes:
+            os.set_blocking(process.stdin.fileno(), False)
+            sel.register(process.stdin, selectors.EVENT_WRITE, "input")
+        else:
+            process.stdin.close()
+        chunks, size = [], 0
         while sel.get_map():
-            remaining = end - time.monotonic()
-            if remaining <= 0:
+            left = end-time.monotonic()
+            if left <= 0:
                 raise Problem("AI_TIMEOUT")
-            for key, _ in sel.select(min(remaining, .2)):
-                block = os.read(key.fd, 65536)
+            for key, _ in sel.select(min(left, .2)):
+                if key.data == "input":
+                    try:
+                        input_offset += os.write(key.fd, input_bytes[input_offset:input_offset+16384])
+                    except BlockingIOError:
+                        continue
+                    except BrokenPipeError:
+                        sel.unregister(key.fileobj)
+                        process.stdin.close()
+                        continue
+                    if input_offset >= len(input_bytes):
+                        sel.unregister(key.fileobj)
+                        process.stdin.close()
+                    continue
+                try:
+                    block = os.read(key.fd, 65536)
+                except BlockingIOError:
+                    continue
                 if not block:
                     sel.unregister(key.fileobj)
                     continue
@@ -166,14 +293,23 @@ def run_process(argv, *, env=None, cwd=None, data=None, timeout=7, limit=MAX_BOD
                 chunks.append(block)
         code = process.wait(timeout=max(.1, end-time.monotonic()))
         if code:
-            raise Problem("AI_EXECUTION_FAILED")
+            safe_code = failure_classifier(b"".join(chunks)) if failure_classifier is not None else None
+            raise Problem(safe_code or "AI_EXECUTION_FAILED")
         return b"".join(chunks)
     except subprocess.TimeoutExpired:
         raise Problem("AI_TIMEOUT") from None
     finally:
-        if process.poll() is None:
+        if own_process_group:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+        elif process.poll() is None:
             process.kill()
         process.wait()
+        sel.close()
+        for pipe in (process.stdin, process.stdout):
+            if pipe is not None:
+                with contextlib.suppress(OSError):
+                    pipe.close()
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -332,32 +468,76 @@ class Bridge:
         self.state = secure_directory(state_dir or self.registry_path.parent)
         self.lock = threading.Lock()
         self.catalog_lock = threading.RLock()
-        self.auth_lock = threading.Lock()
         self.cached = None
         self.cached_until = 0
         self.registry_digest = None
 
-    def codex_home(self):
-        home = secure_directory(self.state / "codex-home")
-        target = home/"auth.json"
-        if not target.exists():
-            source = pathlib.Path.home()/".codex/auth.json"
-            auth = decode(private_file(source).read_bytes())
-            if auth.get("auth_mode") != "chatgpt" or auth.get("OPENAI_API_KEY"):
-                raise Problem("AI_SUBSCRIPTION_REQUIRED")
-            fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    @contextlib.contextmanager
+    def codex_session(self):
+        snapshot = read_codex_auth_snapshot()
+        parent_root = parent_operation_root()
+        temporary = tempfile.mkdtemp(prefix="srpp-codex-access-", dir=parent_root)
+        try:
+            home = secure_directory(pathlib.Path(temporary))
+            projection = {"auth_mode": "chatgptAuthTokens", "tokens": {
+                "access_token": snapshot.access_token, "id_token": snapshot.access_token,
+                "refresh_token": "", "account_id": snapshot.account_id}, "last_refresh": utc()}
+            fd = os.open(home/"auth.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
             with os.fdopen(fd, "wb") as stream:
-                stream.write(encode(auth))
-        auth = decode(private_file(target).read_bytes())
-        if auth.get("auth_mode") != "chatgpt" or auth.get("OPENAI_API_KEY"):
-            raise Problem("AI_SUBSCRIPTION_REQUIRED")
-        return home
+                stream.write(encode(projection))
+            env = clean_environment()
+            env["CODEX_HOME"] = str(home)
+            yield env
+        finally:
+            # In an execution worker, only the parent removes this root after
+            # it has killed/waited the complete worker process group. SIGKILL
+            # cannot skip that parent's cleanup as it can a child finally.
+            if parent_root is None:
+                shutil.rmtree(temporary)
 
-    def codex_env(self):
-        env = clean_environment()
-        with self.auth_lock:
-            env["CODEX_HOME"] = str(self.codex_home())
-        return env
+    @staticmethod
+    def codex_auth_error(event):
+        """Only native structured error envelopes, never text or stderr."""
+        if not isinstance(event, dict):
+            return None
+        if event.get("method") == "account/chatgptAuthTokens/refresh":
+            return "AI_AUTH_EXPIRED"
+        errors = []
+        if isinstance(event.get("error"), dict) and (event.get("id") is not None or event.get("type") in {"error", "turn.failed"}):
+            errors.append(event["error"])
+        if event.get("type") == "error":
+            errors.append(event)
+        item = event.get("item")
+        if isinstance(item, dict) and item.get("type") == "error":
+            errors.append(item)
+        for error in errors:
+            if any(error.get(key) == 401 for key in ("status", "statusCode", "httpStatus")):
+                return "AI_AUTH_EXPIRED"
+            code = error.get("code")
+            if code in (401, "unauthorized", "token_expired", "invalid_token", "refresh_token_expired", "refresh_token_reused"):
+                return "AI_AUTH_EXPIRED"
+            message = error.get("message")
+            if not isinstance(message, str):
+                continue
+            message = message[:8000].casefold()
+            if (re.search(r"(?<![0-9])401(?![0-9])", message)
+                    or "unauthorized" in message or "refresh_token_expired" in message or "refresh_token_reused" in message
+                    or re.search(r"(?:access token|refresh token|authentication token).{0,160}(?:expired|revoked|invalid)", message)
+                    or "token has expired" in message or "token expired" in message):
+                return "AI_AUTH_EXPIRED"
+            if any(term in message for term in ("not logged in", "login required", "sign in required", "no authentication")):
+                return "AI_AUTH_REQUIRED"
+        return None
+
+    def codex_exec_auth_error(self, raw):
+        for line in raw.splitlines():
+            try:
+                code = self.codex_auth_error(decode(line))
+            except Problem:
+                return None
+            if code is not None:
+                return code
+        return None
 
     @staticmethod
     def codex_options():
@@ -398,6 +578,9 @@ class Bridge:
         completed, text_seen, started = False, False, False
         for line in raw.splitlines():
             event = decode(line)
+            auth_code = self.codex_auth_error(event)
+            if auth_code is not None:
+                raise Problem(auth_code)
             kind = event.get("type")
             if kind in {"error", "turn.failed"}:
                 raise Problem("AI_EXECUTION_FAILED")
@@ -423,48 +606,77 @@ class Bridge:
         if not completed or not text_seen:
             raise Problem("AI_EXECUTION_FAILED")
 
-    def codex_rpc(self, tool):
-        env = self.codex_env()
+    def codex_rpc(self, tool, env=None):
+        if env is None:
+            with self.codex_session() as projected_env:
+                return self.codex_rpc(tool, env=projected_env)
         with tempfile.TemporaryDirectory(prefix="srpp-ai-") as cwd:
+            owns_group = parent_operation_root() is None
             process = subprocess.Popen([tool["executable"], "app-server", "--listen", "stdio://", *self.codex_options()],
-                                       stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env, cwd=cwd)
+                                       stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                       env=env, cwd=cwd, start_new_session=owns_group)
             def send(value):
                 process.stdin.write(encode(value)+b"\n")
                 process.stdin.flush()
             found, buffer, size = {}, b"", 0
+            initialized = False
+            sel = selectors.DefaultSelector()
             try:
                 send({"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "srpp-local-ai", "version": VERSION}, "capabilities": {"experimentalApi": True}}})
-                sel = selectors.DefaultSelector()
                 sel.register(process.stdout, selectors.EVENT_READ)
-                end = time.monotonic()+6
+                end = time.monotonic()+CODEX_METADATA_SECONDS
                 while len(found) < 2 and time.monotonic() < end:
                     for key, _ in sel.select(.1):
                         block = os.read(key.fd, 65536)
                         if not block:
-                            raise Problem("AI_TOOL_UNAVAILABLE")
+                            raise Problem("AI_BILLING_UNVERIFIED")
                         size += len(block)
                         if size > MAX_BODY:
                             raise Problem("AI_TOOL_UNAVAILABLE")
                         buffer += block
                         while b"\n" in buffer:
                             line, buffer = buffer.split(b"\n", 1)
-                            msg = decode(line)
+                            try:
+                                msg = decode(line)
+                            except Problem:
+                                raise Problem("AI_BILLING_UNVERIFIED") from None
+                            if not isinstance(msg, dict):
+                                raise Problem("AI_BILLING_UNVERIFIED")
+                            auth_code = self.codex_auth_error(msg)
+                            if auth_code is not None:
+                                raise Problem(auth_code)
+                            if isinstance(msg.get("id"), bool):
+                                raise Problem("AI_BILLING_UNVERIFIED")
                             if msg.get("id") == 1:
-                                if "error" in msg:
-                                    raise Problem("AI_TOOL_UNAVAILABLE")
+                                if initialized or "error" in msg or not isinstance(msg.get("result"), dict):
+                                    raise Problem("AI_BILLING_UNVERIFIED")
+                                initialized = True
                                 send({"method": "initialized"})
                                 send({"id": 2, "method": "account/rateLimits/read", "params": None})
                                 send({"id": 3, "method": "model/list", "params": {"includeHidden": False}})
                             elif msg.get("id") in (2, 3):
+                                if not initialized or msg["id"] in found:
+                                    raise Problem("AI_BILLING_UNVERIFIED")
                                 if "error" in msg:
+                                    raise Problem("AI_BILLING_UNVERIFIED")
+                                if not isinstance(msg.get("result"), dict):
                                     raise Problem("AI_BILLING_UNVERIFIED")
                                 found[msg["id"]] = msg.get("result", {})
                 if len(found) != 2:
                     raise Problem("AI_BILLING_UNVERIFIED")
                 return found[2], found[3]
             finally:
-                process.kill()
+                sel.close()
+                if owns_group:
+                    with contextlib.suppress(ProcessLookupError):
+                        os.killpg(process.pid, signal.SIGKILL)
+                elif process.poll() is None:
+                    process.kill()
                 process.wait()
+                for pipe in (process.stdin, process.stdout):
+                    if pipe is not None:
+                        with contextlib.suppress(OSError):
+                            pipe.close()
 
     @staticmethod
     def check_codex_billing(limits):
@@ -743,22 +955,31 @@ class Bridge:
         try:
             argv = [sys.executable, str(pathlib.Path(__file__).resolve()), "--execute", "--registry", str(self.registry_path),
                     "--state-dir", str(self.state), "--registry-sha", expected_registry]
-            process = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                       start_new_session=True, env=clean_environment())
-            try:
-                output, _ = process.communicate(encode(body), timeout=DEADLINE)
-                if len(output) > MAX_BODY:
-                    raise Problem("AI_EXECUTION_FAILED")
-                value = decode(output)
-                if process.returncode or "code" in value:
-                    raise Problem(value.get("code", "AI_EXECUTION_FAILED"), execution=value.get("execution"))
-                return value
-            except subprocess.TimeoutExpired:
-                raise Problem("AI_TIMEOUT") from None
-            finally:
-                with contextlib.suppress(ProcessLookupError):
-                    os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
+            # This root belongs to the supervising process, not to its worker.
+            # A hard worker kill cannot bypass cleanup of access projections.
+            with tempfile.TemporaryDirectory(prefix="srpp-ai-operation-") as operation_root:
+                child_env = clean_environment()
+                child_env.update(TMPDIR=operation_root, SRPP_AI_OPERATION_ROOT=operation_root)
+                process = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                           start_new_session=True, env=child_env)
+                try:
+                    output, _ = process.communicate(encode(body), timeout=DEADLINE)
+                    if len(output) > MAX_BODY:
+                        raise Problem("AI_EXECUTION_FAILED")
+                    value = decode(output)
+                    if process.returncode or "code" in value:
+                        raise Problem(value.get("code", "AI_EXECUTION_FAILED"), execution=value.get("execution"))
+                    return value
+                except subprocess.TimeoutExpired:
+                    raise Problem("AI_TIMEOUT") from None
+                finally:
+                    with contextlib.suppress(ProcessLookupError):
+                        os.killpg(process.pid, signal.SIGKILL)
+                    process.wait()
+                    for pipe in (process.stdin, process.stdout):
+                        if pipe is not None:
+                            with contextlib.suppress(OSError):
+                                pipe.close()
         finally:
             self.lock.release()
 
@@ -816,17 +1037,28 @@ class Bridge:
                 if response.get("is_error") is True:
                     raise Problem("AI_EXECUTION_FAILED")
                 return response.get("result"), None
-            output_file = pathlib.Path(cwd)/"last-message.txt"
-            argv = [tool["executable"], "exec", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check",
-                    "--ephemeral", "--json", "--sandbox", "read-only", "--model", model,
-                    "--output-last-message", str(output_file), *self.codex_options()]
-            if effort is not None:
-                argv += ["-c", 'model_reasoning_effort='+json.dumps(effort)]
-            events = run_process(argv, env=self.codex_env(), cwd=cwd, data=prompt.encode(), timeout=105)
-            self.validate_codex_events(events)
-            if not output_file.is_file():
-                raise Problem("AI_EMPTY_RESPONSE")
-            return output_file.read_text()[:MAX_TEXT], None
+            with self.codex_session() as projected_env:
+                # The last authority check and exec must use this exact access
+                # snapshot, even if the normal CLI signs in again meanwhile.
+                limits, catalog = self.codex_rpc(tool, env=projected_env)
+                self.check_codex_billing(limits)
+                models = self.codex_models(catalog)
+                selected = next((row for row in models if row["id"] == model), None)
+                if selected is None or (effort not in selected["efforts"] if selected["efforts"] else effort is not None):
+                    raise Problem("AI_MODEL_UNAVAILABLE")
+                output_file = pathlib.Path(cwd)/"last-message.txt"
+                argv = [tool["executable"], "exec", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check",
+                        "--ephemeral", "--json", "--sandbox", "read-only", "--model", model,
+                        "--output-last-message", str(output_file), *self.codex_options()]
+                if effort is not None:
+                    argv += ["-c", 'model_reasoning_effort='+json.dumps(effort)]
+                events = run_process(argv, env=projected_env, cwd=cwd, data=prompt.encode(), timeout=105,
+                                     failure_classifier=self.codex_exec_auth_error,
+                                     own_process_group=parent_operation_root() is None)
+                self.validate_codex_events(events)
+                if not output_file.is_file():
+                    raise Problem("AI_EMPTY_RESPONSE")
+                return output_file.read_text()[:MAX_TEXT], None
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
