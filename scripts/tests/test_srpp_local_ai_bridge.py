@@ -375,6 +375,233 @@ class HttpTests(Fixture):
         execute.assert_not_called()
 
 
+class ClaudeDiscoveryTests(Fixture):
+    def metadata(self):
+        return json.loads((ROOT/"scripts/tests/fixtures/srpp_claude_initialize_models.json").read_text())
+
+    def rows(self):
+        return self.metadata()["response"]["response"]["models"]
+
+    def cli_program(self, *, payload=None, suffix="", sleep=False, oversize=False):
+        executable = self.path/"metadata-cli"
+        recorded = self.path/"control-input.json"
+        script = ("#!"+sys.executable+"\nimport sys,json,time,pathlib,os\n"
+                  +"request=json.loads(sys.stdin.readline())\n"
+                  +f"pathlib.Path({str(recorded)!r}).write_text(json.dumps(request))\n")
+        if sleep:
+            script += "time.sleep(30)\n"
+        elif oversize:
+            script += f"sys.stdout.write('x'*{b.MAX_BODY+1});sys.stdout.flush();time.sleep(30)\n"
+        else:
+            value = payload if payload is not None else self.metadata()
+            script += f"sys.stdout.write({json.dumps(value,ensure_ascii=False)!r}+'\\n'+{suffix!r});sys.stdout.flush();time.sleep(30)\n"
+        executable.write_text(script)
+        executable.chmod(0o700)
+        return {"id": "dynamic", "label": "Dynamic", "adapter": "claude_cli", "executable": str(executable)}, recorded
+
+    def discover_with_process_capture(self, tool, *, seconds=1):
+        processes = []
+        original = b.subprocess.Popen
+        def capture(*args, **kwargs):
+            process = original(*args, **kwargs)
+            processes.append(process)
+            return process
+        with mock.patch.object(b.subprocess, "Popen", side_effect=capture):
+            try:
+                result = self.bridge.claude_models(tool, time.monotonic()+seconds)
+                return result
+            finally:
+                self.assertEqual(1, len(processes))
+                process = processes[0]
+                self.assertIsNotNone(process.poll())
+                self.assertTrue(process.stdin.closed)
+                self.assertTrue(process.stdout.closed)
+
+    def test_default_registry_no_longer_contains_claude_models(self):
+        tool = next(t for t in b.default_registry()["tools"] if t["adapter"] == "claude_cli")
+        self.assertNotIn("models", tool)
+        self.tools = [tool]
+        self.save()
+        self.assertEqual([tool], b.load_registry(self.registry))
+
+    def test_real_cli_fixture_dynamic_models_and_efforts(self):
+        entries = b.Bridge.claude_model_entries(self.rows())
+        self.assertEqual(["claude-haiku-5-5", "claude-opus-5-5", "claude-sonnet-5-5"], [e["id"] for e in entries])
+        for entry in entries:
+            self.assertIn(entry["id"], entry["label"])
+            self.assertEqual(["low", "medium", "high", "xhigh", "max"], entry["efforts"])
+            self.assertEqual("medium", entry["defaultEffort"])
+
+    def test_fourth_cli_standard_version_is_not_capped_or_hardcoded(self):
+        rows = self.rows()
+        extra = copy.deepcopy(rows[1])
+        extra.update(value="claude-opus-5-4", resolvedModel="claude-opus-5-4", displayName="Opus 5.4",
+                     supportedEffortLevels=["low", "medium"])
+        rows.append(extra)
+        models = b.Bridge.claude_model_entries(rows)
+        self.assertEqual(4, len(models))
+        fourth = next(m for m in models if m["id"] == "claude-opus-5-4")
+        self.assertEqual(["low", "medium"], fourth["efforts"])
+
+    def test_explicit_unsupported_effort_only_null_without_invented_levels(self):
+        row = self.rows()[1]
+        row["supportsEffort"] = False
+        row["supportedEffortLevels"] = []
+        model = b.Bridge.claude_model_entries([row])[0]
+        self.assertEqual([], model["efforts"])
+        self.assertIsNone(model["defaultEffort"])
+
+    def test_unknown_or_conflicting_effort_metadata_fails_closed(self):
+        mutations = [lambda r:r.pop("supportsEffort"), lambda r:r.update(supportsEffort=None),
+                     lambda r:r.pop("supportedEffortLevels"), lambda r:r.update(supportedEffortLevels=[]),
+                     lambda r:r.update(supportedEffortLevels=["low", 2]), lambda r:r.update(supportedEffortLevels=["low", "low"]),
+                     lambda r:r.update(supportsEffort=False), lambda r:r.update(defaultEffort="not-returned")]
+        for mutate in mutations:
+            row = self.rows()[1]
+            mutate(row)
+            self.assert_code("AI_MODEL_UNAVAILABLE", b.Bridge.claude_model_entries, [row])
+
+    def test_cli_future_effort_and_default_are_not_replaced(self):
+        row = self.rows()[1]
+        row.update(supportedEffortLevels=["low", "future"], defaultEffort="future")
+        entry = b.Bridge.claude_model_entries([row])[0]
+        self.assertEqual(["low", "future"], entry["efforts"])
+        self.assertEqual("future", entry["defaultEffort"])
+        row.pop("defaultEffort")
+        self.assertEqual("low", b.Bridge.claude_model_entries([row])[0]["defaultEffort"])
+
+    def test_duplicates_same_capabilities_deduplicate_conflicts_reject(self):
+        row = self.rows()[1]
+        self.assertEqual(1, len(b.Bridge.claude_model_entries([row, copy.deepcopy(row)])))
+        conflict = copy.deepcopy(row)
+        conflict["supportedEffortLevels"] = ["low"]
+        self.assert_code("AI_MODEL_UNAVAILABLE", b.Bridge.claude_model_entries, [row, conflict])
+
+    def test_paid_context_original_value_never_loses_modifier(self):
+        row = self.rows()[1]
+        row.update(value="claude-opus-4-6[1m]", resolvedModel="claude-opus-4-6")
+        self.assert_code("AI_MODEL_UNAVAILABLE", b.Bridge.claude_model_entries, [row])
+        row.update(value="claude-opus-4-6", resolvedModel="claude-opus-4-6[1m]")
+        self.assert_code("AI_MODEL_UNAVAILABLE", b.Bridge.claude_model_entries, [row])
+
+    def test_fable_unknown_billing_or_explicit_credits_not_inferred_free(self):
+        row = self.rows()[2]
+        row["value"] = "claude-fable-5-2"
+        self.assert_code("AI_MODEL_UNAVAILABLE", b.Bridge.claude_model_entries, [row])
+        for changes in [{"resolvedModel": "claude-future-9", "value": "future"}, {"requiresUsageCredits": True},
+                        {"subscriptionIncluded": False}, {"description": "Requires usage credits"}]:
+            row = self.rows()[1]
+            row.update(changes)
+            self.assert_code("AI_MODEL_UNAVAILABLE", b.Bridge.claude_model_entries, [row])
+
+    def test_behavior_modes_and_unknown_schema_rejected(self):
+        for mode in ("default", "opusplan"):
+            row = self.rows()[1]
+            row["value"] = mode
+            self.assert_code("AI_MODEL_UNAVAILABLE", b.Bridge.claude_model_entries, [row])
+        for bad in [None, [], {}, [None], [{"value": "opus"}]]:
+            self.assert_code("AI_MODEL_UNAVAILABLE", b.Bridge.claude_model_entries, bad)
+        row = self.rows()[1]
+        row["new_unknown_billing_field"] = True
+        self.assert_code("AI_MODEL_UNAVAILABLE", b.Bridge.claude_model_entries, [row])
+
+    def test_legacy_registry_is_not_model_authority_or_filter(self):
+        before = self.registry.read_bytes()
+        runtime = b.Bridge.claude_model_entries(self.rows())
+        extra = {"id": "claude-opus-5-4", "label": "Opus · claude-opus-5-4", "efforts": ["low"], "defaultEffort": "low"}
+        with mock.patch.object(self.bridge, "claude_proof"), mock.patch.object(self.bridge, "claude_models", return_value=runtime+[extra]):
+            result = self.bridge.probe(self.tools[0])
+        self.assertEqual(4, len(result["models"]))
+        self.assertTrue(result["available"])
+        self.assertEqual("RUNTIME", result["modelSource"])
+        self.assertEqual(before, self.registry.read_bytes())
+
+    def test_discovery_failure_never_falls_back_to_legacy_models(self):
+        with mock.patch.object(self.bridge, "claude_proof"), mock.patch.object(self.bridge, "claude_models", side_effect=b.Problem("AI_TIMEOUT")):
+            result = self.bridge.probe(self.tools[0])
+        self.assertFalse(result["available"])
+        self.assertEqual("AI_TIMEOUT", result["code"])
+        self.assertEqual([], result["models"])
+
+    def test_dynamic_effort_changes_revision_and_old_selection_is_stale(self):
+        first = self.catalog()["tools"][0]
+        first["models"] = b.Bridge.claude_model_entries(self.rows())
+        second = copy.deepcopy(first)
+        second["models"][0].update(efforts=["low"], defaultEffort="low")
+        with mock.patch.object(self.bridge, "probe", return_value=first):
+            old = self.bridge.capabilities(fresh=True)
+        with mock.patch.object(self.bridge, "probe", return_value=second):
+            new = self.bridge.capabilities(fresh=True)
+        self.assertNotEqual(old["catalogRevision"], new["catalogRevision"])
+        selection = {"toolId": "test", "model": first["models"][0]["id"], "effort": "medium", "catalogRevision": old["catalogRevision"]}
+        self.assert_code("AI_CATALOG_STALE", self.bridge.validate_selection, selection, new)
+
+    def test_removed_model_rejected_before_inference_no_fallback(self):
+        body = self.body()
+        body["selection"].update(model="claude-opus-5-4")
+        available = self.catalog()["tools"][0]
+        available["models"] = b.Bridge.claude_model_entries(self.rows())
+        with mock.patch.object(self.bridge, "probe", return_value=available), mock.patch.object(self.bridge, "infer") as infer:
+            self.assert_code("AI_INVALID_SELECTION", self.bridge.execute_inline, body)
+            infer.assert_not_called()
+
+    def test_cli_initialize_only_no_user_turn_and_success_cleanup(self):
+        tool, recorded = self.cli_program()
+        models = self.discover_with_process_capture(tool)
+        self.assertEqual(3, len(models))
+        request = json.loads(recorded.read_text())
+        self.assertEqual("control_request", request["type"])
+        self.assertEqual({"subtype": "initialize", "hooks": {}, "sdkMcpServers": []}, request["request"])
+        self.assertNotIn("prompt", request)
+
+    def test_cli_timeout_kills_process_group_and_closes_pipes(self):
+        tool, _ = self.cli_program(sleep=True)
+        started = time.monotonic()
+        self.assert_code("AI_TIMEOUT", self.discover_with_process_capture, tool, seconds=.15)
+        self.assertLess(time.monotonic()-started, 1)
+
+    def test_cli_output_limit_kills_process_and_closes_pipes(self):
+        tool, _ = self.cli_program(oversize=True)
+        self.assert_code("AI_MODEL_UNAVAILABLE", self.discover_with_process_capture, tool)
+
+    def test_cli_non_initialize_or_model_event_is_rejected(self):
+        for payload in [{"type": "assistant", "message": {}}, {"type": "result", "subtype": "success"},
+                        {"type": "control_response", "response": {"request_id": "other", "subtype": "success"}},
+                        {"type": "control_response", "response": {"request_id": "srpp-model-metadata", "subtype": "error"}}]:
+            tool, _ = self.cli_program(payload=payload)
+            self.assert_code("AI_MODEL_UNAVAILABLE", self.discover_with_process_capture, tool)
+        for suffix in ('{"type":"assistant"}\n', '{"type":"control_response"}\n', '{"type":"user"'):
+            tool, _ = self.cli_program(suffix=suffix)
+            self.assert_code("AI_MODEL_UNAVAILABLE", self.discover_with_process_capture, tool)
+
+    def test_paid_or_unknown_proof_never_starts_discovery_or_inference(self):
+        for code in ("AI_SUBSCRIPTION_REQUIRED", "AI_EXTRA_USAGE_ENABLED", "AI_BILLING_UNVERIFIED"):
+            with mock.patch.object(self.bridge, "claude_proof", side_effect=b.Problem(code)), mock.patch.object(self.bridge, "claude_models") as models, mock.patch.object(self.bridge, "infer") as infer:
+                result = self.bridge.probe(self.tools[0])
+            self.assertEqual(code, result["code"])
+            self.assertEqual([], result["models"])
+            models.assert_not_called()
+            infer.assert_not_called()
+
+    def test_proof_and_discovery_share_one_absolute_deadline(self):
+        deadlines = []
+        def proof(tool, deadline):
+            deadlines.append(deadline)
+        def models(tool, deadline):
+            deadlines.append(deadline)
+            return b.Bridge.claude_model_entries(self.rows())
+        before = time.monotonic()
+        with mock.patch.object(self.bridge, "claude_proof", side_effect=proof), mock.patch.object(self.bridge, "claude_models", side_effect=models):
+            self.assertTrue(self.bridge.probe(self.tools[0])["available"])
+        self.assertEqual(deadlines[0], deadlines[1])
+        self.assertLessEqual(deadlines[0]-before, 8)
+
+    def test_exhausted_deadline_cannot_start_another_metadata_operation(self):
+        with mock.patch.object(b, "run_process") as run:
+            self.assert_code("AI_TIMEOUT", self.bridge.claude_proof, self.tools[0], deadline=time.monotonic()-1)
+            run.assert_not_called()
+
+
 class InstallTests(Fixture):
     def test_state_token_registry_preserved_and_projection_permissions(self):
         state = self.path/"state"

@@ -1,0 +1,235 @@
+{
+  "schemaVersion": 1,
+  "scope": "FEATURE_PREMERGE_RUNTIME_ACCEPTANCE",
+  "verifiedAt": "2026-11-15T15:30:44.877182+00:00",
+  "sourceBranch": "codex/srpp-claude-model-discovery",
+  "baseMainSha": "389a7191180252109a2f04b0094326fd9f52bc27",
+  "sourceRoot": "/Users/steven/.codex/worktrees/srpp-claude-model-discovery/asset-management",
+  "hostInstaller": {
+    "installed": true,
+    "launchAgentUsesFeatureSource": true,
+    "tokenAndRegistryBytesAndModesPreserved": true,
+    "registryNotRewritten": true
+  },
+  "metadataDiscovery": {
+    "httpStatus": 200,
+    "modelSource": "RUNTIME",
+    "protocol": "Claude CLI stream-json initialize control_request only; no user prompt or model turn for metadata",
+    "runtimeModels": [
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "id": "claude-haiku-5-5",
+        "label": "Haiku · claude-haiku-5-5"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "id": "claude-opus-5-5",
+        "label": "Opus · claude-opus-5-5"
+      },
+      {
+        "defaultEffort": "medium",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "id": "claude-sonnet-5-5",
+        "label": "Sonnet · claude-sonnet-5-5"
+      }
+    ],
+    "runtimeModelCount": 3,
+    "legacyRegistryModelCount": 3,
+    "legacyRegistryIsNotModelAuthority": true,
+    "fixedThreeModelLimitRemoved": true,
+    "runtimeCountIsNotAcceptanceThreshold": true,
+    "fourthModelWithoutCodeChangeVerifiedByFixture": true
+  },
+  "businessCenter": {
+    "status": 200,
+    "catalogRevision": "e3d6760d5588525a0e8df12029a0828a7266b3b99c2a19d5cc7e5a9140975e6e",
+    "claude": {
+      "id": "claude",
+      "label": "Claude CLI",
+      "adapter": "claude_cli",
+      "billingMode": "SUBSCRIPTION",
+      "available": true,
+      "code": null,
+      "modelSource": "RUNTIME",
+      "models": [
+        {
+          "id": "claude-haiku-5-5",
+          "label": "Haiku · claude-haiku-5-5",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "defaultEffort": "medium"
+        },
+        {
+          "id": "claude-opus-5-5",
+          "label": "Opus · claude-opus-5-5",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "defaultEffort": "medium"
+        },
+        {
+          "id": "claude-sonnet-5-5",
+          "label": "Sonnet · claude-sonnet-5-5",
+          "efforts": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "defaultEffort": "medium"
+        }
+      ]
+    }
+  },
+  "claudeSyntheticInterpretation": {
+    "httpStatus": 200,
+    "elapsedSeconds": 10.333,
+    "selection": {
+      "toolId": "claude",
+      "model": "claude-sonnet-5-5",
+      "effort": "low",
+      "catalogRevision": "e3d6760d5588525a0e8df12029a0828a7266b3b99c2a19d5cc7e5a9140975e6e"
+    },
+    "selectedModelAbsentFromLegacyConfiguration": false,
+    "execution": {
+      "actualModel": null,
+      "adapterVersion": "1",
+      "billingMode": "SUBSCRIPTION",
+      "code": null,
+      "completedAt": "2026-11-15T15:30:01.020792Z",
+      "modelEvidence": "REQUESTED_ONLY",
+      "requestedEffort": "low",
+      "requestedModel": "claude-sonnet-5-5",
+      "startedAt": "2026-11-15T15:29:53.878183Z",
+      "status": "SUCCEEDED",
+      "toolId": "claude"
+    },
+    "textPresent": true,
+    "textLength": 470,
+    "code": null,
+    "syntheticInput": true,
+    "modelRequestsIssued": 1,
+    "fallbackUsed": false
+  },
+  "otherToolsObserved": [
+    {
+      "id": "codex",
+      "available": false,
+      "code": "AI_BILLING_UNVERIFIED",
+      "modelSource": "CACHE",
+      "modelCount": 8
+    },
+    {
+      "id": "ollama",
+      "available": true,
+      "code": null,
+      "modelSource": "RUNTIME",
+      "modelCount": 2
+    },
+    {
+      "id": "lmstudio",
+      "available": false,
+      "code": "AI_TOOL_UNAVAILABLE",
+      "modelSource": "RUNTIME",
+      "modelCount": 0
+    }
+  ],
+  "infrastructure": {
+    "verifiedAt": "2026-11-15T15:30:24.866592+00:00",
+    "containers": {
+      "business-services": {
+        "image": "sha256:981864c293c7f58cf251a8f7412ef6e798ac4263a0c43d91a11be4a4ea08bc4b",
+        "startedAt": "2026-11-15T10:51:33.493205597Z",
+        "unchanged": true,
+        "health": "healthy"
+      },
+      "bff": {
+        "image": "sha256:36d9fa4e6b53631651d9e6f163bc4542a63b33b4d2b1c3a8564c3c69d34f8b5e",
+        "startedAt": "2026-11-15T10:52:01.651066388Z",
+        "unchanged": true,
+        "health": "healthy"
+      },
+      "frontend": {
+        "image": "sha256:6012dee82a4b7e54d691d2f8289d7dc4db9cab4908964474ca87e6d700a42e42",
+        "startedAt": "2026-11-15T10:52:07.216421709Z",
+        "unchanged": true,
+        "health": null
+      }
+    },
+    "tokenAndRegistryBytesAndModesPreserved": true,
+    "hostSourceRoot": "/Users/steven/.codex/worktrees/srpp-claude-model-discovery/asset-management",
+    "oldRunReadback": {
+      "local": {
+        "id": "5d4213dc-b7f5-41ce-adc6-6a3603734639",
+        "status": "SUCCEEDED",
+        "aiStatus": "NOT_REQUESTED",
+        "hashVerified": true,
+        "selectionAndReceiptUnchanged": true,
+        "resultSha256": "65757660328b41f04c4f26a842b1253ca083ccc296668dbcf4a2a56a3b984a4c"
+      },
+      "ai": {
+        "id": "4d15edde-cebf-45c5-b60c-2aaf4230b9a9",
+        "status": "SUCCEEDED",
+        "aiStatus": "SUCCEEDED",
+        "hashVerified": true,
+        "selectionAndReceiptUnchanged": true,
+        "resultSha256": "02125b3865f3020224cd90e2d5704ae16b6d71bc7cc25f4da3aa830655dfe261"
+      }
+    },
+    "safe9090": {
+      "quotes": 200,
+      "marketIndex": 200
+    },
+    "frontend": {
+      "httpStatus": 200,
+      "formalDomainTlsSystemTrustAndHostnameVerified": true
+    },
+    "unauthenticatedBffStatus": 401,
+    "noContainerRebuildOrRecreate": true,
+    "noPublishNoMailNoTrade": true
+  },
+  "tests": {
+    "coordinatorVerifiedPythonTests": 59,
+    "specVerdict": "PASS",
+    "archVerdict": "PASS"
+  },
+  "limits": [
+    "The installed CLI currently reports three standard subscription models; no unsafe or paid model is added merely to increase the count.",
+    "The successful synthetic request used a dynamically discovered model that also existed in the unchanged legacy registry; dynamic fourth-model support is covered by a fixture.",
+    "CLI receipt is REQUESTED_ONLY: actual provider model was not independently reported.",
+    "Codex remained AI_BILLING_UNVERIFIED with CACHE metadata, matching this task baseline; no credentials or billing gates were changed.",
+    "Real browser OIDC login was not exercised; the unauthenticated BFF remained 401."
+  ],
+  "noApiKeyBillingNoFallback": true,
+  "noPublishNoMailNoTrade": true
+}

@@ -38,6 +38,7 @@ VERSION = "1"
 MAX_BODY = 2 * 1024 * 1024
 MAX_TEXT = 20000
 DEADLINE = 120
+CLAUDE_METADATA_SECONDS = 7.5
 STATE = pathlib.Path.home() / ".local/share/srpp-local-ai"
 ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+\-]{0,159}\Z")
 TOOL_ID = re.compile(r"[a-z0-9][a-z0-9_\-]{0,63}\Z")
@@ -81,6 +82,13 @@ class Problem(Exception):
 
 def utc():
     return dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def remaining(deadline, maximum):
+    left = deadline-time.monotonic()
+    if left <= 0:
+        raise Problem("AI_TIMEOUT")
+    return min(left, maximum)
 
 
 def encode(value):
@@ -173,14 +181,32 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         raise Problem("AI_REMOTE_MODEL_FORBIDDEN")
 
 
-def http_json(url, *, data=None, headers=None, timeout=4):
+def http_json(url, *, data=None, headers=None, timeout=4, deadline=None):
     # Empty ProxyHandler explicitly disables both environment and OS proxies.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     req = urllib.request.Request(url, data=None if data is None else encode(data),
                                  headers={"Content-Type": "application/json", **(headers or {})})
     try:
         with opener.open(req, timeout=timeout) as response:
-            raw = response.read(MAX_BODY+1)
+            if deadline is None:
+                raw = response.read(MAX_BODY+1)
+            else:
+                chunks, size = [], 0
+                while True:
+                    # read1 returns available data rather than waiting to fill
+                    # a large read. Reapply the absolute deadline on each read,
+                    # so a slowly trickling metadata body cannot extend it.
+                    left = remaining(deadline, timeout)
+                    if response.fp is not None:
+                        response.fp.raw._sock.settimeout(left)
+                    block = response.read1(min(65536, MAX_BODY+1-size))
+                    if not block:
+                        break
+                    chunks.append(block)
+                    size += len(block)
+                    if size > MAX_BODY:
+                        raise Problem("AI_EXECUTION_FAILED")
+                raw = b"".join(chunks)
             if len(raw) > MAX_BODY:
                 raise Problem("AI_EXECUTION_FAILED")
             return decode(raw)
@@ -196,10 +222,7 @@ def default_registry():
         {"id": "codex", "label": "Codex CLI", "adapter": "codex_cli",
          "executable": str(home/".local/bin/codex")},
         {"id": "claude", "label": "Claude CLI", "adapter": "claude_cli",
-         "executable": str(home/".local/bin/claude"), "models": [
-             {"id": "claude-sonnet-5-5", "label": "Claude Sonnet 5.5", "efforts": ["low", "medium", "high", "xhigh", "max"], "defaultEffort": "medium"},
-             {"id": "claude-opus-5-5", "label": "Claude Opus 5.5", "efforts": ["low", "medium", "high", "xhigh", "max"], "defaultEffort": "medium"},
-             {"id": "claude-haiku-5-5", "label": "Claude Haiku 5.5", "efforts": ["low", "medium", "high", "xhigh", "max"], "defaultEffort": "medium"}]},
+         "executable": str(home/".local/bin/claude")},
         {"id": "ollama", "label": "Ollama（本機模型）", "adapter": "ollama", "host": "127.0.0.1", "port": 11434},
         {"id": "lmstudio", "label": "LM Studio（本機模型）", "adapter": "local_openai", "host": "127.0.0.1", "port": 1234}
     ]}
@@ -248,10 +271,13 @@ def load_registry(path):
             if not address.is_loopback or not isinstance(item["port"], int) or isinstance(item["port"], bool) or not 1 <= item["port"] <= 65535:
                 raise Problem("AI_REMOTE_MODEL_FORBIDDEN")
         else:
-            expected = {"id", "label", "adapter", "executable"} | ({"models"} if item["adapter"] == "claude_cli" else set())
-            if set(item) != expected or not pathlib.Path(item["executable"]).is_absolute():
+            expected = {"id", "label", "adapter", "executable"}
+            valid_keys = set(item) == expected or (item["adapter"] == "claude_cli" and set(item) == expected | {"models"})
+            if not valid_keys or not pathlib.Path(item["executable"]).is_absolute():
                 raise Problem("AI_TOOL_UNAVAILABLE")
-            if item["adapter"] == "claude_cli":
+            if item["adapter"] == "claude_cli" and "models" in item:
+                # Legacy metadata stays byte-for-byte in the administrator's
+                # file, but is never a model source, filter, or fallback.
                 if not isinstance(item["models"], list) or len(item["models"]) > 100:
                     raise Problem("AI_TOOL_UNAVAILABLE")
                 for model in item["models"]:
@@ -482,20 +508,25 @@ class Bridge:
                 continue
         return []
 
-    def claude_proof(self, tool):
+    def claude_proof(self, tool, deadline=None):
+        deadline = deadline if deadline is not None else time.monotonic()+CLAUDE_METADATA_SECONDS
         with tempfile.TemporaryDirectory(prefix="srpp-ai-") as cwd:
-            raw = run_process([tool["executable"], "--safe-mode", "auth", "status"], env=clean_environment(), cwd=cwd, timeout=3)
+            raw = run_process([tool["executable"], "--safe-mode", "auth", "status"], env=clean_environment(), cwd=cwd, timeout=remaining(deadline, 2.5))
         auth = decode(raw)
         if auth.get("loggedIn") is not True or auth.get("authMethod") != "claude.ai" or auth.get("subscriptionType") not in {"pro", "max", "ultra"}:
             raise Problem("AI_SUBSCRIPTION_REQUIRED")
         try:
-            credential = decode(run_process(["/usr/bin/security", "find-generic-password", "-s", "Claude Code-credentials", "-w"], env=clean_environment(), timeout=2))
+            credential = decode(run_process(["/usr/bin/security", "find-generic-password", "-s", "Claude Code-credentials", "-w"], env=clean_environment(), timeout=remaining(deadline, 1.5)))
             token = credential["claudeAiOauth"]["accessToken"]
             if not isinstance(token, str) or not token:
                 raise ValueError()
             usage = http_json("https://api.anthropic.com/api/oauth/usage", headers={"Authorization": "Bearer "+token,
-                              "anthropic-beta": "oauth-2025-04-20"}, timeout=3)
-        except (KeyError, ValueError, TypeError, Problem):
+                              "anthropic-beta": "oauth-2025-04-20"}, timeout=remaining(deadline, 2.5), deadline=deadline)
+        except Problem as error:
+            if error.code == "AI_TIMEOUT" or time.monotonic() >= deadline:
+                raise Problem("AI_TIMEOUT") from None
+            raise Problem("AI_BILLING_UNVERIFIED") from None
+        except (KeyError, ValueError, TypeError):
             raise Problem("AI_BILLING_UNVERIFIED") from None
         enabled = usage.get("extra_usage", {}).get("is_enabled")
         if enabled is True:
@@ -506,6 +537,127 @@ class Bridge:
             value = usage.get(field)
             if isinstance(value, dict) and value.get("utilization", 100) >= 100:
                 raise Problem("AI_BILLING_UNVERIFIED")
+
+    @staticmethod
+    def claude_model_entries(rows):
+        """Normalize CLI ModelInfo, never an API catalog or legacy registry.
+
+        Supported-model metadata is not a billing grant. Standard Opus,
+        Sonnet and Haiku lineages are covered by the documented subscription
+        policy only together with the existing personal-subscription proof
+        and extra-usage=false gate. Fable, paid context variants, explicit
+        credit requirements and unrecognized lineages have no such grant.
+        """
+        if not isinstance(rows, list) or not 1 <= len(rows) <= 100:
+            raise Problem("AI_MODEL_UNAVAILABLE")
+        fields = {"value", "resolvedModel", "displayName", "description", "supportsEffort", "supportedEffortLevels",
+                  "supportsAdaptiveThinking", "supportsFastMode", "supportsAutoMode", "supportsThinkingOff",
+                  "defaultEffort", "requiresUsageCredits", "subscriptionIncluded"}
+        required = {"value", "resolvedModel", "displayName", "description", "supportsEffort"}
+        normalized = {}
+        for row in rows:
+            if not isinstance(row, dict) or not required <= set(row) or set(row)-fields:
+                raise Problem("AI_MODEL_UNAVAILABLE")
+            if any(not isinstance(row[k], str) or not row[k].strip() for k in ("value", "resolvedModel", "displayName", "description")):
+                raise Problem("AI_MODEL_UNAVAILABLE")
+            if len(row["value"]) > 200 or len(row["displayName"]) > 200 or len(row["description"]) > 4000:
+                raise Problem("AI_MODEL_UNAVAILABLE")
+            if not isinstance(row["supportsEffort"], bool):
+                raise Problem("AI_MODEL_UNAVAILABLE")
+            for key in ("supportsAdaptiveThinking", "supportsFastMode", "supportsAutoMode", "supportsThinkingOff", "requiresUsageCredits", "subscriptionIncluded"):
+                if key in row and not isinstance(row[key], bool):
+                    raise Problem("AI_MODEL_UNAVAILABLE")
+            levels = row.get("supportedEffortLevels", [])
+            if (not isinstance(levels, list) or len(levels) > 10
+                    or any(not isinstance(level, str) or not EFFORT.fullmatch(level) for level in levels)
+                    or len(set(levels)) != len(levels)
+                    or (row["supportsEffort"] and not levels)
+                    or (not row["supportsEffort"] and levels)):
+                raise Problem("AI_MODEL_UNAVAILABLE")
+            default = row.get("defaultEffort")
+            if default is not None and (not isinstance(default, str) or default not in levels):
+                raise Problem("AI_MODEL_UNAVAILABLE")
+            # Check the original selection BEFORE resolving aliases. A [1m]
+            # paid variant must never become an apparently plain model id.
+            value, resolved = row["value"], row["resolvedModel"]
+            paid_description = any(term in row["description"].casefold() for term in
+                                   ("usage credits", "requires credits", "pay-as-you-go", "extra usage", "additional charge"))
+            if (value.casefold() in {"default", "opusplan"} or "[" in value or "]" in value
+                    or row.get("requiresUsageCredits") is True or row.get("subscriptionIncluded") is False
+                    or paid_description or not re.fullmatch(r"claude-(?:opus|sonnet|haiku)-[0-9]+(?:-[0-9]+)*", resolved)
+                    or not ID.fullmatch(resolved)):
+                continue
+            if levels and default is None:
+                default = "medium" if "medium" in levels else levels[0]
+            label = row["displayName"]
+            if resolved not in label:
+                label = label[:197-len(resolved)]+" · "+resolved
+            entry = model_entry({"id": resolved, "label": label, "efforts": levels, "defaultEffort": default})
+            previous = normalized.get(resolved)
+            if previous is not None:
+                if previous["efforts"] != entry["efforts"] or previous["defaultEffort"] != entry["defaultEffort"]:
+                    raise Problem("AI_MODEL_UNAVAILABLE")
+                continue
+            normalized[resolved] = entry
+        if not normalized:
+            raise Problem("AI_MODEL_UNAVAILABLE")
+        return [normalized[key] for key in sorted(normalized)]
+
+    def claude_models(self, tool, deadline):
+        """SDK supportedModels() is initialize.models; no user turn is sent."""
+        remaining(deadline, CLAUDE_METADATA_SECONDS)
+        process = None
+        selector = selectors.DefaultSelector()
+        with tempfile.TemporaryDirectory(prefix="srpp-ai-") as cwd:
+            try:
+                args = [tool["executable"], "--safe-mode", "--print", "--input-format", "stream-json",
+                        "--output-format", "stream-json", "--verbose", "--tools", "", "--strict-mcp-config",
+                        "--mcp-config", '{"mcpServers":{}}', "--disable-slash-commands", "--no-session-persistence",
+                        "--permission-mode", "dontAsk", "--permission-prompts", "none"]
+                process = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                           cwd=cwd, env=clean_environment(), start_new_session=True)
+                request_id = "srpp-model-metadata"
+                request = {"type": "control_request", "request_id": request_id,
+                           "request": {"subtype": "initialize", "hooks": {}, "sdkMcpServers": []}}
+                process.stdin.write(encode(request)+b"\n")
+                process.stdin.flush()
+                selector.register(process.stdout, selectors.EVENT_READ)
+                buffer, size = b"", 0
+                while True:
+                    left = remaining(deadline, .1)
+                    for key, _ in selector.select(left):
+                        block = os.read(key.fd, 65536)
+                        if not block:
+                            raise Problem("AI_MODEL_UNAVAILABLE")
+                        size += len(block)
+                        if size > MAX_BODY:
+                            raise Problem("AI_MODEL_UNAVAILABLE")
+                        buffer += block
+                        while b"\n" in buffer:
+                            line, buffer = buffer.split(b"\n", 1)
+                            try:
+                                event = decode(line)
+                            except Problem:
+                                raise Problem("AI_MODEL_UNAVAILABLE") from None
+                            if not isinstance(event, dict) or event.get("type") != "control_response":
+                                raise Problem("AI_MODEL_UNAVAILABLE")
+                            response = event.get("response")
+                            if (not isinstance(response, dict) or response.get("request_id") != request_id
+                                    or response.get("subtype") != "success" or not isinstance(response.get("response"), dict)):
+                                raise Problem("AI_MODEL_UNAVAILABLE")
+                            if buffer.strip():
+                                raise Problem("AI_MODEL_UNAVAILABLE")
+                            return self.claude_model_entries(response["response"].get("models"))
+            finally:
+                selector.close()
+                if process is not None:
+                    with contextlib.suppress(ProcessLookupError):
+                        os.killpg(process.pid, signal.SIGKILL)
+                    process.wait()
+                    for pipe in (process.stdin, process.stdout):
+                        if pipe is not None:
+                            with contextlib.suppress(OSError):
+                                pipe.close()
 
     def local_models(self, tool):
         if tool["adapter"] == "ollama":
@@ -522,16 +674,16 @@ class Bridge:
         adapter = tool["adapter"]
         result = {"id": tool["id"], "label": tool["label"], "adapter": adapter,
                   "billingMode": "SUBSCRIPTION" if adapter.endswith("_cli") else "LOCAL", "available": False,
-                  "code": None, "modelSource": "CONFIGURED" if adapter == "claude_cli" else "RUNTIME", "models": []}
-        if adapter == "claude_cli":
-            result["models"] = tool["models"]
+                  "code": None, "modelSource": "RUNTIME", "models": []}
         try:
             if adapter == "codex_cli":
                 limits, data = self.codex_rpc(tool)
                 result["models"] = self.codex_models(data)
                 self.check_codex_billing(limits)
             elif adapter == "claude_cli":
-                self.claude_proof(tool)
+                deadline = time.monotonic()+CLAUDE_METADATA_SECONDS
+                self.claude_proof(tool, deadline=deadline)
+                result["models"] = self.claude_models(tool, deadline)
             else:
                 result["models"] = self.local_models(tool)
             if not result["models"]:
@@ -570,11 +722,11 @@ class Bridge:
         if selection["catalogRevision"] != catalog["catalogRevision"]:
             raise Problem("AI_CATALOG_STALE", 409)
         tool = next((v for v in catalog["tools"] if v["id"] == selection["toolId"]), None)
+        if tool is not None and not tool["available"]:
+            raise Problem(tool["code"] or "AI_TOOL_UNAVAILABLE")
         model = next((v for v in tool["models"] if v["id"] == selection["model"]), None) if tool else None
         if model is None or (selection["effort"] not in model["efforts"] if model["efforts"] else selection["effort"] is not None):
             raise Problem("AI_INVALID_SELECTION", 400)
-        if not tool["available"]:
-            raise Problem(tool["code"] or "AI_TOOL_UNAVAILABLE")
         return tool
 
     def execute(self, body):

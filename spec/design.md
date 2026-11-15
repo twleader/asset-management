@@ -14048,6 +14048,15 @@ VOO暫時替代規則仍是SRPP saved-evidence budget diagnostics：尚無正式
 
 新增 host Python bridge，以標準函式庫實作，固定 GET /capabilities 與 POST /interpret，兩者均驗 Bearer token。bind 127.0.0.1:8766，後端固定host.docker.internal:8766；token以只讀檔案mount給business，host從0600檔讀取。管理用host JSON registry定義工具id／label／adapter／固定執行檔與模型設定，不接受網頁傳入命令／endpoint；新增同adapter工具不需修改前端。API tree用不可變typed DTO完整驗證；回應錯誤僅輸出具名code，不洩漏CLI原始stderr／token。
 
-Codex adapter從無推論的app-server model/list取得slug與supportedReasoningEfforts（不可用時得讀本機models_cache.json並標CACHE），限定subscription可用且非hidden模型；Claude從明示host模型能力清單取得，標示CONFIGURED，執行錯誤不得暗換。Ollama /api/tags + /api/show驗本機模型與capabilities，local_openai /v1/models驗本機模型，可配置已驗的effort能力；不支援時null。未知adapter不可用。CLI使用argv而非shell，乾淨環境、隔離cwd、無工具/MCP/hooks，強制subscription auth；依Requirement208修訂每次讀費用證據，未知即關閉。Ollama及local_openai只允許numeric loopback端點、不跟redirect、不使用環境proxy、不發雲端model或工具請求。
+Codex adapter從無推論的app-server model/list取得slug與supportedReasoningEfforts（不可用時得讀本機models_cache.json並標CACHE），限定subscription可用且非hidden模型；Claude自Task593起改從CLI initialize控制回應的supportedModels同源metadata取得，標示RUNTIME，執行錯誤不得暗換；舊registry models不再是權威。Ollama /api/tags + /api/show驗本機模型與capabilities，local_openai /v1/models驗本機模型，可配置已驗的effort能力；不支援時null。未知adapter不可用。CLI使用argv而非shell，乾淨環境、隔離cwd、無工具/MCP/hooks，強制subscription auth；依Requirement208修訂每次讀費用證據，未知即關閉。Ollama及local_openai只允許numeric loopback端點、不跟redirect、不使用環境proxy、不發雲端model或工具請求。
 
 SrppSettingsRun新增可空ai_selection_json與ai_execution_json（text）保存獨立歷史snapshot，屬歷史執行證據例外，不保存可推導業務分類。既有列null合法；selection與execution均不進worker request、不進input/config/result hashes或release payload。Liquibase增量須冪等，部署後重產db/schema.sql。橋接的timeout小於既有整體175秒deadline，CLI process group與HTTP timeout有界，host只允許一個模型執行、滿載回具名BUSY。host服務以使用者LaunchAgent持續運行，安裝腳本保留既有registry／token、路徑指向授權部署來源；不掛載整個home或CLI憑證到Docker。
+
+
+## Task 593：Claude CLI 零推論模型探索
+
+在host Bridge的claude_cli adapter新增受控stream-json初始化讀取，沿既有safe-mode、乾淨環境、隔離cwd、空tools／MCP與no-session-persistence；stdin只送initialize control_request，不送user訊息，不發推論。匹配request_id與success控制回應，解析models中的resolvedModel/displayName/supportsEffort/supportedEffortLevels。SDK supportedModels()同源資料作RUNTIME能力來源，費用及訂閱的既有proof仍在執行前立即重查。
+
+normalize時先排除無法確認包含於訂閱的付費／特殊context條目，再將明確具體resolvedModel去重；不能刪除[1m]等付費修飾而誤開免費路徑。effort只沿CLI資料，沒有能力即null；回應過大／格式無法驗證／空models均關閉此工具，不回退host固定清單。保留相同閉合wire欄位（modelSource已支援RUNTIME），不改Vue、Java/BFF DTO或金融資料。
+
+load_registry接受舊claude_cli models鍵但不以它裁切探索結果，不改寫既有0600設定；新registry的Claude列只有id/label/adapter/executable。canonical目錄hash綁自動探索能力及有效registry設定；初始化有界且所有子程序與pipe必須清理，能力快取維持20秒。正式host部署以installer kickstart從正確source root重新載入；必要business/bff/frontend映像未改時不得假稱已rebuild，實測現行business GET得到新的RUNTIME模型清單即可驗跨層傳遞。合併後host來源必須指main，容器保持既有main版本與既有TLS/OAuth設定。
