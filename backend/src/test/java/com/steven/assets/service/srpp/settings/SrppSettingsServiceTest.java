@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.*;
 import com.fasterxml.jackson.databind.node.*;
 import com.steven.assets.controller.*;
 import com.steven.assets.dto.LatestAssetsDto;
+import com.steven.assets.dto.SrppSettingsDto.*;
 import com.steven.assets.model.*;
 import com.steven.assets.repository.*;
 import com.steven.assets.security.CurrentUserContext;
@@ -72,7 +73,13 @@ class SrppSettingsServiceTest {
     SrppSettingsService build(ExecutorService executor,JsonNode receipt){return new SrppSettingsService(user,drafts,runs,releases,worker,ai,assets,authority,report,registry,json,tx,executor,clock,receipt);}
     @AfterEach void close(){service.shutdown();}
     ObjectNode create(){ObjectNode b=json.createObjectNode().put("name","退休情境").put("baseBundleSha256",base);b.set("values",catalog.path("currentValues"));return (ObjectNode)SettingsCanonicalJson.tree(service.create(b.toString()));}
-    ObjectNode simulate(ObjectNode d,String mode){return (ObjectNode)SettingsCanonicalJson.tree(service.simulate(UUID.fromString(d.path("id").asText()),"{\"revision\":"+d.path("revision")+",\"mode\":\""+mode+"\",\"seed\":7,\"simulations\":100}"));}
+    final AiSelection choice=new AiSelection("ollama","gemma4:31b",null,"f".repeat(64));
+    ObjectNode simulate(ObjectNode d,String mode){
+        ObjectNode body=json.createObjectNode().put("revision",d.path("revision").asLong()).put("mode",mode).put("seed",7).put("simulations",100);
+        if(mode.equals("AI"))body.set("aiSelection",SettingsCanonicalJson.tree(choice));
+        return (ObjectNode)SettingsCanonicalJson.tree(service.simulate(UUID.fromString(d.path("id").asText()),body.toString()));
+    }
+    AiExecution aiReceipt(String status,String code){return new AiExecution(choice.toolId(),choice.model(),choice.effort(),"gemma4:31b","PROVIDER_REPORTED","LOCAL","1","2026-11-14T05:00:00Z","2026-11-14T05:00:01Z",status,code);}
     ObjectNode publish(ObjectNode d,ObjectNode r){return (ObjectNode)SettingsCanonicalJson.tree(service.publish(UUID.fromString(d.path("id").asText()),"{\"revision\":"+d.path("revision")+",\"simulationId\":\""+r.path("id").asText()+"\"}"));}
     ObjectNode update(ObjectNode d,String key,JsonNode value){ObjectNode values=d.path("values").deepCopy();values.set(key,value);ObjectNode b=json.createObjectNode().put("revision",d.path("revision").asLong()).put("name","修改情境");b.set("values",values);return (ObjectNode)SettingsCanonicalJson.tree(service.update(UUID.fromString(d.path("id").asText()),b.toString()));}
     /** Real Python V3 shape, with simple synthetic amounts for workflow assertions. */
@@ -131,13 +138,42 @@ class SrppSettingsServiceTest {
             }
         }
     }
-    @Test void aiFailureAndMissingKeyRetainIdenticalDeterministicNumbers() {
-        ObjectNode d=create(),local=simulate(d,"LOCAL");when(ai.available()).thenReturn(true);when(ai.interpret(any())).thenThrow(new IllegalStateException("test"));ObjectNode failed=simulate(d,"AI");assertThat(failed.path("status").asText()).isEqualTo("SUCCEEDED");assertThat(failed.path("aiStatus").asText()).isEqualTo("FAILED");assertThat(failed.path("deterministicResult")).isEqualTo(local.path("deterministicResult"));
-        when(ai.available()).thenReturn(false);ObjectNode noKey=simulate(d,"AI");assertThat(noKey.path("aiStatus").asText()).isEqualTo("NOT_CONFIGURED");assertThat(noKey.path("deterministicResult")).isEqualTo(local.path("deterministicResult"));
+    @Test void aiFailureRetainsIdenticalDeterministicNumbersAndSanitizedReceipt() {
+        ObjectNode d=create(),local=simulate(d,"LOCAL");
+        when(ai.interpret(any(),eq(choice))).thenThrow(new SrppSettingsAiFailure("AI_EXTRA_USAGE_ENABLED",aiReceipt("FAILED","AI_EXTRA_USAGE_ENABLED")));
+        ObjectNode failed=simulate(d,"AI");
+        assertThat(failed.path("status").asText()).isEqualTo("SUCCEEDED");assertThat(failed.path("aiStatus").asText()).isEqualTo("FAILED");
+        assertThat(failed.path("errorCode").asText()).isEqualTo("AI_EXTRA_USAGE_ENABLED");
+        assertThat(failed.path("deterministicResult")).isEqualTo(local.path("deterministicResult"));
+        assertThat(failed.path("resultSha256")).isEqualTo(local.path("resultSha256"));
+        assertThat(failed.path("aiExecution").path("status").asText()).isEqualTo("FAILED");
+        verify(ai).validateSelection(choice);
     }
-    @Test void successfulAiAddsTextWithoutChangingCalculatedEvidence() {
-        ObjectNode d=create(),local=simulate(d,"LOCAL");when(ai.available()).thenReturn(true);when(ai.interpret(any())).thenReturn("請依給定假設比較情境差異。");ObjectNode interpreted=simulate(d,"AI");
-        assertThat(interpreted.path("aiStatus").asText()).isEqualTo("SUCCEEDED");assertThat(interpreted.path("aiInterpretation").asText()).contains("給定假設");assertThat(interpreted.path("deterministicResult")).isEqualTo(local.path("deterministicResult"));assertThat(interpreted.path("resultSha256")).isEqualTo(local.path("resultSha256"));
+    @Test void successfulAiAddsTextWithoutChangingCalculatedEvidenceOrWorkerInput() {
+        ObjectNode d=create(),local=simulate(d,"LOCAL");
+        when(ai.interpret(any(),eq(choice))).thenReturn(new AiResult("請依給定假設比較情境差異。",aiReceipt("SUCCEEDED",null)));
+        ObjectNode interpreted=simulate(d,"AI");
+        assertThat(interpreted.path("aiStatus").asText()).isEqualTo("SUCCEEDED");assertThat(interpreted.path("aiInterpretation").asText()).contains("給定假設");
+        assertThat(interpreted.path("deterministicResult")).isEqualTo(local.path("deterministicResult"));assertThat(interpreted.path("resultSha256")).isEqualTo(local.path("resultSha256"));
+        assertThat(interpreted.path("aiSelection")).isEqualTo(SettingsCanonicalJson.tree(choice));
+        assertThat(interpreted.path("aiExecution").path("actualModel").asText()).isEqualTo("gemma4:31b");
+        SrppSettingsRun stored=rs.get(UUID.fromString(interpreted.path("id").asText()));
+        assertThat(stored.getRequestJson()).isEqualTo(rs.get(UUID.fromString(local.path("id").asText())).getRequestJson());
+        assertThat(SettingsCanonicalJson.parse(stored.getRequestJson()).has("aiSelection")).isFalse();
+        assertThat(local.path("aiSelection").isNull()).isTrue();assertThat(local.path("aiExecution").isNull()).isTrue();
+    }
+    @Test void invalidSelectionAndOtherOwnerRejectBeforeAnyModelOrAssetRead() {
+        ObjectNode d=create();UUID id=UUID.fromString(d.path("id").asText());clearInvocations(ai,assets,worker);
+        assertThatThrownBy(()->service.simulate(id,"{\"revision\":1,\"mode\":\"AI\"}")).isInstanceOf(SrppSettingsProblem.class);
+        assertThatThrownBy(()->service.simulate(id,"{\"revision\":1,\"mode\":\"LOCAL\",\"aiSelection\":{}}")).isInstanceOf(SrppSettingsProblem.class);
+        user.setEffectiveUserId(8L);assertThatThrownBy(()->simulate(d,"AI")).isInstanceOf(SrppSettingsProblem.class).hasMessageContaining("找不到");
+        verifyNoInteractions(ai,assets,worker);
+    }
+    @Test void billingRefusalBeforeQueueDoesNotCreateRunOrCallCalculator() {
+        ObjectNode d=create();clearInvocations(worker,assets);
+        doThrow(new SrppSettingsProblem(409,"AI_BILLING_UNVERIFIED","費用無法驗證")).when(ai).validateSelection(choice);
+        assertThatThrownBy(()->simulate(d,"AI")).isInstanceOf(SrppSettingsProblem.class);
+        assertThat(rs).isEmpty();verify(ai,never()).interpret(any(),any());verifyNoInteractions(worker,assets);
     }
     @Test void staleRevisionOtherOwnerUnknownValuesAndNonAdminFailClosed() {
         ObjectNode d=create();UUID id=UUID.fromString(d.path("id").asText());ObjectNode changed=update(d,"riskCautiousTotal",IntNode.valueOf(4));assertThat(changed.path("revision").asLong()).isEqualTo(2);assertThat(changed.path("changes").get(0).path("formalSupported").asBoolean()).isTrue();

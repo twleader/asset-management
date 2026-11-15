@@ -30,10 +30,10 @@
       </el-card>
       <el-card shadow="never" class="version-card">
         <div class="version-label">AI 文字解讀</div>
-        <div class="version-value" :class="rootData.aiAvailable ? 'available' : 'unavailable'">
-          {{ rootData.aiAvailable ? '可使用' : '目前未配置' }}
+        <div class="version-value" :class="aiModeAvailable ? 'available' : 'unavailable'">
+          {{ aiModeAvailable ? '可使用' : '目前無可用工具' }}
         </div>
-        <div class="version-detail">AI 不會更改模擬數值或發布規則</div>
+        <div class="version-detail">使用既有訂閱或本機模型；AI 不會更改模擬數值或發布規則</div>
       </el-card>
     </div>
 
@@ -343,7 +343,7 @@
             <div class="section-heading">
               <div>
                 <strong>二、情境模擬</strong>
-                <span class="section-subtitle">兩種模式使用相同計算結果；差別只有是否呼叫 AI 產生文字解讀。</span>
+                <span class="section-subtitle">兩種模式使用相同計算結果；AI 只補充文字解讀。</span>
               </div>
               <el-tag v-if="selectedRun" :type="runStatusType(selectedRun.status)" effect="plain">
                 {{ runStatusLabel(selectedRun.status) }}
@@ -359,13 +359,89 @@
           <div class="mode-options">
             <el-radio-group v-model="runMode" :disabled="simulating">
               <el-radio-button value="LOCAL">不呼叫 AI</el-radio-button>
-              <el-radio-button value="AI" :disabled="!rootData.aiAvailable">呼叫 AI 解讀</el-radio-button>
+              <el-radio-button value="AI" :disabled="!aiModeAvailable">呼叫 AI 解讀</el-radio-button>
             </el-radio-group>
             <p class="mode-description">
               <template v-if="runMode === 'LOCAL'">不呼叫 AI；只產生情境數值與限制說明。</template>
-              <template v-else>呼叫 AI 為相同計算結果補充文字解讀，不計算或修改數值。</template>
-              <span v-if="runMode === 'AI' && !rootData.aiAvailable">AI 尚未配置，請選擇「不呼叫 AI」。</span>
+              <template v-else>依所選工具的既有訂閱或本機模型產生文字解讀，不計算或修改數值。</template>
+              <span v-if="runMode === 'AI' && !aiModeAvailable">目前沒有可選工具，請重新載入工具清單。</span>
             </p>
+          </div>
+
+          <div class="ai-catalog-summary">
+            <div class="ai-catalog-summary-heading">
+              <div>
+                <strong>AI 工具狀態</strong>
+                <span>{{ aiCatalogStatusSummary }}</span>
+              </div>
+              <el-button text :icon="Refresh" :loading="loadingRoot" :disabled="simulating" @click="refreshAiCatalog">
+                重新載入
+              </el-button>
+            </div>
+            <el-collapse>
+              <el-collapse-item name="ai-tools-status">
+                <template #title>查看工具可用狀態與原因</template>
+                <div v-if="aiTools.length" class="ai-tool-status-list">
+                  <div v-for="tool in aiTools" :key="tool.id" class="ai-tool-status-item">
+                    <div class="ai-tool-status-heading">
+                      <strong>{{ aiToolLabel(tool) }}</strong>
+                      <el-tag :type="isAiToolSelectable(tool) ? 'success' : 'warning'" size="small" effect="plain">
+                        {{ isAiToolSelectable(tool) ? '可用' : '暫不可用' }}
+                      </el-tag>
+                    </div>
+                    <small>{{ aiToolAvailabilityDetail(tool) }}</small>
+                  </div>
+                </div>
+                <p v-else class="ai-tool-status-empty">目前尚未載入工具資料；可重新載入工具清單。</p>
+              </el-collapse-item>
+            </el-collapse>
+          </div>
+
+          <div v-if="runMode === 'AI'" class="ai-selection-panel">
+            <div class="ai-selection-heading">
+              <div>
+                <strong>選擇解讀工具</strong>
+                <span class="control-hint">只會使用下方顯示可用的工具與模型。</span>
+              </div>
+            </div>
+            <el-alert v-if="aiSelectionNotice" type="warning" show-icon :closable="false"
+              :title="aiSelectionNotice" />
+            <div class="ai-selection-grid">
+              <div>
+                <label class="control-label" for="srpp-ai-tool">工具</label>
+                <el-select id="srpp-ai-tool" popper-class="srpp-ai-tool-popper" :model-value="aiSelection.toolId" placeholder="選擇可用工具"
+                  :disabled="simulating || !aiCatalogRevision || aiCatalogRefreshRequired" @change="changeAiTool">
+                  <el-option v-for="tool in aiTools" :key="tool.id" :label="aiToolLabel(tool)" :value="tool.id"
+                    :disabled="!isAiToolSelectable(tool)">
+                    <div class="ai-tool-option">
+                      <span>{{ aiToolLabel(tool) }}</span>
+                      <el-tag size="small" effect="plain">{{ aiBillingModeLabel(tool.billingMode) }}</el-tag>
+                    </div>
+                    <small class="ai-tool-option-detail">{{ aiToolAvailabilityDetail(tool) }}</small>
+                  </el-option>
+                </el-select>
+              </div>
+              <div>
+                <label class="control-label" for="srpp-ai-model">模型</label>
+                <el-select id="srpp-ai-model" :model-value="aiSelection.model" placeholder="先選擇工具"
+                  :disabled="simulating || !selectedAiTool || aiCatalogRefreshRequired" @change="changeAiModel">
+                  <el-option v-for="model in selectedAiModels" :key="model.id" :label="aiModelLabel(model)" :value="model.id" />
+                </el-select>
+              </div>
+              <div>
+                <label class="control-label" for="srpp-ai-effort">思考程度</label>
+                <el-select v-if="selectedAiEfforts.length" id="srpp-ai-effort" :model-value="aiSelection.effort"
+                  placeholder="選擇思考程度" :disabled="simulating || !selectedAiModel || aiCatalogRefreshRequired" @change="changeAiEffort">
+                  <el-option v-for="effort in selectedAiEfforts" :key="effort" :label="aiEffortLabel(effort)" :value="effort" />
+                </el-select>
+                <el-input v-else id="srpp-ai-effort" model-value="不適用" disabled />
+              </div>
+            </div>
+            <p v-if="selectedAiTool" class="ai-selection-detail">
+              {{ aiBillingModeLabel(selectedAiTool.billingMode) }}；模型清單：{{ aiModelSourceLabel(selectedAiTool.modelSource) }}。
+              <template v-if="selectedAiModel && !selectedAiEfforts.length">此模型沒有可選的思考程度。</template>
+            </p>
+            <p v-if="aiSelectionError" class="ai-selection-error">{{ aiSelectionError }}</p>
           </div>
 
           <div class="simulation-controls">
@@ -382,7 +458,7 @@
               <span class="control-hint">100–100,000；預設 1,000</span>
             </div>
             <el-button type="primary" :icon="VideoPlay" :loading="simulating"
-            :disabled="!activeDraft || draftDirty || draftBaseChanged || moneyInputErrorKeys.length || shortStrategyErrors.length || pairedOverrideErrors.length || !draftName.trim() || runMode === 'AI' && !rootData.aiAvailable || simulationProcessing"
+              :disabled="!activeDraft || draftDirty || draftBaseChanged || moneyInputErrorKeys.length || shortStrategyErrors.length || pairedOverrideErrors.length || !draftName.trim() || runMode === 'AI' && !aiSelectionReady || simulationProcessing"
               @click="simulate">
               {{ simulationProcessing ? '模擬執行中…' : '開始模擬' }}
             </el-button>
@@ -499,15 +575,35 @@
           </div>
           <p class="field-reason">金額為 2026 年 8 月實質新臺幣元，已排除緊急預備金；不是未來名目金額。</p>
 
-          <div class="ai-result" :class="aiStatusType(selectedRun.aiStatus)">
+          <div class="ai-result" :class="aiStatusType(currentAiStatus)">
             <div class="ai-result-heading">
               <strong>AI 文字解讀</strong>
-              <el-tag :type="aiStatusTagType(selectedRun.aiStatus)" size="small" effect="plain">
-                {{ aiStatusLabel(selectedRun.aiStatus) }}
+              <el-tag :type="aiStatusTagType(currentAiStatus)" size="small" effect="plain">
+                {{ aiStatusLabel(currentAiStatus) }}
               </el-tag>
             </div>
             <p v-if="selectedRun.aiInterpretation">{{ selectedRun.aiInterpretation }}</p>
-            <p v-else>{{ aiStatusDescription(selectedRun.aiStatus, selectedRun.mode) }}</p>
+            <p v-else>{{ aiStatusDescription(currentAiStatus, selectedRun.mode) }}</p>
+            <div v-if="selectedRun.mode === 'AI'" class="ai-receipt">
+              <div class="subsection-heading">本次工具執行紀錄</div>
+              <template v-if="selectedRun.aiSelection || selectedRun.aiExecution">
+                <dl class="ai-receipt-grid">
+                  <dt>工具</dt><dd>{{ aiReceiptToolLabel(selectedRun) }}</dd>
+                  <dt>要求模型</dt><dd>{{ aiReceiptRequestedModel(selectedRun) }}</dd>
+                  <dt>要求的思考程度</dt><dd>{{ aiReceiptRequestedEffort(selectedRun) }}</dd>
+                  <dt>實際模型</dt><dd>{{ aiActualModelLabel(selectedRun.aiExecution) }}</dd>
+                  <dt>使用方式</dt><dd>{{ aiReceiptBillingMode(selectedRun) }}</dd>
+                  <dt>連接器版本</dt><dd>{{ selectedRun.aiExecution?.adapterVersion || '未記錄' }}</dd>
+                  <dt>開始時間</dt><dd>{{ aiReceiptTime(selectedRun.aiExecution?.startedAt) }}</dd>
+                  <dt>完成時間</dt><dd>{{ aiReceiptTime(selectedRun.aiExecution?.completedAt) }}</dd>
+                  <dt>執行狀態</dt><dd>{{ aiReceiptExecutionStatusLabel(selectedRun) }}</dd>
+                </dl>
+                <p v-if="aiReceiptFailureMessage(selectedRun)" class="ai-receipt-error">
+                  {{ aiReceiptFailureMessage(selectedRun) }}
+                </p>
+              </template>
+              <p v-else class="ai-receipt-empty">這筆歷史模擬沒有保存工具選擇與執行紀錄。</p>
+            </div>
           </div>
 
           <div class="subsection-heading">基準與情境比較</div>
@@ -826,6 +922,25 @@ import { useAuthStore } from '@/stores/authStore'
 import SrppShortTermOpportunities from '@/components/SrppShortTermOpportunities.vue'
 import { canPublishSrppRun, hasSrppDraftChanges, isCurrentSrppRun } from '@/utils/srppSettingsCenterState'
 import {
+  createEmptySrppAiSelection,
+  findSrppAiModel,
+  findSrppAiTool,
+  hasSrppAiSelection,
+  isSrppAiToolSelectable,
+  safeSrppAiCodeMessage,
+  selectSrppAiModel,
+  selectSrppAiTool,
+  srppAiActualModelLabel,
+  srppAiBillingModeLabel,
+  srppAiEfforts,
+  srppAiExecutionStatusLabel,
+  srppAiModels,
+  srppAiModelSourceLabel,
+  srppAiSelectionPayload,
+  srppAiTools,
+  validateSrppAiSelection
+} from '@/utils/srppSettingsCenterAi'
+import {
   formatMoneyText,
   formatPreciseDecimal,
   inspectWeightTotal,
@@ -858,6 +973,10 @@ const loadingSelectedRun = ref(false)
 const simulating = ref(false)
 const simulationError = ref('')
 const runMode = ref('LOCAL')
+const aiSelection = ref(createEmptySrppAiSelection())
+const aiSelectionNotice = ref('')
+const rejectedAiCatalogRevision = ref('')
+const aiCatalogRefreshRequired = ref(false)
 const seed = ref(20261114)
 const simulationCount = ref(1000)
 const publishing = ref(false)
@@ -878,6 +997,38 @@ let disposed = false
 let initialized = false
 
 const catalog = computed(() => rootData.value?.catalog || null)
+const aiTools = computed(() => srppAiTools(rootData.value?.aiTools))
+const aiCatalogRevision = computed(() => typeof rootData.value?.aiCatalogRevision === 'string'
+  ? rootData.value.aiCatalogRevision.trim()
+  : '')
+const aiModeAvailable = computed(() => !aiCatalogRefreshRequired.value && !!aiCatalogRevision.value && rootData.value?.aiAvailable === true)
+const selectedAiTool = computed(() => findSrppAiTool(aiTools.value, aiSelection.value.toolId))
+const selectedAiModels = computed(() => isSrppAiToolSelectable(selectedAiTool.value)
+  ? srppAiModels(selectedAiTool.value)
+  : [])
+const selectedAiModel = computed(() => findSrppAiModel(selectedAiTool.value, aiSelection.value.model))
+const selectedAiEfforts = computed(() => srppAiEfforts(selectedAiModel.value))
+const aiSelectionValidation = computed(() => validateSrppAiSelection(aiTools.value, aiCatalogRevision.value, aiSelection.value))
+const aiSelectionReady = computed(() => aiModeAvailable.value && aiSelectionValidation.value.valid)
+const aiCatalogStatusSummary = computed(() => {
+  if (aiCatalogRefreshRequired.value) return '工具清單已過期，請重新載入後再選擇。'
+  if (rootData.value?.aiAvailable === true) return '目前有可用工具，請選擇工具與模型。'
+  if (!aiCatalogRevision.value && loadingRoot.value) return '正在讀取可用工具清單。'
+  if (!aiTools.value.length) return '目前沒有可用工具資料；可重新載入查看狀態。'
+  return `目前沒有可選工具：${aiToolAvailabilityDetail(aiTools.value[0])}`
+})
+const aiSelectionError = computed(() => {
+  if (runMode.value !== 'AI' || aiSelectionReady.value || !hasSrppAiSelection(aiSelection.value)) return ''
+  return ({
+    'catalog-missing': '目前沒有可用的工具清單，請重新載入。',
+    'catalog-stale': '工具清單已更新，請重新選擇工具與模型。',
+    'tool-unavailable': '請選擇目前可用的工具。',
+    'model-required': '請選擇此工具提供的模型。',
+    'effort-required': '請選擇此模型支援的思考程度。',
+    'effort-not-supported': '此模型不提供思考程度選項。'
+  })[aiSelectionValidation.value.reason] || '請確認工具與模型選擇。'
+})
+const currentAiStatus = computed(() => selectedRun.value?.aiExecution?.status || selectedRun.value?.aiStatus)
 const fields = computed(() => Array.isArray(catalog.value?.fields) ? catalog.value.fields : [])
 const drafts = computed(() => Array.isArray(rootData.value?.drafts) ? rootData.value.drafts : [])
 const runs = computed(() => Array.isArray(rootData.value?.simulations) ? rootData.value.simulations : [])
@@ -1030,6 +1181,11 @@ watch(ownerIdentity, (next, previous) => {
   loadingSelectedRun.value = false
   simulating.value = false
   simulationError.value = ''
+  runMode.value = 'LOCAL'
+  aiSelection.value = createEmptySrppAiSelection()
+  aiSelectionNotice.value = ''
+  rejectedAiCatalogRevision.value = ''
+  aiCatalogRefreshRequired.value = false
   pollError.value = ''
   pollTimedOut.value = false
   selectedRelease.value = null
@@ -1389,6 +1545,127 @@ function runOptionLabel(runItem) {
   return `${mode} · ${status}${at}`
 }
 
+function aiToolLabel(tool) {
+  return tool?.label || tool?.id || '未命名工具'
+}
+
+function aiModelLabel(model) {
+  return model?.label || model?.id || '未命名模型'
+}
+
+function aiEffortLabel(effort) {
+  return ({ low: '低', medium: '中', high: '高', xhigh: '極高', max: '最高' })[effort] || effort
+}
+
+function aiBillingModeLabel(billingMode) {
+  return srppAiBillingModeLabel(billingMode)
+}
+
+function aiModelSourceLabel(modelSource) {
+  return srppAiModelSourceLabel(modelSource)
+}
+
+function isAiToolSelectable(tool) {
+  return isSrppAiToolSelectable(tool)
+}
+
+function aiToolAvailabilityDetail(tool) {
+  if (tool?.available !== true) {
+    return tool?.code
+      ? safeSrppAiCodeMessage(tool.code)
+      : '目前無法確認此工具是否可用，請重新載入工具清單。'
+  }
+  if (!srppAiModels(tool).length) return '目前沒有可選模型。'
+  return `${aiBillingModeLabel(tool.billingMode)}；${aiModelSourceLabel(tool.modelSource)}`
+}
+
+function changeAiTool(toolId) {
+  aiSelectionNotice.value = ''
+  aiSelection.value = selectSrppAiTool(aiTools.value, toolId, aiCatalogRevision.value)
+}
+
+function changeAiModel(modelId) {
+  aiSelectionNotice.value = ''
+  aiSelection.value = selectSrppAiModel(aiTools.value, aiSelection.value, modelId, aiCatalogRevision.value)
+}
+
+function changeAiEffort(effort) {
+  if (!selectedAiEfforts.value.includes(effort)) return
+  aiSelectionNotice.value = ''
+  aiSelection.value = { ...aiSelection.value, effort }
+}
+
+function synchronizeAiSelection(response) {
+  const revision = typeof response?.aiCatalogRevision === 'string' ? response.aiCatalogRevision.trim() : ''
+  if (rejectedAiCatalogRevision.value && revision !== rejectedAiCatalogRevision.value) {
+    rejectedAiCatalogRevision.value = ''
+    aiCatalogRefreshRequired.value = false
+  }
+  if (!hasSrppAiSelection(aiSelection.value)) {
+    aiSelection.value = createEmptySrppAiSelection(revision)
+    return
+  }
+  const validation = validateSrppAiSelection(response?.aiTools, revision, aiSelection.value)
+  if (validation.valid) return
+  aiSelection.value = createEmptySrppAiSelection(revision)
+  aiSelectionNotice.value = validation.reason === 'catalog-stale'
+    ? safeSrppAiCodeMessage('CATALOG_STALE')
+    : '工具或模型清單已變更，請重新選擇。'
+}
+
+function refreshAiCatalog() {
+  aiSelectionNotice.value = ''
+  return loadRoot()
+}
+
+function aiReceiptToolLabel(run) {
+  const toolId = run?.aiSelection?.toolId || run?.aiExecution?.toolId
+  const tool = findSrppAiTool(aiTools.value, toolId)
+  return tool?.label || toolId || '未記錄'
+}
+
+function aiReceiptRequestedModel(run) {
+  return run?.aiSelection?.model || run?.aiExecution?.requestedModel || '未記錄'
+}
+
+function aiReceiptRequestedEffort(run) {
+  if (run?.aiSelection && Object.hasOwn(run.aiSelection, 'effort')) {
+    return run.aiSelection.effort == null ? '不適用' : run.aiSelection.effort
+  }
+  if (run?.aiExecution && Object.hasOwn(run.aiExecution, 'requestedEffort')) {
+    return run.aiExecution.requestedEffort == null ? '不適用' : run.aiExecution.requestedEffort
+  }
+  return '未記錄'
+}
+
+function aiReceiptBillingMode(run) {
+  const mode = run?.aiExecution?.billingMode
+  return mode === 'SUBSCRIPTION' || mode === 'LOCAL' ? aiBillingModeLabel(mode) : '未記錄'
+}
+
+function aiReceiptTime(value) {
+  return value ? formatTime(value) : '未記錄'
+}
+
+function aiReceiptFailureMessage(run) {
+  if (run?.aiExecution?.status !== 'FAILED' && run?.aiStatus !== 'FAILED') return ''
+  return safeSrppAiCodeMessage(run?.aiExecution?.code || run?.errorCode)
+}
+
+function aiActualModelLabel(execution) {
+  return srppAiActualModelLabel(execution)
+}
+
+function aiExecutionStatusLabel(status) {
+  return srppAiExecutionStatusLabel(status)
+}
+
+function aiReceiptExecutionStatusLabel(run) {
+  return run?.aiExecution?.status
+    ? aiExecutionStatusLabel(run.aiExecution.status)
+    : aiStatusLabel(run?.aiStatus)
+}
+
 function setActiveDraft(draft) {
   const previousDraftId = activeDraft.value?.id
   if (previousDraftId !== draft?.id) {
@@ -1450,6 +1727,7 @@ async function loadRoot() {
       !response.catalog.currentValues || typeof response.catalog.currentValues !== 'object') {
       throw new Error('SRPP 設定目錄回應格式不完整，已停止載入編輯器。')
     }
+    synchronizeAiSelection(response)
     rootData.value = response
     if (!initialized) {
       const currentValues = response.catalog.currentValues
@@ -1656,6 +1934,10 @@ async function simulate() {
     ElMessage.warning('請修正短線策略的白名單、欄位範圍或配置上限。')
     return
   }
+  if (runMode.value === 'AI' && !aiSelectionReady.value) {
+    ElMessage.warning(aiSelectionError.value || '請先選擇可用的工具與模型。')
+    return
+  }
   runRequestSequence += 1
   const requestSequence = runRequestSequence
   const ownerAtRequest = ownerIdentity.value
@@ -1664,12 +1946,14 @@ async function simulate() {
   pollTimedOut.value = false
   simulating.value = true
   try {
-    const run = await bffApi.portfolioAdvice.srpp.simulateDraft(activeDraft.value.id, {
+    const request = {
       revision: activeDraft.value.revision,
       mode: runMode.value,
       seed: Number(seed.value),
       simulations: Number(simulationCount.value)
-    })
+    }
+    if (runMode.value === 'AI') request.aiSelection = srppAiSelectionPayload(aiSelection.value)
+    const run = await bffApi.portfolioAdvice.srpp.simulateDraft(activeDraft.value.id, request)
     if (disposed || ownerAtRequest !== ownerIdentity.value || requestSequence !== runRequestSequence) return
     setActiveRun(run)
     updateRunInRoot(run)
@@ -1678,6 +1962,14 @@ async function simulate() {
     else if (run.status === 'FAILED') ElMessage.warning('情境模擬未完成，請稍後重新執行。')
   } catch (error) {
     if (disposed || ownerAtRequest !== ownerIdentity.value || requestSequence !== runRequestSequence) return
+    const code = error?.response?.data?.code
+    if (runMode.value === 'AI' && ['CATALOG_STALE', 'AI_CATALOG_STALE'].includes(code)) {
+      rejectedAiCatalogRevision.value = aiSelection.value.catalogRevision
+      aiCatalogRefreshRequired.value = true
+      aiSelection.value = createEmptySrppAiSelection()
+      aiSelectionNotice.value = safeSrppAiCodeMessage('CATALOG_STALE')
+      await loadRoot()
+    }
     if (error?.response?.status === 409) {
       simulationError.value = apiErrorMessage(error, '草稿版本已變更，請重新載入後再模擬。')
     } else {
@@ -2202,6 +2494,31 @@ onUnmounted(() => {
 .mode-options { margin-top: 14px; }
 .mode-description { margin: 8px 0; color: #64748b; font-size: 12px; line-height: 1.6; }
 .mode-description span { display: block; margin-top: 3px; color: #b45309; }
+.ai-catalog-summary { margin: 10px 0 14px; padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; }
+.ai-catalog-summary-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.ai-catalog-summary-heading strong { display: block; color: #334155; font-size: 12px; }
+.ai-catalog-summary-heading span { display: block; margin-top: 3px; color: #64748b; font-size: 11px; line-height: 1.5; }
+.ai-tool-status-list { display: grid; gap: 8px; }
+.ai-tool-status-item { padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; }
+.ai-tool-status-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ai-tool-status-heading strong { color: #334155; font-size: 12px; }
+.ai-tool-status-item small, .ai-tool-status-empty { display: block; margin-top: 4px; color: #64748b; font-size: 10px; line-height: 1.6; }
+.ai-tool-status-empty { margin-bottom: 0; }
+.ai-selection-panel { margin: 12px 0 14px; padding: 12px; border: 1px solid #dbeafe; border-radius: 8px; background: #f8fbff; }
+.ai-selection-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.ai-selection-heading strong { display: block; color: #334155; font-size: 13px; }
+.ai-selection-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.ai-selection-grid > div { min-width: 0; }
+.ai-selection-grid :deep(.el-select), .ai-selection-grid :deep(.el-input) { width: 100%; }
+/* This dropdown is teleported outside the component and contains two-line options. */
+:global(.srpp-ai-tool-popper .el-select-dropdown__item) { height: auto; min-height: 54px; padding-top: 8px; padding-bottom: 8px; line-height: 1.5; white-space: normal; }
+:global(.srpp-ai-tool-popper) { max-width: calc(100vw - 24px); }
+.ai-tool-option { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ai-tool-option > span { min-width: 0; overflow-wrap: anywhere; }
+.ai-tool-option :deep(.el-tag) { flex-shrink: 0; }
+.ai-tool-option-detail { display: block; margin-top: 2px; color: #94a3b8; font-size: 10px; line-height: 1.5; white-space: normal; }
+.ai-selection-detail, .ai-selection-error { margin: 8px 0 0; color: #64748b; font-size: 11px; line-height: 1.6; }
+.ai-selection-error { color: #b45309; }
 .simulation-controls { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 14px; margin: 14px 0 8px; }
 .simulation-controls > div { min-width: 154px; }
 .simulation-controls :deep(.el-input-number) { width: 160px; }
@@ -2223,6 +2540,13 @@ onUnmounted(() => {
 .ai-result.success { border-color: #a7f3d0; background: #f0fdf4; }
 .ai-result.warning { border-color: #fde68a; background: #fffbeb; }
 .ai-result p { margin: 8px 0 0; color: #475569; font-size: 13px; line-height: 1.7; white-space: pre-wrap; }
+.ai-receipt { margin-top: 12px; padding-top: 8px; border-top: 1px solid #e2e8f0; }
+.ai-receipt .subsection-heading { margin: 0 0 8px; }
+.ai-receipt-grid { display: grid; grid-template-columns: minmax(100px, 0.7fr) minmax(0, 1.5fr); gap: 5px 12px; margin: 0; }
+.ai-receipt-grid dt { color: #64748b; font-size: 11px; }
+.ai-receipt-grid dd { min-width: 0; margin: 0; color: #334155; font-size: 11px; overflow-wrap: anywhere; }
+.ai-receipt .ai-receipt-error { color: #9a3412; font-size: 12px; }
+.ai-receipt .ai-receipt-empty { color: #64748b; font-size: 12px; }
 .comparison-table { margin-bottom: 12px; }
 .path-heading { justify-content: space-between; margin-top: 16px; }
 .limitations-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 8px; }
@@ -2238,6 +2562,7 @@ onUnmounted(() => {
 }
 @media (max-width: 700px) {
   .version-cards { grid-template-columns: 1fr; }
+  .ai-selection-grid { grid-template-columns: 1fr; }
   .field-grid, .limitations-grid { grid-template-columns: 1fr; }
   .weights-grid { grid-template-columns: 1fr; }
   .identity-grid, .assumptions-grid { grid-template-columns: 1fr; gap: 2px; }

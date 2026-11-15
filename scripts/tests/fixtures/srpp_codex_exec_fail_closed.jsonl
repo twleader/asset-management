@@ -1,0 +1,5 @@
+{"type":"thread.started","thread_id":"synthetic-fixture-thread"}
+{"type":"item.completed","item":{"id":"diagnostic","type":"error","message":"Code Mode is unavailable because code-mode host is disabled. Code mode will fail closed; enable `features.code_mode_host` and install `codex-code-mode-host`."}}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"response","type":"agent_message","text":"合成回歸測試文字，非原始模型輸出。"}}
+{"type":"turn.completed"}

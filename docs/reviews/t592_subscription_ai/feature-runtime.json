@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 1,
+  "scope": "FEATURE_PREMERGE_RUNTIME_ACCEPTANCE",
+  "recordedAt": "2026-11-15T10:42:59.710923+00:00",
+  "sourceBranch": "codex/srpp-ai-subscription",
+  "baseMainSha": "cf697f8dc098d7f02692b07de4b00d6c46120a5f",
+  "composeProject": "asset-management",
+  "images": {
+    "business-services": "sha256:a25c07b01403f8e8b53403b21901f78ddd60be518acd068cda420fcf60a004f1",
+    "bff": "sha256:fa0e081a396913759cf0b8e7f933cb2621a13da4dfdc028b3ece9acfc4963dd2",
+    "frontend": "sha256:05d36dc463213a8b51a5121899d5d727d1c7b200061e493944fc8683988be537"
+  },
+  "containerChecks": {
+    "business-services": {
+      "environmentMatchesMain": true,
+      "restartCount": 0,
+      "dockerHealth": "healthy"
+    },
+    "bff": {
+      "environmentMatchesMain": true,
+      "restartCount": 0,
+      "dockerHealth": "healthy"
+    },
+    "frontend": {
+      "environmentMatchesMain": true,
+      "restartCount": 0,
+      "dockerHealth": null
+    }
+  },
+  "deploymentConfig": {
+    "featureEnvMatchesMain": true,
+    "fubonSecretsBoundToMain": true,
+    "dedicatedBridgeTokenReadOnly": true,
+    "tokenReadableByApplicationUid": true,
+    "credentialsLogged": false
+  },
+  "hostBridge": {
+    "launchAgentLoaded": true,
+    "bind": "127.0.0.1:8766",
+    "dockerCanReachHostLoopback": true
+  },
+  "frontend": {
+    "httpStatus": 200,
+    "tlsSystemTrustAndHostnameVerified": true,
+    "indexSha256": "9371b1de1b7dfbbf23bb797a5822ccf3ef92e3ae1f2a00d8dda10870f5ae0770",
+    "newAiCopyPresentInServedAssets": true
+  },
+  "safe9090": {
+    "quotes": 200,
+    "marketIndex": 200
+  },
+  "authentication": {
+    "unauthenticatedBffStatus": 401,
+    "realOidcLoginExercised": false,
+    "businessFeatureApiScope": "container-internal, verified configured ACTIVE ADMIN context",
+    "browserValidationScope": "handled separately with synthetic responses; no authentication setting changed"
+  },
+  "tests": {
+    "backend": 62,
+    "bff": 4,
+    "frontend": 191,
+    "backendFailures": 0,
+    "bffFailures": 0
+  },
+  "migration": {
+    "id": "v1.167.0-srpp-subscription-ai",
+    "schemaDrift": "PASS",
+    "tableCount": 123
+  },
+  "localSimulation": {
+    "centerStatus": 200,
+    "aiAvailable": true,
+    "aiCatalogRevision": "d4a11f928f74df82ce8e4d23321162ffaa7a37b40aae66ec87ce23bd284d2c46",
+    "tools": [
+      {
+        "id": "codex",
+        "available": true,
+        "code": null,
+        "modelCount": 8
+      },
+      {
+        "id": "claude",
+        "available": true,
+        "code": null,
+        "modelCount": 3
+      },
+      {
+        "id": "ollama",
+        "available": true,
+        "code": null,
+        "modelCount": 2
+      },
+      {
+        "id": "lmstudio",
+        "available": false,
+        "code": "AI_TOOL_UNAVAILABLE",
+        "modelCount": 0
+      }
+    ],
+    "draftId": "9ac06b24-1de0-4339-99fa-10b19fff6f66",
+    "localRunId": "5d4213dc-b7f5-41ce-adc6-6a3603734639",
+    "localStatus": "SUCCEEDED",
+    "localAiStatus": "NOT_REQUESTED",
+    "localResultSha256": "65757660328b41f04c4f26a842b1253ca083ccc296668dbcf4a2a56a3b984a4c",
+    "invalidSelectionStatus": 400,
+    "invalidSelectionCode": "AI_INVALID_SELECTION",
+    "resultHashVerified": true
+  },
+  "aiSimulation": {
+    "aiRunId": "4d15edde-cebf-45c5-b60c-2aaf4230b9a9",
+    "status": "SUCCEEDED",
+    "aiStatus": "SUCCEEDED",
+    "errorCode": null,
+    "aiSelection": {
+      "toolId": "ollama",
+      "model": "gemma4:31b",
+      "effort": null,
+      "catalogRevision": "d4a11f928f74df82ce8e4d23321162ffaa7a37b40aae66ec87ce23bd284d2c46"
+    },
+    "aiExecution": {
+      "toolId": "ollama",
+      "requestedModel": "gemma4:31b",
+      "requestedEffort": null,
+      "actualModel": "gemma4:31b",
+      "modelEvidence": "PROVIDER_REPORTED",
+      "billingMode": "LOCAL",
+      "adapterVersion": "1",
+      "startedAt": "2026-11-15T10:41:00.736449Z",
+      "completedAt": "2026-11-15T10:41:50.226475Z",
+      "status": "SUCCEEDED",
+      "code": null
+    },
+    "resultSha256": "02125b3865f3020224cd90e2d5704ae16b6d71bc7cc25f4da3aa830655dfe261",
+    "textPresent": true,
+    "resultHashVerified": true,
+    "localScenarioNumbersIdentical": true
+  },
+  "startupRegression": {
+    "initialFailure": "Spring production constructor lacked explicit Autowired with multiple constructors",
+    "fixed": true,
+    "contextRegressionPassed": true,
+    "finalBusinessRestartCount": 0
+  },
+  "limitations": [
+    "This receipt is pre-merge feature deployment; a post-merge deployment receipt is separate.",
+    "Real OIDC login was not exercised; the unauthenticated BFF still returned 401.",
+    "CLI synthetic smoke results are recorded separately by the coordinating agent."
+  ],
+  "noPublishNoMailNoTrade": true
+}

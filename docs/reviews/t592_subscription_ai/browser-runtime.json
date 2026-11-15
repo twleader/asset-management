@@ -1,0 +1,61 @@
+{
+  "status": "passed_with_mobile_layout_limit",
+  "dockerBrowserSource": "http://localhost/asset-allocation-advice",
+  "dockerHttpsProbe": {
+    "url": "https://localhost/asset-allocation-advice",
+    "status": 200,
+    "note": "TLS reachability probe; browser fixture screenshots were captured from the HTTP Docker assets."
+  },
+  "fixtures": {
+    "auth": "synthetic ADMIN fixture",
+    "catalogAndSimulationRuns": "synthetic data only",
+    "realAccountDataCaptured": false,
+    "apiCalls": "All /api/** requests intercepted and fulfilled by the acceptance script; no real API calls. Static page assets came from the running Docker frontend."
+  },
+  "passedChecks": [
+    "Dynamic tool and model options render from the aiTools fixture.",
+    "Catalog default effort is applied; a model without effort submits effort=null.",
+    "AI simulation payload includes aiSelection with toolId, model, effort, and catalogRevision.",
+    "LOCAL simulation payload omits aiSelection.",
+    "Failed AI run with null aiExecution renders a safe explanation from run.errorCode; raw code is hidden.",
+    "Unavailable fee-related reasons and reload control remain available in LOCAL; AI mode is disabled when no tool is available.",
+    "Owner switch resets mode to LOCAL, reloads the catalog, and does not retain the previous tool/model selection.",
+    "Two-line tool option contents are not clipped in desktop and 375px expanded-sidebar viewport measurements.",
+    "No unhandled page errors."
+  ],
+  "pageErrors": [],
+  "optionMeasurements": {
+    "desktop": {
+      "clientHeight": 54,
+      "scrollHeight": 54,
+      "textWithin": true
+    },
+    "viewport375ExpandedSidebar": {
+      "clientHeight": 174,
+      "scrollHeight": 174,
+      "textWithin": true,
+      "selectionGridWidth": 41,
+      "oneColumn": true
+    }
+  },
+  "mobileFollowup": {
+    "sidebarCollapsedInteractionAndScreenshot": "NOT_EXECUTED",
+    "limitation": "At viewport width 375px with the existing sidebar expanded, the selection grid measured only 41px. The browser run verified option text bounds, not usable interaction with the sidebar collapsed. This is a global layout constraint outside the frontend feature scope."
+  },
+  "screenshots": {
+    "desktopFocusedSimulation": {
+      "path": "/tmp/srpp-settings-acceptance/ui-simulation-controls.png",
+      "size": "573x923",
+      "source": "synthetic fixture on Docker frontend assets"
+    },
+    "viewport375ExpandedSidebar": {
+      "path": "/tmp/srpp-settings-acceptance/ui-mobile-tool-options.png",
+      "size": "1010x812",
+      "source": "synthetic fixture; horizontal overflow reflects expanded sidebar constraint"
+    }
+  },
+  "acceptanceScript": {
+    "path": "/tmp/srpp-settings-acceptance/ui-acceptance.mjs",
+    "sha256": "4eb8ab255e7b5a7ef86df50fad65a51129f6e0bda115ecc6604d5c8b7a725634"
+  }
+}

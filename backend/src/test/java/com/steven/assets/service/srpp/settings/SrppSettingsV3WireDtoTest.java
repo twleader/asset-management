@@ -32,7 +32,7 @@ class SrppSettingsV3WireDtoTest {
         assertThatThrownBy(()->tax.years().clear()).isInstanceOf(UnsupportedOperationException.class);
         assertThatThrownBy(()->tax.years().getFirst().brackets().clear()).isInstanceOf(UnsupportedOperationException.class);
         assertThatThrownBy(()->tax.notes().clear()).isInstanceOf(UnsupportedOperationException.class);
-        String id=UUID.randomUUID().toString();RunResponse run=new RunResponse(id,UUID.randomUUID().toString(),1,"LOCAL","SUCCEEDED",typed.configSha256(),typed.inputSha256(),hash,"NOT_REQUESTED",null,null,"2026-11-14T00:00:00Z","2026-11-14T00:00:00Z",typed,List.of(),false,List.of(),null);
+        String id=UUID.randomUUID().toString();RunResponse run=new RunResponse(id,UUID.randomUUID().toString(),1,"LOCAL","SUCCEEDED",typed.configSha256(),typed.inputSha256(),hash,"NOT_REQUESTED",null,null,"2026-11-14T00:00:00Z","2026-11-14T00:00:00Z",typed,List.of(),false,List.of(),null,null,null);
         SrppSettingsService service=mock(SrppSettingsService.class);when(service.simulation(UUID.fromString(id))).thenReturn(run);
         ObjectMapper mapper=new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
         var mvc=MockMvcBuilders.standaloneSetup(new SrppSettingsController(service)).setMessageConverters(new MappingJackson2HttpMessageConverter(mapper)).build();

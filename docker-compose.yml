@@ -270,6 +270,13 @@ services:
       - ${EXPORT_OUTPUT_DIR_HOST:-/Users/steven}:/home/steven
       # Task 352: Java sees only the shared service token, never SDK identity/key/PFX files.
       - ${FUBON_SECRETS_DIR_HOST:-./secrets/fubon}/shared:/run/secrets/fubon/shared:ro
+      # Task592: only the dedicated bridge token projection; CLI credentials stay on the host.
+      - type: bind
+        source: ${SRPP_LOCAL_AI_TOKEN_FILE:-/Users/steven/.local/share/srpp-local-ai/docker-token/bridge.token}
+        target: /run/secrets/srpp_local_ai_token
+        read_only: true
+        bind:
+          create_host_path: false
     depends_on:
       postgres:
         condition: service_healthy

@@ -30,7 +30,7 @@ class SrppSettingsV2WireDtoTest {
         assertThat(typed.result().scenario().assumptions().reserveStrategy().protectedReserveRealTwd()).isEqualTo(new BigDecimal("1600000.00"));
         assertThat(typed.result().scenario().reserveStrategyAudit().monthlyAudit()).hasSize(typed.result().scenario().reserveStrategyAudit().monthUpdateCount());
         assertThatThrownBy(()->typed.result().scenario().assumptions().cashflowSchedule().payroll().ledger().clear()).isInstanceOf(UnsupportedOperationException.class);
-        String id=UUID.randomUUID().toString();RunResponse run=new RunResponse(id,UUID.randomUUID().toString(),1,"LOCAL","SUCCEEDED",typed.configSha256(),typed.inputSha256(),pythonHash,"NOT_REQUESTED",null,null,"2026-11-14T00:00:00Z","2026-11-14T00:00:00Z",typed,List.of(),false,List.of(),null);
+        String id=UUID.randomUUID().toString();RunResponse run=new RunResponse(id,UUID.randomUUID().toString(),1,"LOCAL","SUCCEEDED",typed.configSha256(),typed.inputSha256(),pythonHash,"NOT_REQUESTED",null,null,"2026-11-14T00:00:00Z","2026-11-14T00:00:00Z",typed,List.of(),false,List.of(),null,null,null);
         SrppSettingsService service=mock(SrppSettingsService.class);when(service.simulation(UUID.fromString(id))).thenReturn(run);
         ObjectMapper mapper=new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
         var mvc=MockMvcBuilders.standaloneSetup(new SrppSettingsController(service)).setMessageConverters(new MappingJackson2HttpMessageConverter(mapper)).build();

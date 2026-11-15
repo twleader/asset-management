@@ -29,10 +29,18 @@ class SrppSettingsBffTest {
         var original=json.readTree(getClass().getResourceAsStream("/srpp/settings-result-wire.json"));
         var run=json.createObjectNode().put("id","11111111-1111-4111-8111-111111111111").put("draftId","22222222-2222-4222-8222-222222222222").put("draftRevision",1).put("mode","LOCAL").put("status","SUCCEEDED").put("configSha256",original.path("configSha256").asText()).put("inputSha256",original.path("inputSha256").asText()).put("resultSha256","79d17b6863696707c5c0733c7c214fcbb7136aa78d8a25592697c5f7a3288f9f").put("aiStatus","NOT_REQUESTED").put("publishEligible",false);
         run.set("deterministicResult",original);run.putArray("changes");run.putArray("blockedReasons");
+        run.putObject("aiSelection").put("toolId","codex").put("model","test-model").put("effort","high").put("catalogRevision","f".repeat(64));
+        run.putObject("aiExecution").put("toolId","codex").put("requestedModel","test-model").put("requestedEffort","high").putNull("actualModel")
+                .put("modelEvidence","REQUESTED_ONLY").put("billingMode","SUBSCRIPTION").put("adapterVersion","1")
+                .put("startedAt","2026-11-15T01:00:00Z").put("completedAt","2026-11-15T01:00:01Z").put("status","SUCCEEDED").putNull("code");
         var root=json.createObjectNode();var cat=root.putObject("catalog").put("schemaVersion",1).put("catalogVersion","SRPP_SETTINGS_CATALOG_V1");
         cat.putObject("currentValues").put("livingExpense",new java.math.BigDecimal("750000.15"));
         var fields=cat.putArray("fields");fields.addObject().put("id","late").put("group","退休規劃").put("order",20);fields.addObject().put("id","first").put("group","資產配置").put("order",0);fields.addObject().put("id","middle").put("group","退休規劃").put("order",10);
         root.putArray("drafts");root.putArray("releases");root.putArray("simulations").add(run);
+        root.put("aiCatalogRevision","f".repeat(64)).put("aiAvailable",true);
+        var tool=root.putArray("aiTools").addObject().put("id","codex").put("label","Codex CLI").put("adapter","codex_cli")
+                .put("billingMode","SUBSCRIPTION").put("available",true).putNull("code").put("modelSource","RUNTIME");
+        tool.putArray("models").addObject().put("id","test-model").put("label","Test model").put("defaultEffort","high").putArray("efforts").add("high");
         HttpServer server=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);
         server.createContext("/api/portfolio-advice/srpp",exchange->{byte[] bytes=json.writeValueAsBytes(root);exchange.getResponseHeaders().add("Content-Type","application/json");exchange.sendResponseHeaders(200,bytes.length);exchange.getResponseBody().write(bytes);exchange.close();});server.start();
         try {
@@ -43,6 +51,10 @@ class SrppSettingsBffTest {
             assertThat(body.path("fieldGroups").get(1).path("fields").get(0).path("id").asText()).isEqualTo("middle");
             assertThat(body.path("fieldGroups").get(1).path("fields").get(1).path("id").asText()).isEqualTo("late");
             var actual=body.path("simulations").get(0);sameJson(original,actual.path("deterministicResult"),"deterministicResult");
+            assertThat(body.path("aiTools").get(0).path("models").get(0).path("efforts").get(0).asText()).isEqualTo("high");
+            assertThat(body.path("aiCatalogRevision").asText()).isEqualTo("f".repeat(64));
+            assertThat(actual.path("aiSelection")).isEqualTo(run.path("aiSelection"));
+            assertThat(actual.path("aiExecution")).isEqualTo(run.path("aiExecution"));
             assertThat(body.path("catalog").path("currentValues").path("livingExpense").isNumber()).isTrue();
             java.util.Map<String,com.fasterxml.jackson.databind.JsonNode> rows=new java.util.HashMap<>();actual.path("presentation").path("scenario").path("assumptions").forEach(row->rows.put(row.path("key").asText(),row));
             assertThat(rows).hasSize(25);assertThat(rows.get("referenceInflation").path("value").decimalValue()).isEqualByComparingTo("0.0225");assertThat(rows.get("referenceInflation").path("unit").asText()).isEqualTo("fraction");

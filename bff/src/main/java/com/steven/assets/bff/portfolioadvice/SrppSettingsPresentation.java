@@ -15,11 +15,11 @@ final class SrppSettingsPresentation {
         List<JsonNode> ordered=new ArrayList<>(center.catalog().fields());ordered.sort(Comparator.comparingInt(n->n.path("order").asInt()));
         Map<String,List<JsonNode>> groups=new LinkedHashMap<>();for(JsonNode f:ordered)groups.computeIfAbsent(f.path("group").asText("其他設定"),k->new ArrayList<>()).add(f);
         List<FieldGroup> fieldGroups=groups.entrySet().stream().map(e->new FieldGroup(e.getKey(),e.getValue())).toList();
-        return new CenterResponse(center.catalog(),center.current(),center.drafts(),center.simulations().stream().map(SrppSettingsPresentation::run).toList(),center.releases(),center.canPublish(),center.aiAvailable(),fieldGroups);
+        return new CenterResponse(center.catalog(),center.current(),center.drafts(),center.simulations().stream().map(SrppSettingsPresentation::run).toList(),center.releases(),center.canPublish(),center.aiAvailable(),fieldGroups,center.aiTools(),center.aiCatalogRevision());
     }
     static RunResponse run(RunResponse r) {
         Presentation presentation=r.deterministicResult()==null?null:new Presentation(scenario(r.deterministicResult().result().baseline()),scenario(r.deterministicResult().result().scenario()));
-        return new RunResponse(r.id(),r.draftId(),r.draftRevision(),r.mode(),r.status(),r.configSha256(),r.inputSha256(),r.resultSha256(),r.aiStatus(),r.aiInterpretation(),r.errorCode(),r.createdAt(),r.completedAt(),r.deterministicResult(),r.changes(),r.publishEligible(),r.blockedReasons(),presentation);
+        return new RunResponse(r.id(),r.draftId(),r.draftRevision(),r.mode(),r.status(),r.configSha256(),r.inputSha256(),r.resultSha256(),r.aiStatus(),r.aiInterpretation(),r.errorCode(),r.createdAt(),r.completedAt(),r.deterministicResult(),r.changes(),r.publishEligible(),r.blockedReasons(),presentation,r.aiSelection(),r.aiExecution());
     }
     private record Definition(String key,String pointer,String label,String unit) {}
     private static final List<Definition> ASSUMPTIONS=List.of(
