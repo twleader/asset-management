@@ -1,0 +1,29 @@
+{
+  "scope": "NATIVE_AUTH_START_CANCEL_ONLY",
+  "usageRequestsIssued": 0,
+  "modelRequestsIssued": 0,
+  "codeSubmitted": false,
+  "authorizationUrlPersisted": false,
+  "localStateStatus": 200,
+  "localLoginState": "VALID",
+  "localStateCode": null,
+  "startStatus": 200,
+  "flowStatusBeforeCancel": "WAITING_FOR_CODE",
+  "validatedOfficialUrl": true,
+  "nativeCli": {
+    "version": "2.1.325",
+    "binarySha256": "84590fefe6338be9087f5814b61f9a54c5f21524163a4c127cb5a808e31009f2"
+  },
+  "nativePid": 9113,
+  "nativePgid": 9113,
+  "callbackLoopbackOnly": true,
+  "callbackPorts": [
+    54575
+  ],
+  "cancelStatus": 200,
+  "cancelled": true,
+  "nativeProcessGroupCleaned": true,
+  "nativeCallbackClosed": true,
+  "credentialTokenRegistryAndBackoffBytesAndModesPreserved": true,
+  "status": "PASS"
+}

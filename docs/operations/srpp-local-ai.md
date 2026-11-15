@@ -132,3 +132,25 @@ python3 -B -m unittest scripts/tests/test_srpp_local_ai_bridge.py
 單元測試使用隔離 fixture，涵蓋付費／未知狀態零推論、憑證隔離、組合驗證、版本過期、單工作鎖、逾時 killpg、拒絕遠端模型、token 驗證及安裝冪等。Codex 同步測試只用合成 JWT，覆蓋登入輪替、同 snapshot proof／exec、來源安全讀取、過期／錯帳、舊副本不可 fallback、401 與費用未知分流、並行投影及外層硬逾時清理；不讀寫真實登入、不發模型推論。Claude 自動探索另驗真實去識別 initialize 結構、動態第四模型、能力矛盾、未知 effort、原始付費 context 拒絕、legacy 配置不裁切、共同 deadline、成功／失敗／輸出超限的程序與管線清理。usage 退避測試使用 loopback 合成 HTTP、時鐘及新建程序，驗證 429→零外呼冷卻→200 恢復、跨程序／重啟共享、原子負向檔、記憶體 TTL／登入輪替、fresh 不讀正快取，以及真 parent→worker 路徑過目錄 TTL 後選 Codex 零 Claude query、選 Claude 僅一次 fresh query，不打真 usage 刷限流。fixture 只保存合成 request_id 與公開 model metadata，不含真實 account、email、org、憑證、commands 或 skills 來源。整體驗收另外應經正式頁面 BFF 執行 LOCAL 與所選 AI，確認數值雜湊一致、文字解讀與收據保留、未選模型及工具不被呼叫。
 
 參考官方說明：[Codex app-server](https://developers.openai.com/codex/app-server/)、[Codex 額外 credits](https://help.openai.com/en/articles/12642688-using-credits-for-flexible-usage-in-chatgpt-plus-pro)、[Claude Code CLI](https://code.claude.com/docs/en/cli-reference)、[Claude 額外用量](https://support.claude.com/en/articles/12429409-manage-usage-credits-for-paid-claude-plans)、[LM Studio 本機庫存](https://lmstudio.ai/docs/developer/rest/list)。
+
+## Claude 訂閱登入與本地期限（Task 596）
+
+主要管理者本人可在 Claude 工具列選擇重新登入。介面先顯示站內提示；只有按下登入才啟動原生 CLI，開啟官方授權頁。使用者完成官方頁面後，將完整 `code#state` 貼回站內視窗。此欄僅接收一次授權碼，不收密碼、API key 或 token。登入與費用確認為獨立狀態：登入成功只表示本地正常訂閱憑證已更新，費用仍受原有 fresh proof 與持久 429 冷卻約束。
+
+獨立 `/auth/claude/state` 在費用冷卻期間仍可查本地登入狀態，沒有 usage 或模型請求。明確本地過期顯示 EXPIRED；存在但不合法的期限需要重新登入；缺少期限為 UNKNOWN，不能稱本地有效。真正費用查詢保留 cooldown 優先；允許查詢時，先讀正常憑證的 `expiresAt`（epoch 毫秒），已過期回 `AI_AUTH_EXPIRED`，不對 usage 發送失效 access token。期限缺失仍沿既有 fresh 服務端費用證明，不以本地有效期限授權免費執行。
+
+Host 登入管理器獨立在 `scripts/srpp_claude_auth.py`，bridge 由自身同目錄明確載入。Host 的 `state/start/status/complete/cancel` 全部為固定 bearer 保護的 POST；ownerId 與 43 字元 sessionBinding 由伺服器權威身分／WebSession 產生，不接受瀏覽器自訂。每台 host 最多一個流程，flowId 為 256bit 隨機值、有效期300秒，terminal snapshot 最多保留60秒。跨 owner/binding 不透露 URL、不取消他人流程；重啟後舊 flow 不可重播。
+
+登入唯一命令是固定 registry executable 的 `--safe-mode auth login --claudeai`，乾淨環境額外固定 `BROWSER=/usr/bin/true` 防止在 host 自開瀏覽器。正常登入的 PKCE、OAuth 交換與 Keychain 寫入全部由 native CLI 執行；不複製／備份 refresh token、不自行交換或手寫憑證。CLI 登入本身可執行必要的帳號／政策網路驗證，但本功能不額外查 usage、也不送模型回合。
+
+原生2.1.325的正式授權網址精確為 `https://claude.com/cai/oauth/authorize`，manual redirect 為 `https://platform.claude.com/oauth/code/callback`，client ID 與八項原生 scope 在管理器閉合驗證。拒絕未知網址／query、重複欄位、不同 client、scope 變動及不合法 PKCE／state；可選 orgUUID 僅合法 UUID。此版不支援 login_hint/login_method，若 CLI 未來改協定則安全失敗，不能換成其它登入供應商。scope 中原生的 `org:create_api_key` 不代表允許此功能用 API 計費，登入始終強制 `--claudeai`。
+
+完整 authorization URL、state、code、native stdout/stderr、OAuth 回應與憑證不進檔案、日誌、錯誤 ingestion、DB 或 localStorage。只有等待貼碼時回傳已驗的官方 URL，送碼後立即隱藏；伺服器 constant-time 比對 state、限制單行 ASCII 與4096字元、最多寫 native stdin 一次。總輸出上限128KiB；完成、取消、逾時、超限都終止完整程序群組及 callback、關閉 selector／管線。UI 關閉或取消後不要沿用舊授權碼。
+
+`claude-operation.lock` 為私有0600 no-follow flock：Claude metadata／所選 Claude worker 持共享鎖，登入全流程持排他鎖。登入中 Claude 回 `AI_AUTH_IN_PROGRESS`；Claude 操作中開始登入回 `AUTH_BUSY`。Codex／Ollama不參與此鎖，可繼續使用。登入成功只清記憶體目錄／Claude正向metadata，不刪或縮短 `claude-usage-backoff.json`，不改模型、effort 或原模擬結果。
+
+原生來源備查（本機2.1.325，非跨版本契約）：callback class 的 `listen(...,"127.0.0.1",...)` 明確只綁loopback；authLogin 正常路徑在授權碼交換成功前不執行 credential 寫入，登入成功後才呼叫原生保存。部署驗收只允許真正 native start 取得已驗 manual URL 後立即 cancel，零模型／不開外站／不送碼；前後憑證、token、registry 的 bytes 比對只保存布林結果，不保存任何憑證 hash 或 raw 值。若發現正常憑證有變，立即停止，不以還原 refresh token 解決。真正完成官方登入由使用者操作。
+
+合成測試使用獨立 fake CLI 與 loopback HTTP 驗 URL allowlist、八 scope、重複query、PKCE state、單次code、跨 owner/binding、取消／逾時／輸出上限／native失敗／程序與鎖清理、短terminal保留、路由閉合／bearer／no-store，以及本地expiry在429下獨立顯示、過期零usage。這些測試不呼叫真CLI登入、Keychain、usage 或模型。部署需同步重建 recreate `business-services`、`bff`、`frontend` 與 reload host，依既有權威環境／TLS保護流程執行。
+
+官方來源：[CLI 訂閱登入](https://code.claude.com/docs/en/cli-reference)、[正常憑證儲存與多帳號](https://code.claude.com/docs/en/authentication#credential-management)、[更新到期登入](https://code.claude.com/docs/en/authentication#renew-an-expiring-login)。

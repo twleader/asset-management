@@ -118,6 +118,15 @@ test('登入必要與登入過期文案不會混淆費用未知或未呼叫模�
   assert.notEqual(authExpired, billingUnverified)
 })
 
+test('Claude 登入中的安全碼與費用限流保持獨立', () => {
+  const authInProgress = safeSrppAiCodeMessage('AI_AUTH_IN_PROGRESS')
+  const rateLimited = safeSrppAiCodeMessage('AI_RATE_LIMITED')
+
+  assert.equal(authInProgress, 'Claude 登入正在進行，請先完成目前登入流程。')
+  assert.equal(rateLimited, '此工具的費用狀態查詢暫時被限流，請等待退避後再重新載入。等待期間不會重複查詢，費用確認前不呼叫模型。')
+  assert.notEqual(authInProgress, rateLimited)
+})
+
 test('費用查詢限流只停用該工具，並與費用未知及登入錯誤分開說明', () => {
   const catalog = [
     {

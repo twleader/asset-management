@@ -1,0 +1,12 @@
+package com.steven.assets.bff.portfolioadvice;
+import org.junit.jupiter.api.Test;import org.springframework.test.web.reactive.server.WebTestClient;import org.springframework.web.reactive.function.client.WebClientResponseException;import org.springframework.http.*;import reactor.core.publisher.Mono;import java.nio.charset.StandardCharsets;import static org.mockito.Mockito.*;
+@org.springframework.boot.test.context.SpringBootTest
+@org.springframework.test.context.TestPropertySource(properties="business-services.url=http://127.0.0.1:1")
+class SrppClaudeAuthHttpTest {
+ @org.springframework.beans.factory.annotation.Autowired org.springframework.context.ApplicationContext context;
+ @org.springframework.test.context.bean.override.mockito.MockitoBean SrppClaudeAuthBffService service;
+ @org.springframework.test.context.bean.override.mockito.MockitoBean com.steven.assets.bff.security.BusinessUserClient users;
+ @org.springframework.test.context.bean.override.mockito.MockitoBean com.steven.assets.bff.apierrorlogs.ApiErrorLogIngestClient ingest;
+
+ @Test void dedicatedAdviceSanitizesRawTransportFailureBeforeGlobalLogger(){when(service.call(any(),isNull(),any(),any(),isNull(),isNull())).thenReturn(Mono.error(WebClientResponseException.create(503,"SECRET_NATIVE_CODE",HttpHeaders.EMPTY,"secret-auth-code".getBytes(StandardCharsets.UTF_8),StandardCharsets.UTF_8)));var client=WebTestClient.bindToApplicationContext(context).apply(org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers.springSecurity()).configureClient().build().mutateWith(org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers.mockUser().roles("ADMIN"));client.get().uri("/api/bff/portfolio-advice/srpp/ai-auth/claude/state?toolId=claude").exchange().expectStatus().isEqualTo(503).expectHeader().valueEquals("Cache-Control","no-store").expectBody().jsonPath("$.code").isEqualTo("AUTH_FAILED").jsonPath("$.message").isEqualTo("登入作業無法完成，請重新確認登入狀態");when(service.call(any(),isNull(),any(),any(),isNull(),isNull())).thenReturn(Mono.just(new SrppClaudeAuthDto.BootstrapResponse(1,"n".repeat(43),new SrppClaudeAuthDto.AuthLocalState(1,"claude","VALID",java.time.Instant.parse("2099-01-01T00:00:00Z"),null))));client.get().uri("/api/bff/portfolio-advice/srpp/ai-auth/claude/state?toolId=claude").exchange().expectStatus().isOk().expectBody().jsonPath("$.login.expiresAt").isEqualTo("2099-01-01T00:00:00Z");}
+}

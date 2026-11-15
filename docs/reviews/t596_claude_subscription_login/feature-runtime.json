@@ -1,0 +1,211 @@
+{
+  "schemaVersion": 1,
+  "status": "PASS_LOGIN_FLOW_WITH_PROVIDER_COOLDOWN_RETAINED",
+  "verifiedAt": "2026-11-15T18:01:19.013667+00:00",
+  "sourceFeature": "/Users/steven/.codex/worktrees/srpp-claude-auth-expiry/asset-management",
+  "sourceMainUnmodified": true,
+  "deployment": {
+    "images": {
+      "business-services": "sha256:e0d4f2e4db71f8bea303d3061eefb89c9b98960d2eb32878f0b4562abc77bb27",
+      "bff": "sha256:b4f440e9ba9053175aa7fb79e35b5981c03a4fc2915ccb3f287cbc91f3d7ac82",
+      "frontend": "sha256:737d5a4583245d1af6ccbf00442f9d86f9fd79d58e436f5c1551e3214d536ff6"
+    },
+    "allRunningImagesMatchBuilt": true,
+    "businessAndBffHealthy": true,
+    "frontendServesHttps": true,
+    "effectiveConfig": {
+      "business-services": {
+        "configuredEnvironmentKeysCompared": 47,
+        "allValuesMatchMain": true,
+        "bindMountSourcesMatchMain": true
+      },
+      "bff": {
+        "configuredEnvironmentKeysCompared": 9,
+        "allValuesMatchMain": true,
+        "bindMountSourcesMatchMain": true
+      },
+      "frontend": {
+        "configuredEnvironmentKeysCompared": 4,
+        "allValuesMatchMain": true,
+        "bindMountSourcesMatchMain": true
+      }
+    },
+    "host": {
+      "sourceRoot": "/Users/steven/.codex/worktrees/srpp-claude-auth-expiry/asset-management",
+      "sourceMatchesReviewedTests": true,
+      "scriptSha256": {
+        "scripts/srpp-local-ai-bridge.py": "4aa473ef3a119ee67000a0cd22e3041f2da2f34abc15e38be6688db992db685b",
+        "scripts/srpp_claude_auth.py": "81fe1f0ba8899fc51c75dee60db0cdee42f8a025096fed9774f84a61b669f792"
+      },
+      "hostStderrEmpty": true,
+      "mainClean": true
+    },
+    "installer": {
+      "finalStatus": "INSTALLED",
+      "initialAttempt": "TRANSIENT_INSTALL_FAILED",
+      "diagnosticRetrySucceeded": true,
+      "startupStderrEmpty": true
+    }
+  },
+  "nativeAuth": {
+    "scope": "NATIVE_AUTH_START_CANCEL_ONLY",
+    "usageRequestsIssued": 0,
+    "modelRequestsIssued": 0,
+    "codeSubmitted": false,
+    "authorizationUrlPersisted": false,
+    "localStateStatus": 200,
+    "localLoginState": "VALID",
+    "localStateCode": null,
+    "startStatus": 200,
+    "flowStatusBeforeCancel": "WAITING_FOR_CODE",
+    "validatedOfficialUrl": true,
+    "nativeCli": {
+      "version": "2.1.325",
+      "binarySha256": "84590fefe6338be9087f5814b61f9a54c5f21524163a4c127cb5a808e31009f2"
+    },
+    "nativePid": 9113,
+    "nativePgid": 9113,
+    "callbackLoopbackOnly": true,
+    "callbackPorts": [
+      54575
+    ],
+    "cancelStatus": 200,
+    "cancelled": true,
+    "nativeProcessGroupCleaned": true,
+    "nativeCallbackClosed": true,
+    "credentialTokenRegistryAndBackoffBytesAndModesPreserved": true,
+    "status": "PASS"
+  },
+  "capabilities": {
+    "hostStatus": 200,
+    "businessStatus": 200,
+    "matches": true,
+    "tools": [
+      {
+        "id": "codex",
+        "available": true,
+        "code": null,
+        "modelSource": "RUNTIME",
+        "modelCount": 8
+      },
+      {
+        "id": "claude",
+        "available": false,
+        "code": "AI_RATE_LIMITED",
+        "modelSource": "RUNTIME",
+        "modelCount": 0
+      },
+      {
+        "id": "ollama",
+        "available": true,
+        "code": null,
+        "modelSource": "RUNTIME",
+        "modelCount": 2
+      },
+      {
+        "id": "lmstudio",
+        "available": false,
+        "code": "AI_TOOL_UNAVAILABLE",
+        "modelSource": "RUNTIME",
+        "modelCount": 0
+      }
+    ],
+    "backoffStateUnchanged": true,
+    "nextAllowedAt": 1794766018.423195,
+    "readBeforeProviderDeadline": true,
+    "claudeUsageRequestsIssued": 0,
+    "modelRequestsIssued": 0
+  },
+  "browser": {
+    "source": "https://localhost",
+    "deployedProductionAssets": true,
+    "sourceRevision": "feature-reviewed",
+    "frontendImageDigest": "sha256:737d5a4583245d1af6ccbf00442f9d86f9fd79d58e436f5c1551e3214d536ff6",
+    "syntheticAuthAndBffOnly": true,
+    "realLogin": false,
+    "realInference": false,
+    "realApiWrites": 0,
+    "checks": {
+      "expiredPromptsWithoutStartingLogin": true,
+      "dismissedPromptDoesNotReopen": true,
+      "normalPopupDoesNotShowFalseBlockedFallbackOnPoll": true,
+      "officialPopupRequiresUserGesture": true,
+      "codeSubmittedOnceAndCleared": true,
+      "authOnlyPolling": true,
+      "successReloadsCenterOnce": true,
+      "loginDoesNotClearRateLimit": true,
+      "blockedPopupHasSafeOfficialLink": true,
+      "cancelled": true,
+      "expiryStopsCodeEntry": true,
+      "ownerChangeIgnoresLateResponseAndOfficialNavigation": true,
+      "privilegedLoginHiddenForOtherAdminAndImpersonation": true
+    },
+    "pageErrors": [],
+    "unexpectedApiRequests": [],
+    "externalAttempts": [],
+    "syntheticAuthMutations": 6,
+    "authCodeOrUrlSaved": false,
+    "status": "PASS"
+  },
+  "oldRuns": {
+    "local": {
+      "id": "5d4213dc-b7f5-41ce-adc6-6a3603734639",
+      "status": "SUCCEEDED",
+      "aiStatus": "NOT_REQUESTED",
+      "resultSha256": "65757660328b41f04c4f26a842b1253ca083ccc296668dbcf4a2a56a3b984a4c",
+      "hashVerified": true,
+      "aiSelection": null,
+      "aiExecution": null
+    },
+    "ai": {
+      "id": "4d15edde-cebf-45c5-b60c-2aaf4230b9a9",
+      "status": "SUCCEEDED",
+      "aiStatus": "SUCCEEDED",
+      "resultSha256": "02125b3865f3020224cd90e2d5704ae16b6d71bc7cc25f4da3aa830655dfe261",
+      "hashVerified": true,
+      "aiSelection": {
+        "toolId": "ollama",
+        "model": "gemma4:31b",
+        "effort": null,
+        "catalogRevision": "d4a11f928f74df82ce8e4d23321162ffaa7a37b40aae66ec87ce23bd284d2c46"
+      },
+      "aiExecution": {
+        "toolId": "ollama",
+        "requestedModel": "gemma4:31b",
+        "requestedEffort": null,
+        "actualModel": "gemma4:31b",
+        "modelEvidence": "PROVIDER_REPORTED",
+        "billingMode": "LOCAL",
+        "adapterVersion": "1",
+        "startedAt": "2026-11-15T10:41:00.736449Z",
+        "completedAt": "2026-11-15T10:41:50.226475Z",
+        "status": "SUCCEEDED",
+        "code": null
+      }
+    }
+  },
+  "safe9090": {
+    "quotes": 200,
+    "marketIndex": 200
+  },
+  "formalDomainTlsSystemTrustAndHostnameVerified": true,
+  "anonymousAuthState": {
+    "status": 401,
+    "cacheControl": "no-store"
+  },
+  "credentialAndBackoffPreserved": true,
+  "sensitiveAuthMarkersAbsentFromServiceLogs": {
+    "business-services": true,
+    "bff": true
+  },
+  "actualModelRequestsIssued": 0,
+  "actualClaudeUsageRequestsIssued": 0,
+  "nativeAuthorizationCodeSubmitted": false,
+  "nativeAuthorizationUrlPersisted": false,
+  "providerCooldown": {
+    "nextAllowedAt": 1794766018.423195,
+    "preserved": true,
+    "feeProofNotBypassed": true
+  },
+  "browserScope": "Deployed production assets with synthetic authenticated user and intercepted API/official page fixtures; no real browser login bypass."
+}

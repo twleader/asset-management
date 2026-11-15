@@ -19,6 +19,7 @@ import hashlib
 import hmac
 import http.server
 import ipaddress
+import importlib.util
 import json
 import math
 import os
@@ -41,6 +42,10 @@ import urllib.request
 from dataclasses import dataclass
 
 sys.dont_write_bytecode = True
+_auth_spec = importlib.util.spec_from_file_location("srpp_claude_auth_"+hashlib.sha256(str(pathlib.Path(__file__).resolve()).encode()).hexdigest()[:12], pathlib.Path(__file__).resolve().with_name("srpp_claude_auth.py"))
+_auth_module = importlib.util.module_from_spec(_auth_spec)
+sys.modules[_auth_spec.name] = _auth_module
+_auth_spec.loader.exec_module(_auth_module)
 VERSION = "1"
 MAX_BODY = 2 * 1024 * 1024
 MAX_TEXT = 20000
@@ -70,8 +75,14 @@ MESSAGES = {
     "AI_CATALOG_STALE": "AI 模型清單已更新，請重新載入後選擇",
     "AI_TOOL_UNAVAILABLE": "AI 工具尚未啟動或無法連線",
     "AI_SUBSCRIPTION_REQUIRED": "需要有效的既有訂閱登入，不能使用 API 金鑰",
-    "AI_AUTH_REQUIRED": "無法讀取有效的 Codex 訂閱登入，請在一般 Codex CLI 重新登入",
-    "AI_AUTH_EXPIRED": "Codex 登入已失效或需要更新，請在一般 Codex CLI 重新登入",
+    "AI_AUTH_REQUIRED": "需要更新工具的訂閱登入",
+    "AI_AUTH_EXPIRED": "工具的訂閱登入已過期，請重新登入",
+    "AI_AUTH_IN_PROGRESS": "Claude 正在重新登入，請完成或取消後再試",
+    "AUTH_BUSY": "Claude 正在處理工作，請稍後再登入",
+    "AUTH_FAILED": "登入未完成，請重新開始",
+    "AUTH_TIMEOUT": "登入已逾時，請重新開始",
+    "AUTH_INVALID_CODE": "授權碼不正確或不屬於本次登入",
+    "AUTH_SESSION_NOT_FOUND": "找不到這次登入，請重新開始",
     "AI_BILLING_UNVERIFIED": "無法確認僅使用訂閱額度，已停止呼叫",
     "AI_RATE_LIMITED": "費用狀態查詢暫時被限流，請等待退避後再重新載入；確認前不呼叫模型",
     "AI_PAID_CREDITS_ENABLED": "帳戶可使用額外付費點數，已停止呼叫",
@@ -520,6 +531,59 @@ class Bridge:
         self.cached_until = 0
         self.registry_digest = None
         self.claude_metadata_positive = None
+        self.auth_manager = _auth_module.ClaudeAuthManager(self.state, self.claude_auth_tool,
+            self.claude_local_state, clean_environment, self.invalidate_claude_metadata, Problem)
+
+    def claude_auth_tool(self, tool_id):
+        if not isinstance(tool_id, str) or not TOOL_ID.fullmatch(tool_id):
+            return None
+        return next((t for t in load_registry(self.registry_path) if t["id"] == tool_id and t["adapter"] == "claude_cli"), None)
+
+    def invalidate_claude_metadata(self):
+        self.claude_metadata_positive = None
+        self.cached_until = 0
+
+    @staticmethod
+    def claude_expiry(oauth):
+        value = oauth.get("expiresAt")
+        if "expiresAt" not in oauth:
+            return None
+        if not finite_number(value) or value <= 0:
+            raise Problem("AI_AUTH_REQUIRED")
+        try:
+            text = dt.datetime.fromtimestamp(float(value)/1000, dt.timezone.utc).isoformat().replace("+00:00", "Z")
+        except (ValueError, OverflowError, OSError):
+            raise Problem("AI_AUTH_REQUIRED") from None
+        if value <= time.time()*1000:
+            raise Problem("AI_AUTH_EXPIRED")
+        return text
+
+    def claude_local_state(self, tool):
+        result = dict(schemaVersion=1, toolId=tool["id"], loginState="UNKNOWN", expiresAt=None, code="AI_AUTH_REQUIRED")
+        try:
+            with tempfile.TemporaryDirectory(prefix="srpp-auth-state-") as cwd:
+                auth = decode(run_process([tool["executable"], "--safe-mode", "auth", "status"], env=clean_environment(), cwd=cwd, timeout=2.5))
+            if (not isinstance(auth, dict) or auth.get("loggedIn") is not True or auth.get("authMethod") != "claude.ai"
+                    or auth.get("subscriptionType") not in {"pro", "max", "ultra"}):
+                result["loginState"] = "REQUIRED"
+                return result
+            credential = decode(run_process(["/usr/bin/security", "find-generic-password", "-s", "Claude Code-credentials", "-w"], env=clean_environment(), timeout=1.5))
+            oauth = credential["claudeAiOauth"]
+            if not isinstance(oauth.get("accessToken"), str) or not oauth["accessToken"]:
+                raise Problem("AI_AUTH_REQUIRED")
+            result["expiresAt"] = self.claude_expiry(oauth)
+            if result["expiresAt"] is not None:
+                result.update(loginState="VALID", code=None)
+        except Problem as error:
+            if error.code == "AI_AUTH_EXPIRED":
+                result.update(loginState="EXPIRED", code="AI_AUTH_EXPIRED")
+                value = oauth["expiresAt"]
+                result["expiresAt"] = dt.datetime.fromtimestamp(float(value)/1000, dt.timezone.utc).isoformat().replace("+00:00", "Z")
+            elif error.code == "AI_AUTH_REQUIRED":
+                result.update(loginState="REQUIRED")
+        except (OSError, ValueError, TypeError, KeyError):
+            pass
+        return result
 
     def read_claude_backoff(self):
         path = self.state/"claude-usage-backoff.json"
@@ -618,6 +682,8 @@ class Bridge:
         out = copy.deepcopy(catalog)
         try:
             self.claude_cooldown()
+            with _auth_module.operation_lock(self.state, Problem):
+                pass
         except Problem as error:
             for tool in out["tools"]:
                 if tool["adapter"] == "claude_cli":
@@ -882,6 +948,7 @@ class Bridge:
             if not isinstance(auth, dict) or auth.get("loggedIn") is not True or auth.get("authMethod") != "claude.ai" or auth.get("subscriptionType") not in {"pro", "max", "ultra"}:
                 raise Problem("AI_SUBSCRIPTION_REQUIRED")
             credential = decode(run_process(["/usr/bin/security", "find-generic-password", "-s", "Claude Code-credentials", "-w"], env=clean_environment(), timeout=remaining(deadline, 1.5)))
+            self.claude_expiry(credential["claudeAiOauth"])
             token = credential["claudeAiOauth"]["accessToken"]
             if not isinstance(token, str) or not token:
                 raise ValueError()
@@ -910,7 +977,7 @@ class Bridge:
                     self.claude_metadata_positive = {"fingerprint": fingerprint, "until": time.monotonic()+CLAUDE_METADATA_TTL}
         except Problem as error:
             self.claude_metadata_positive = None
-            if error.code in {"AI_RATE_LIMITED", "AI_SUBSCRIPTION_REQUIRED", "AI_EXTRA_USAGE_ENABLED", "AI_BUSY"}:
+            if error.code in {"AI_RATE_LIMITED", "AI_SUBSCRIPTION_REQUIRED", "AI_EXTRA_USAGE_ENABLED", "AI_BUSY", "AI_AUTH_EXPIRED", "AI_AUTH_REQUIRED", "AI_AUTH_IN_PROGRESS"}:
                 raise
             if error.code == "AI_TIMEOUT" or time.monotonic() >= deadline:
                 raise Problem("AI_TIMEOUT") from None
@@ -1082,12 +1149,13 @@ class Bridge:
                 result["models"] = self.codex_models(data)
                 self.check_codex_billing(limits)
             elif adapter == "claude_cli":
-                deadline = time.monotonic()+CLAUDE_METADATA_SECONDS
-                if for_execution:
-                    self.claude_proof(tool, deadline=deadline, fresh=True)
-                else:
-                    self.claude_proof(tool, deadline=deadline)
-                result["models"] = self.claude_models(tool, deadline)
+                with _auth_module.operation_lock(self.state, Problem):
+                    deadline = time.monotonic()+CLAUDE_METADATA_SECONDS
+                    if for_execution:
+                        self.claude_proof(tool, deadline=deadline, fresh=True)
+                    else:
+                        self.claude_proof(tool, deadline=deadline)
+                    result["models"] = self.claude_models(tool, deadline)
             else:
                 result["models"] = self.local_models(tool)
             if not result["models"]:
@@ -1166,7 +1234,11 @@ class Bridge:
                 raise Problem("AI_CATALOG_STALE", 409)
             self.validate_selection(selection, self.cached, check_available=False)
             expected_registry = current_registry
+        selected_registry_tool = next((t for t in load_registry(self.registry_path) if t["id"] == selection["toolId"]), None)
+        lease = _auth_module.operation_lock(self.state, Problem) if selected_registry_tool and selected_registry_tool["adapter"] == "claude_cli" else contextlib.nullcontext()
+        lease.__enter__()
         if not self.lock.acquire(blocking=False):
+            lease.__exit__(None, None, None)
             raise Problem("AI_BUSY", 429)
         try:
             argv = [sys.executable, str(pathlib.Path(__file__).resolve()), "--execute", "--registry", str(self.registry_path),
@@ -1201,8 +1273,18 @@ class Bridge:
                                 pipe.close()
         finally:
             self.lock.release()
+            lease.__exit__(None, None, None)
 
     def execute_inline(self, body, expected_registry=None):
+        # Workers own a lease across BOTH proof and inference, independently
+        # of the parent supervisor's additional lease.
+        tools = load_registry(self.registry_path)
+        selected = next((t for t in tools if t["id"] == body["selection"]["toolId"]), None)
+        lease = _auth_module.operation_lock(self.state, Problem) if selected and selected["adapter"] == "claude_cli" else contextlib.nullcontext()
+        with lease:
+            return self._execute_inline_locked(body, expected_registry)
+
+    def _execute_inline_locked(self, body, expected_registry=None):
         selection = body["selection"]
         tools = load_registry(self.registry_path)
         if expected_registry is not None and hashlib.sha256(encode(tools)).hexdigest() != expected_registry:
@@ -1329,6 +1411,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if self.command == "GET" and self.path == "/capabilities":
                 self.input_timer.cancel()
                 self.respond(200, self.server.bridge.capabilities())
+            elif self.command == "POST" and self.path in {"/auth/claude/"+a for a in ("state", "start", "status", "complete", "cancel")}:
+                body = self.request_body()
+                self.input_timer.cancel()
+                action = self.path.rsplit("/", 1)[1]
+                self.respond(200, getattr(self.server.bridge.auth_manager, action)(body))
             elif self.command == "POST" and self.path == "/interpret":
                 body = self.request_body()
                 self.input_timer.cancel()

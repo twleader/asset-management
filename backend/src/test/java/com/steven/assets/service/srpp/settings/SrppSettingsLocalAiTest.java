@@ -136,7 +136,7 @@ class SrppSettingsLocalAiTest {
                 .put("code","AI_AUTH_REQUIRED").put("modelSource","CACHE");
         codex.putArray("models").addObject().put("id","gpt-6-luna").put("label","GPT-6 Luna").put("defaultEffort","low").putArray("efforts").add("low");
         AiSelection requested=new AiSelection("codex","gpt-6-luna","low",revision);
-        for(String code:java.util.List.of("AI_AUTH_REQUIRED","AI_AUTH_EXPIRED","AI_BILLING_UNVERIFIED")) {
+        for(String code:java.util.List.of("AI_AUTH_REQUIRED","AI_AUTH_EXPIRED","AI_AUTH_IN_PROGRESS","AI_BILLING_UNVERIFIED")) {
             codex.put("code",code);
             AiCapabilities available=ai.capabilities();assertThat(available.tools()).hasSize(2);
             assertThat(available.tools().get(0).available()).isTrue();assertThat(available.tools().get(1).code()).isEqualTo(code);
@@ -148,7 +148,7 @@ class SrppSettingsLocalAiTest {
     }
     @Test void freshAuthenticationFailureBeforeProviderExecutionStaysNamedWithoutReceiptOrFallback() {
         ai.capabilities();status=401;
-        for(String code:java.util.List.of("AI_AUTH_REQUIRED","AI_AUTH_EXPIRED")) {
+        for(String code:java.util.List.of("AI_AUTH_REQUIRED","AI_AUTH_EXPIRED","AI_AUTH_IN_PROGRESS")) {
             ObjectNode error=JsonNodeFactory.instance.objectNode().put("code",code).put("message","raw provider error must not be exposed").putNull("execution");
             reply.set(error.toString());int before=interpretations.get();
             assertThatThrownBy(()->ai.interpret(result(),choice)).isInstanceOf(SrppSettingsAiFailure.class)
