@@ -177,7 +177,7 @@ final class PublicSrppProjectionService {
         for (JsonNode row : root.path("symbols")) {
             fields(row, Set.of("symbol", "market", "facts", "status", "reasonCodes"));
             String symbol = text(row, "symbol");
-            require(symbol.matches("[0-9]{4,5}[A-Z]?") && "TW".equals(text(row, "market")) && symbols.add(symbol));
+            require(symbol.matches("(?:[0-9]{4,5}[A-Z]?|[0-9]{6})") && "TW".equals(text(row, "market")) && symbols.add(symbol));
             require(previous == null || previous.compareTo(symbol) < 0); previous = symbol;
             boolean outside = "UNAVAILABLE".equals(text(row, "status"));
             if (outside) strings(row.path("reasonCodes"), Set.of("NOT_IN_PACKAGE_CAPTURE")); else { require("NOT_EVALUATED".equals(text(row, "status"))); strings(row.path("reasonCodes"), Set.of()); }

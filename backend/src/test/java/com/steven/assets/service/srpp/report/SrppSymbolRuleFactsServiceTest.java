@@ -25,6 +25,25 @@ import static org.mockito.Mockito.*;
 
 /** Task497 A2 facts tests; the filename is intentionally included by the SDD Maven glob. */
 class SrppSymbolRuleFactsServiceTest {
+    @Test void acceptsSixDigitFrozenEtfButNeverManufacturesOutsideEvidence() {
+        var saved = packageWith(List.of(new Leg("009826", "台股", "BUY", 1, null)));
+        for (String code : new String[] {null, "009826"}) {
+            var response = SrppJcs.parseStrict(harness(saved).facts(query(saved, code)));
+            assertThat(response.path("symbols").get(0).path("symbol").asText()).isEqualTo("009826");
+            assertThat(response.path("symbols").get(0).path("status").asText()).isEqualTo("NOT_EVALUATED");
+            assertThat(response.path("tradeAuthorization").asBoolean()).isFalse();
+        }
+        var outside = SrppJcs.parseStrict(harness(saved).facts(query(saved, "009827")));
+        assertThat(outside.path("symbols").get(0).path("status").asText()).isEqualTo("UNAVAILABLE");
+        assertThat(outside.path("symbols").get(0).path("reasonCodes").toString()).contains("NOT_IN_PACKAGE_CAPTURE");
+        for (String invalid : List.of("009826B", "0009826", "００９８２６", "009826 ", "00697b", "009826,009826", "009826,")) {
+            problem(() -> harness(saved).facts(query(saved, invalid)), "INVALID_REQUEST");
+        }
+        for (String valid : List.of("0050", "2330", "00697B", "009826")) {
+            assertThat(SrppProjectionRequest.symbols(query(saved, valid)).stockCodes()).containsExactly(valid);
+        }
+    }
+
     @Test void mapsAllSevenFrozenValuesAtCaptureT1WithIndependentSourceReceiptT2AndFixedFacts() {
         Instant t2 = AT.minusSeconds(30);
         var saved = packageWith(List.of(new Leg("0050", "台股", "BUY", 2, null)), "91", t2);

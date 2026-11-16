@@ -12,6 +12,27 @@ import java.nio.charset.StandardCharsets;
 import static org.assertj.core.api.Assertions.*;
 
 class SrppProjectionQueryTest {
+ @Test void sixDigitEtfPassesQueryAndSealedResponseWhileMalformedCodesFail(){
+  for(String code:java.util.List.of("0050","2330","00697B","009826")){
+   var p=common();p.add("stockCodes",code);var q=SrppProjectionQuery.facts(p,new HttpHeaders(),CLOCK);
+   ObjectNode response=factsProjection();((ObjectNode)response.path("symbols").get(0)).put("symbol",code);rehash(response);
+   assertThatCode(()->PublicSrppProjectionService.validate(q,7,MediaType.APPLICATION_JSON,response.toString().getBytes(StandardCharsets.UTF_8))).doesNotThrowAnyException();
+  }
+  for(String code:java.util.List.of("009826B","0009826","００９８２６","00697b","009826 ","009826,009826")){
+   var p=common();p.add("stockCodes",code);
+   assertThatThrownBy(()->SrppProjectionQuery.facts(p,new HttpHeaders(),CLOCK)).isInstanceOf(SrppReportProblemException.class);
+  }
+  var p=common();p.add("stockCodes","009826");var q=SrppProjectionQuery.facts(p,new HttpHeaders(),CLOCK);
+  ObjectNode malformed=factsProjection();((ObjectNode)malformed.path("symbols").get(0)).put("symbol","009826B");rehash(malformed);
+  assertThatThrownBy(()->PublicSrppProjectionService.validate(q,7,MediaType.APPLICATION_JSON,malformed.toString().getBytes(StandardCharsets.UTF_8))).isInstanceOf(IllegalArgumentException.class);
+ }
+ @Test void reasonlessWaitAndVetoAreStillRejected(){
+  for(String decision:java.util.List.of("A.0~WAIT","A.0~WAIT~","A.0~WAIT~UNKNOWN","A.0~VETO","A.0~REDUCE~~OTHER")){
+   var p=common();p.add("decisions",decision);p.add("asOf","2026-10-14T04:00:00Z");
+   assertThatThrownBy(()->SrppProjectionQuery.order(p,new HttpHeaders(),CLOCK)).isInstanceOf(SrppReportProblemException.class);
+  }
+ }
+
  private static final Clock CLOCK=Clock.fixed(Instant.parse("2026-10-14T05:00:00Z"),ZoneId.of("Asia/Taipei"));
  private static LinkedMultiValueMap<String,String> common(){var p=new LinkedMultiValueMap<String,String>();p.add("consumer","Codex");p.add("tradingDate","2026-10-14");p.add("reportSlot","12:00");p.add("policyBundleSha256","a".repeat(64));p.add("swaggerSha256","b".repeat(64));p.add("calculationRunId","11111111-1111-4111-8111-111111111111");return p;}
  @Test void orderAcceptsOneClosedDecision(){var p=common();p.add("decisions","BOND_D130_D195.0~WAIT~RISK_MODE");p.add("asOf","2026-10-14T12:00:00+08:00");var q=SrppProjectionQuery.order(p,new HttpHeaders(),CLOCK);assertThat(q.businessUri()).contains("/internal/public-srpp/order-plan").contains("decisions=BOND_D130_D195.0~WAIT~RISK_MODE");}

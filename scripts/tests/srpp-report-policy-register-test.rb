@@ -68,10 +68,9 @@ class SrppReportPolicyRegisterTest < Minitest::Test
   end
 
   def test_duplicate_model_key_is_rejected_before_generation
-    duplicate = (ROOT / 'backend/src/main/resources/srpp/decision/model_inputs.json').read.sub(
-      /\n  "model_version": "3\.22\.0",/,
-      "\n  \"model_version\": \"3.22.0\",\n  \"model_version\": \"3.22.0\","
-    )
+    original = (ROOT / 'backend/src/main/resources/srpp/decision/model_inputs.json').read
+    duplicate = original.sub(/(\n  "model_version": "[^"]+",)/) { |field| field + field }
+    refute_equal original, duplicate, 'fixture must actually insert a duplicate model_version key'
     error = assert_raises(SrppPolicyRegister::Error) do
       SrppReportPolicyRegister.generate(
         model_bytes: duplicate,

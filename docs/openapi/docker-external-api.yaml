@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: 資產管理系統 Docker 外部 API
-  version: 1.28.2
+  version: 1.28.3
   description: |
     本文件只描述 `api-gateway` 對 Docker host 與 Tailscale 私有網路開放的二十七條精確 method/path pairs：
     二十三條 GET（其中 transactions／trading-radar／部分 SRPP routes 是 configured-admin 或 email 選定 owner 範圍，calendar、commodity-prices、completed-technicals 與 technical-series 是 global no-tenant）
@@ -3681,7 +3681,7 @@ paths:
       - {name: policyBundleSha256, in: query, required: true, description: 不可變包的正式政策 SHA-256。, schema: {type: string, pattern: '^[0-9a-f]{64}$', description: 64 位小寫十六進位 SHA-256}, example: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}
       - {name: swaggerSha256, in: query, required: true, description: 發布 Swagger SHA-256。, schema: {type: string, pattern: '^[0-9a-f]{64}$', description: 64 位小寫十六進位 SHA-256}, example: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}
       - {name: calculationRunId, in: query, required: true, description: FINAL immutable package UUID。, schema: {type: string, format: uuid, description: 不可變計算包 UUID}, example: 11111111-1111-4111-8111-111111111111}
-      - {name: stockCodes, in: query, required: false, description: 選填單一台股 CSV；非 package universe 逐列 UNAVAILABLE，不可用來搜尋新標的。, schema: {type: string, description: 1 至 60 個台股代碼 CSV}, example: '0050,2330'}
+      - {name: stockCodes, in: query, required: false, description: 選填單一台股 CSV；非 package universe 逐列 UNAVAILABLE，不可用來搜尋新標的。, schema: {type: string, description: 1 至 60 個唯一台股代碼 CSV；接受4至5位ASCII數字加選填大寫字母或精確6位ASCII數字}, example: '0050,2330'}
       responses:
         '200':
           description: 每個 symbol 固定十二筆 frozen facts，並保留 unavailable 理由。
@@ -17072,7 +17072,7 @@ components:
       additionalProperties: false
       required: [symbol, market, facts, status, reasonCodes]
       properties:
-        symbol: {description: immutable derived TW universe 或 explicit requested 台股代碼。, type: string, pattern: '^[0-9]{4,5}[A-Z]?$'}
+        symbol: {description: immutable derived TW universe 或 explicit requested 台股代碼。, type: string, pattern: '^(?:[0-9]{4,5}[A-Z]?|[0-9]{6})$'}
         market: {description: A2 僅允許台股，固定 TW。, type: string, const: TW}
         facts: {description: 固定順序且恰 12 筆 rule facts。, type: array, minItems: 12, maxItems: 12, items: {description: 單一 typed frozen fact。, $ref: '#/components/schemas/SrppSymbolRuleFact'}}
         status: {description: symbol availability：NOT_EVALUATED 或 UNAVAILABLE；固定四筆 unavailable facts 使 v1 row 不會是 AVAILABLE。, type: string, enum: [NOT_EVALUATED, UNAVAILABLE]}

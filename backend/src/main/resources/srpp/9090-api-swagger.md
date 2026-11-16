@@ -7,7 +7,7 @@
 | 項目 | 值 |
 | --- | --- |
 | OpenAPI | `3.1.0` |
-| 契約版本 | `1.28.2` |
+| 契約版本 | `1.28.3` |
 | AI 流程觀測契約版本 | `1.4.0` |
 | 對外路徑 | 28 條：23 個 `GET`、5 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
@@ -33745,7 +33745,7 @@ Task497 A2 單一 frozen source mapping 的 typed rule fact。
     "symbol": {
       "description": "immutable derived TW universe 或 explicit requested 台股代碼。",
       "type": "string",
-      "pattern": "^[0-9]{4,5}[A-Z]?$"
+      "pattern": "^(?:[0-9]{4,5}[A-Z]?|[0-9]{6})$"
     },
     "market": {
       "description": "A2 僅允許台股，固定 TW。",
@@ -33785,7 +33785,7 @@ Task497 A2 單一 frozen source mapping 的 typed rule fact。
 
 | 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
 | --- | --- | --- | --- | --- | --- |
-| `symbol` | 是 | `string` | 否 | pattern: ^[0-9]{4,5}[A-Z]?$ | immutable derived TW universe 或 explicit requested 台股代碼。 |
+| `symbol` | 是 | `string` | 否 | pattern: ^(?:[0-9]{4,5}[A-Z]?\|[0-9]{6})$ | immutable derived TW universe 或 explicit requested 台股代碼。 |
 | `market` | 是 | `string` | 否 | enum: `TW` | A2 僅允許台股，固定 TW。 |
 | `facts` | 是 | `array of SrppSymbolRuleFact` | 否 | minItems: 12<br>maxItems: 12<br>items: SrppSymbolRuleFact<br>items 說明: 單一 typed frozen fact。 | 固定順序且恰 12 筆 rule facts。 |
 | `status` | 是 | `string` | 否 | enum: `NOT_EVALUATED`, `UNAVAILABLE` | symbol availability：NOT_EVALUATED 或 UNAVAILABLE；固定四筆 unavailable facts 使 v1 row 不會是 AVAILABLE。 |

@@ -43,7 +43,7 @@ final class SrppProjectionRequest {
     static Symbols symbols(MultiValueMap<String,String> values) {
         Common common=common(values, union(COMMON,Set.of("stockCodes"))); String raw=values.getFirst("stockCodes");
         if(raw==null)return new Symbols(common,List.of());
-        try { String[] parts=raw.split(",",-1);if(parts.length<1||parts.length>60)throw new IllegalArgumentException(); Set<String> set=new TreeSet<>();for(String code:parts)if(!code.matches("[0-9]{4,5}[A-Z]?" )||!set.add(code))throw new IllegalArgumentException();return new Symbols(common,List.copyOf(set)); }catch(RuntimeException bad){throw new SrppReportProblem("INVALID_REQUEST");}
+        try { String[] parts=raw.split(",",-1);if(parts.length<1||parts.length>60)throw new IllegalArgumentException(); Set<String> set=new TreeSet<>();for(String code:parts)if(!code.matches("(?:[0-9]{4,5}[A-Z]?|[0-9]{6})" )||!set.add(code))throw new IllegalArgumentException();return new Symbols(common,List.copyOf(set)); }catch(RuntimeException bad){throw new SrppReportProblem("INVALID_REQUEST");}
     }
     private static boolean reason(String value){return Set.of("EVENT_RISK","RISK_MODE","MARKET_CONTEXT","PRIORITY_ELSEWHERE","EVIDENCE_CONFLICT","OTHER").contains(value);}
     private static String one(MultiValueMap<String,String> values,String key){String v=values.getFirst(key);if(v==null||v.isEmpty())throw new IllegalArgumentException();return v;}
