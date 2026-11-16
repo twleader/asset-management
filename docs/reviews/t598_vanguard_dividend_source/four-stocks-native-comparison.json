@@ -1,0 +1,28 @@
+{
+  "checkedAt": "2026-11-16T16:38:10.539887+00:00",
+  "results": [
+    {
+      "symbol": "GOOGL",
+      "checkedCount": 10,
+      "pass": true
+    },
+    {
+      "symbol": "AVGO",
+      "checkedCount": 54,
+      "pass": true
+    },
+    {
+      "symbol": "NVDA",
+      "checkedCount": 53,
+      "pass": true
+    },
+    {
+      "symbol": "MSFT",
+      "checkedCount": 53,
+      "pass": true
+    }
+  ],
+  "totalChecked": 170,
+  "pass": true,
+  "tradeAuthorization": false
+}

@@ -1,0 +1,97 @@
+{
+  "completed_at": "2026-11-16T16:38:21.513802+00:00",
+  "code_merge_commit": "3826809a66501ff37c133047a48c878432574087",
+  "official_etf_history": {
+    "VOO": 40,
+    "VT": 40,
+    "total_exact_amount_ex_pay": 80,
+    "source": "VANGUARD_ISSUER",
+    "public_rows_each": 43,
+    "canonical_rows_each": 44,
+    "old_dates_preserved": true,
+    "actual_official_scope_from": "2016-12",
+    "maintenance_years": 10,
+    "reason_not_20": "VOO 2013 split is inside20-year window; retained conservative split basis guard and used split-after10-year request containing all40 official rows."
+  },
+  "equities": [
+    {
+      "symbol": "GOOGL",
+      "requested_years": 20,
+      "observed_history_count": 10,
+      "first_date": "2024-06-10",
+      "all_amount_ex_pay_match": true,
+      "public_rows": 0,
+      "public_message": "股利資料未完成canonical驗證，暫不可採用",
+      "whole_scope_complete": false
+    },
+    {
+      "symbol": "AVGO",
+      "requested_years": 20,
+      "observed_history_count": 54,
+      "first_date": "2013-06-13",
+      "all_amount_ex_pay_match": true,
+      "public_rows": 43,
+      "public_message": null,
+      "whole_scope_complete": false
+    },
+    {
+      "symbol": "NVDA",
+      "requested_years": 20,
+      "observed_history_count": 53,
+      "first_date": "2013-08-20",
+      "all_amount_ex_pay_match": true,
+      "public_rows": 43,
+      "public_message": null,
+      "whole_scope_complete": false
+    },
+    {
+      "symbol": "MSFT",
+      "requested_years": 20,
+      "observed_history_count": 53,
+      "first_date": "2013-08-13",
+      "all_amount_ex_pay_match": true,
+      "public_rows": 0,
+      "public_message": "股利資料未完成canonical驗證，暫不可採用",
+      "whole_scope_complete": false
+    }
+  ],
+  "equity_exact_history_total": 170,
+  "remaining_unknown_etf_payment_dates": {
+    "VOO": [
+      "2015-12-21",
+      "2016-03-21",
+      "2016-06-21",
+      "2016-09-13"
+    ],
+    "VT": [
+      "2015-12-21",
+      "2016-03-15",
+      "2016-06-14",
+      "2016-09-13"
+    ]
+  },
+  "amd": {
+    "current_non_payer_verified": true,
+    "official_source": "https://ir.amd.com/contacts-faq/faq",
+    "synthetic_zero_events_written": false,
+    "provider_empty_complete": false
+  },
+  "future_announcements": {
+    "GOOGL": {
+      "amount": "0.22",
+      "ex_date": "2026-12-07",
+      "pay_date": "2026-12-14",
+      "financial_status": "UNRESOLVED",
+      "declaration_date_conflict": "Nasdaq2026-10-27 vs issuer2026-10-28 retained in raw sources"
+    },
+    "MSFT": {
+      "amount": "0.98",
+      "ex_date": "2026-11-19",
+      "pay_date": "2026-12-10",
+      "financial_status": "UNRESOLVED"
+    }
+  },
+  "remaining_price_basis_guard": "US_DIVIDEND_PRICE_BASIS_UNVERIFIED retained; dividend completion grants no trading authority",
+  "no_rule_changes": true,
+  "no_trades_or_mail": true
+}

@@ -12,6 +12,16 @@ VOO與VT的配息歷史原先依Yahoo資料，金額為三位小數且缺發放�
 - targeted tests 70例全過：external46、backend24，詳tests.json。檢查原生fixture精度/日期、錯身份/幣別/schema/傳輸、split拒絕、來源fallback、重複/衝突、整日期組權威與舊歷史保留。
 - arch round2 PASS 0/0/0（介面搬至service/port）；兩份最終審查隨附。
 - 編譯後client真實連線官方HTTP成功，各回傳8筆PARTIAL且最新amount/ex/pay與官方一致。
-- feature兩服務已重建/recreate；主代理獨立9090驗收：VOO/VT近兩年共16筆amount/ex/pay逐筆與官方原文一致，public各43筆且全部舊日期保留，來源含VANGUARD_ISSUER。BFF保持運作。main落地與正式部署仍待核對。
+- 程式main `3826809a66501ff37c133047a48c878432574087` 已no-ff merge/push，兩服務自乾淨main重建/recreate且healthy，BFF id未變。主代理正式獨立9090驗收：VOO/VT官方全部40/檔共80筆amount/ex/pay逐筆與原文一致，public各43筆、canonical各44，所有舊日期保留；來源含VANGUARD_ISSUER。詳main-validation.json與main-*verification.json。
 
 本次沒有修改金融API／DB schema、SRPP規則包與authority、未來公告完整門檻或US價格價基guard，沒有下單或寄信。GOOGL/MSFT未來UNRESOLVED與US股息價基限制仍另行揭露，不能因歷史配息補齊而宣稱解除。
+
+## 全部可取得歷史與保留缺口
+
+兩ETF以合法years10範圍（2016-11-16起）涵蓋發行人全部40筆，自2016年12月起；不為了years20而放寬VOO2013split的價基保護。初始公開歷史與官方比較共修正63筆金額精度、80筆發放日。官方範圍前未知支付日仍保留：VOO 2015-12-21、2016-03-21、2016-06-21、2016-09-13；VT 2015-12-21、2016-03-15、2016-06-14、2016-09-13。公開10年列表各含後三筆；canonical另保留2015，未猜值或撤回。
+
+其他四個股另以既有20年bounded sync（2006-11-16起）擷取實際Nasdaq日期組，GOOGL10筆自2024-06-10、AVGO54筆自2013-06-13、NVDA53筆自2013-08-20、MSFT53筆自2013-08-13，共170筆歷史amount/ex/pay逐筆與保存原文一致。這些PARTIAL事件不證明2006至來源首日間全無配息，也不證明未來45日完整。MSFT原生列表另有2003-02-19/0.08/pay N/A，早於所請20年範圍，不硬填或推論採用。
+
+AMD官方FAQ確認目前不付現金股息，不寫虛構零事件。GOOGL已公告0.22/2026-12-07除息、12-14支付；MSFT0.98/11-19除息、12-10支付，原生證據保留，未來完整性不足仍UNRESOLVED，因此兩檔公開金融配息列表仍不可採用；歷史canonical已有10／53筆RESOLVED。GOOGL公告日Nasdaq10/27與發行人10/28差異原文保留，不手改。
+
+最終量化結果見final-summary.json。上述未來與US價格價基限制保留，不能把歷史補齊解讀成交易條件全部通過。
