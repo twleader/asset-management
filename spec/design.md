@@ -14042,6 +14042,10 @@ VOO暫時替代規則仍是SRPP saved-evidence budget diagnostics：尚無正式
 本階段不修改Swagger/路由/DB/排程，不執行正式registry SQL或部署；最終source hash凍結且主代理驗收後才以獨立後續release步驟處理雙repoGit、insert-only登錄、受控服務重建與精確hash業務API回讀，任何缺口必須保留原狀態。
 
 
+### Task 597：D221 半導體龍頭事件下限的精確權威同步
+
+資產端僅同步 SRPP 最終來源 bytes（D221／policy 2.69.0／model 3.24.0）與由原工具產生的衍生產物：`backend/src/main/resources/srpp/decision/{model_inputs,policy_manifest}.json`、`srpp/report/d201-policy-document.json`、`srpp/report/d201-registration.sql`、四組 report golden 及 `srpp-simulator/runtime`。D221 修改的是 SRPP 報告端的語意評分（半導體類別下限、D204 美股→台股取 IXIC/SOX 較低分），由 SRPP 本機 `leader_shock.py`／`cross_market_context.py` 在保存證據上計算；9090 不計算這兩項，也不新增 wire。`SRPP_RISK_RUBRIC_V2` 只雜湊類別代碼、上限與門檻，本次未變，Java `SrppRiskRubricV1`／V2 驗證與 formula V3 保持原狀。發布採 Task 504 順序：雙 repo 落地後 insert-only 登錄，從乾淨 main 重建 business-services 與 srpp-simulator，回讀 JAR authority 與 runtime bytes，再從 SRPP host 做三 GET 連線驗收；report-calculations 正式採用待合法 09:05–13:30 時窗，其他時間記 NOT_YET_EXECUTED。
+
 ## Task 592：訂閱／本機 AI 解讀架構
 
 既有 SrppSettingsAiPort 改為 capabilities、validateSelection 與 interpret(frozenResult,selection)，由 SrppSettingsLocalAi HTTP adapter 取代 SrppSettingsAnthropicAi；不影響 PortfolioAdviceService 的其他功能。backend與BFF的CenterResponse均增加 typed aiTools 與 aiCatalogRevision，RunResponse均增加 aiSelection、aiExecution，SrppSettingsPresentation.center/run必須完整攜帶新欄位與舊列null；部署重建business-services、bff、frontend。舊 aiAvailable 保留為工具至少一組可用的摘要。simulate body 增 aiSelection，其他CAS／owner／deterministic engine 契約不變。選擇先驗證，再排隊；執行時再次驗證。LOCAL path 不探測 AI。

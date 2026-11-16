@@ -7011,6 +7011,16 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 - [ ] 210.5 不新增HTTP路由、DTO、DB schema、行情來源、排程、報告、交易或郵件；本階段僅在獨立feature worktree準備具體可審閱結果，commit/merge/push、正式registry與部署待主代理凍結最終來源後另行協調。
 
 
+### Requirement 211：D221 半導體龍頭事件下限與 D204 費半連動的 SRPP 權威同步（Task 597）
+
+使用者於 2026-11-16 核准 SRPP D221（policy 2.69.0／model 3.24.0）：六項風險中「半導體景氣與先進製程」新增龍頭重大事件下限（十家固定名單、三種事件、5 個台股交易日窗口，SOX 已完成日確認可升至 2 分，由 SRPP `scripts/leader_shock.py` 計算），D204 美股→台股連動改評 IXIC 與 SOX 取較低分。資產管理必須採同一最終來源，不另造規則。
+
+- [ ] 211.1 精確同步最終 SRPP `model_inputs.json`、`policy_manifest.json` 原 bytes，以原工具產生 canonical `d201-policy-document.json`、insert-only `d201-registration.sql` 與四組原計算器 golden；`check-srpp-report-authority.py --check` 對最終來源通過，不放寬任何檢查。
+- [ ] 211.2 `SRPP_RISK_RUBRIC_V2` 的類別代碼、上限與 5／8／3／4 門檻不變，`rubricSha256` 必須與發布前相同；Java 風險 rubric、formula V3 與計算器 hashes 不得改變。
+- [ ] 211.3 以既有 SRPP `export_settings_runtime.py` 同步 `srpp-simulator/runtime` 共 23 檔（含 `runtime-manifest.json`），`--check` 通過；不手抄。
+- [ ] 211.4 D221 龍頭事件下限與 D204 SOX 連動屬 SRPP 報告端 LLM／本機計算器的評分範圍；本次不新增 9090 HTTP 路由、DTO、DB schema、行情來源、排程、報告、交易或郵件，也不由 9090 計算該下限。
+- [ ] 211.5 相關 Java 離線回歸（SrppReport*、SrppSettings*、DecisionPolicyAuthorityTest）須通過；若有斷言綁定舊 decision／policy version，只更新為同版來源取值，不改正式演算法。
+
 ### Task 592：訂閱／本機 AI 工具、模型與思考程度（Requirement 208 修訂）
 
 使用者希望情境模擬可選可擴充的 AI 執行工具、model 與 effort，沿用既有訂閱或本機模型，禁止額外 API 計費。本修訂取代原 AI 直接 Anthropic SDK／共用 PortfolioAdvice 模型設定；其他功能的既有 AI 設定不在本次變更範圍。
