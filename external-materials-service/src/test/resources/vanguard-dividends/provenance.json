@@ -1,0 +1,26 @@
+{
+  "voo-identity.json": {
+    "sha256": "b29ccd017211d49dab2e04d641f3f135f97176183d6bb1aa87aacbe47cc772d2",
+    "source_url": "https://advisors.vanguard.com/investments/products/api/funds/0968"
+  },
+  "voo-profile.json": {
+    "sha256": "425b9620e22edb5c65d042479749cfb9519ab7fc069d2d5adfd1c87b1b5c4274",
+    "source_url": "https://advisors.vanguard.com/investments/products/api/funds/0968/profile"
+  },
+  "voo-distributions.json": {
+    "sha256": "efab23ef703371be7026f7aaaffdf3f2c57437fee12b938ce3b918182be85ed3",
+    "source_url": "https://advisors.vanguard.com/investments/products/api/funds/0968/pricing/distributions?hasDistributionYield=false"
+  },
+  "vt-identity.json": {
+    "sha256": "7288a7cb141b3f27da4486ef6ac183fedbb4e4707d487c8925760a05093b5566",
+    "source_url": "https://advisors.vanguard.com/investments/products/api/funds/3141"
+  },
+  "vt-profile.json": {
+    "sha256": "06c18f2b0e9024be629fec9fdc1062de58d1255466a682a10cf30f1d33184c55",
+    "source_url": "https://advisors.vanguard.com/investments/products/api/funds/3141/profile"
+  },
+  "vt-distributions.json": {
+    "sha256": "176aa53804827219fe50167ca50ad22ef51dd2c3b380aaa0485687bf1808ed96",
+    "source_url": "https://advisors.vanguard.com/investments/products/api/funds/3141/pricing/distributions?hasDistributionYield=false"
+  }
+}

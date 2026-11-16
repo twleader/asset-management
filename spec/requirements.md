@@ -7083,3 +7083,16 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 13. 新host auth邏輯優先獨立scripts/srpp_claude_auth.py，bridge由同目錄明確importlib載入並註冊sys.modules，避免installer/test不同worktree module path快取問題。原生唯一認證來源仍cleanenv正常Claude Code-credentials，由CLI自身登入更新，不任意掃其它帳號/mtime或採環境API key。bootstrap/native-auth的local check與usage查詢分開；既有Codex access-only同步、Task595退避/fee gates、LOCAL與數值hash不變，無DB/交易/寄信/正式政策改動。
 14. 測試須涵蓋過期guard零HTTP、local auth在429仍能顯過期、expiry malformed/missing規則、所有Task595/594回歸；native假CLI的URL/PKCE state/code、未知host/client/scope/duplicates/長輸出、跨binding/owner/replay/取消/timeout/cleanup、Claude模型與auth互斥且Codex/Ollama不受阻；BFF真principal/role/configured-admin/停用/代看/Origin/CSRF/跨session拒絕零hostcall、安全例外/DTO/密碼與URL不進ingestion；production browser合成流程的auto-dialog/user-popup/blockedfallback/貼碼/成功後一次reload/取消過期及owner races。部署需重建recreate business/bff/frontend與host，主權威.env/secret/TLS不覆寫。實機native start取得可驗的官方manualURL後立即cancel，零model、前後正常credential/token/registry bytes比對（只存bool），不能為測試強迫已登入使用者重登或輸出完整URL/code。若正式登入需要使用者授權，就在UI由使用者完成，不自動批准。
 15. 保留真usage Retry-After現有期限，不刪/縮state；只有期限後才可fresh fee proof，最多一次合成Claude解讀，若仍拒絕如實記外部條件。不為完成驗收買點數、切API、使用stale成功proof或重試模型。獨立spec/arch審查與測試/feature部署通過後feature commit/push、main no-ff merge/push、乾淨main同服務重建、host來源main與remote/ref/config/TLS/舊run hash回讀。原Task595 main014daf49/e1526483與歷史WAITING/SAFE_REFUSAL收據保留；本次是使用者新增登入UX要求的續作。
+
+
+## Requirement 212：VOO／VT 發行人歷史配息精度與發放日（Task 598）
+
+作為持有美國 Vanguard ETF 的使用者，我需要歷史配息直接保留發行人的原生每股金額與除息／發放日，避免 Yahoo 三位小數與缺發放日使資料不足。
+
+- 只適用美股 VOO→0968／CUSIP922908363、VT→3141／CUSIP922042742，USD為既有封閉商品映射。external-materials 專用 adapter 純抓官方 fund identity、profile及distributions JSON，business/BFF 不外呼。
+- 綁定官方 fundIdentifier、portId、isETF、profile CUSIP／IOV ticker；任何顯式非USD、身份不符、日期不合法、非正金額、未知分配類別、傳輸／schema失敗，不寫假值，以既有Nasdaq／Yahoo後備並保留失敗狀態。不以URL成功當身份驗真。
+- 原生 amount 用 BigDecimal exact，保留 INC／CGST／CGLT／ROC 各自元件；同日元件加總由既有canonical完成，不以recordDate代理exDate、不把reinvestPrice當股息。payableDate必填且不早於exDate；不虛構公告時間。
+- 請求只納入 [from,to] 且已完成除息日；profile若顯示區間內股票分割而歷史金額價基未證明，拒絕該issuer結果，不自行反算。保留來源URL與原文SHA256 provenance。
+- 歷史日期組成功輸出 PARTIAL、dateGroupsComplete=true、complete=false；不因此宣稱未來45日完整、沒有事件或撤回。未知／空列表不升EMPTY_COMPLETE。
+- 官方歷史 provider VANGUARD_ISSUER 配息來源順位高於Nasdaq/Yahoo；來源較早未覆蓋事件保留，未來完整門檻、US價格價基guard、SRPP規則／hash、公開API、排程、DB schema與交易權限皆不變。
+- 以保存真實官方兩檔fixture驗證8個近兩年事件金額／日期；測身份、幣別、日期、未知類別、傳輸失敗、分割衝突、fallback、去重與多來源衝突；部署後重跑同一受控sync與canonical preview/apply，9090 readback精確比對。

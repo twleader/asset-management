@@ -34,8 +34,15 @@ public class DividendFetchClient {
     private final DividendUpcomingScopeClient upcomingScopeClient;
     private final Clock clock;
     private final boolean yahooCurl;
+    private final com.steven.assets.externalmaterials.service.port.VanguardDividendSource vanguard;
 
     @Autowired
+    public DividendFetchClient(@Value("${finmind.token:${FINMIND_TOKEN:}}") String token,
+                               DividendUpcomingScopeClient upcoming, DividendFinMindTransport finmind,
+                               com.steven.assets.externalmaterials.service.port.VanguardDividendSource vanguard) {
+        this(token, upcoming, Clock.systemUTC(), HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10))
+                .followRedirects(HttpClient.Redirect.NORMAL).version(HttpClient.Version.HTTP_1_1).build(), true, finmind, vanguard);
+    }
     public DividendFetchClient(@Value("${finmind.token:${FINMIND_TOKEN:}}") String token,
                                DividendUpcomingScopeClient upcoming, DividendFinMindTransport finmind) {
         this(token, upcoming, Clock.systemUTC(), HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10))
@@ -53,6 +60,12 @@ public class DividendFetchClient {
     }
     private DividendFetchClient(String token, DividendUpcomingScopeClient upcoming, Clock clock, HttpClient http,
                                 boolean yahooCurl, DividendFinMindTransport finmind) {
+        this(token, upcoming, clock, http, yahooCurl, finmind, null);
+    }
+    DividendFetchClient(String token, DividendUpcomingScopeClient upcoming, Clock clock, HttpClient http,
+                        boolean yahooCurl, DividendFinMindTransport finmind,
+                        com.steven.assets.externalmaterials.service.port.VanguardDividendSource vanguard) {
+        this.vanguard = vanguard;
         this.finmind = finmind;
         this.upcomingScopeClient = upcoming;
         this.clock = clock == null ? Clock.systemUTC() : clock;
@@ -64,7 +77,9 @@ public class DividendFetchClient {
 
     public DividendFetchResult fetch(String code, String market, int years) {
         var observations = fetchObservations(code, market, years);
-        return observations.stream().filter(DividendFetchResult::complete).findFirst().orElse(observations.getFirst());
+        return observations.stream().filter(DividendFetchResult::complete).findFirst()
+                .orElseGet(() -> observations.stream().filter(row -> row.status() != FetchStatus.FAILED
+                        && !row.events().isEmpty()).findFirst().orElse(observations.getFirst()));
     }
 
     public List<DividendFetchResult> fetchObservations(String code, String market, int years) {
@@ -73,7 +88,16 @@ public class DividendFetchClient {
         LocalDate from = today.minusYears(years);
         if (!Set.of("台股", "美股").contains(market))
             return List.of(failed("UNKNOWN", from, today, "不支援的市場", List.of()));
-        DividendFetchResult historical = "台股".equals(market) ? fetchTw(code, from, today) : fetchUs(code, from, today);
+        List<DividendFetchResult> issuerFailures = new ArrayList<>();
+        DividendFetchResult historical;
+        if ("美股".equals(market) && vanguard != null && vanguard.supports(code)) {
+            var issuer = vanguard.fetch(code, from, today);
+            if (issuer.status() != FetchStatus.FAILED && !issuer.events().isEmpty()) historical = issuer;
+            else {
+                issuerFailures.add(issuer); // Append actual source failure/unknown absence; fallback never hides it.
+                historical = fetchUs(code, from, today);
+            }
+        } else historical = "台股".equals(market) ? fetchTw(code, from, today) : fetchUs(code, from, today);
         var upcoming = upcomingScopeClient == null ? DividendUpcomingScopeClient.UpcomingScope.unavailable("未設定 upcoming dividend adapter")
                 : upcomingScopeClient.fetch(code, market, today, today.plusDays(45));
         if (upcoming == null) upcoming = DividendUpcomingScopeClient.UpcomingScope.unavailable("upcoming provider 未回結果");
@@ -83,7 +107,8 @@ public class DividendFetchClient {
                 upcoming.scopeFrom(), upcoming.scopeTo(), upcoming.sourceAvailableAt(),
                 complete ? null : upcoming.errorReason() == null ? "upcoming scope incomplete" : upcoming.errorReason(),
                 upcoming.sourceUrls(), upcoming.normalizerVersion(), upcoming.amountBasis(), upcoming.dateGroupsComplete(), upcoming.capturedAt(), upcoming.failureKind());
-        List<DividendFetchResult> observations = new ArrayList<>(storageGroups(historical));
+        List<DividendFetchResult> observations = new ArrayList<>(issuerFailures);
+        observations.addAll(storageGroups(historical));
         observations.addAll(storageGroups(future));
         return List.copyOf(observations);
     }

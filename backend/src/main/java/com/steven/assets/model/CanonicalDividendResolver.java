@@ -281,6 +281,7 @@ public final class CanonicalDividendResolver {
             default -> 100;
         };
         if("美股".equals(market)) return switch(provider) {
+            case "VANGUARD_ISSUER" -> -10;
             case "NASDAQ_DIVIDEND_CALENDAR" -> 0;
             case "NASDAQ.stocks", "NASDAQ.etf" -> 10;
             case "Yahoo Finance (nominal from verified splits)" -> 20;
