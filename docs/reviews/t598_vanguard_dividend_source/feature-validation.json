@@ -1,0 +1,204 @@
+{
+  "phase": "feature",
+  "symbols": [
+    {
+      "symbol": "VOO",
+      "checks": [
+        {
+          "ex_date": "2026-09-28",
+          "expected_amount": "1.8226",
+          "actual_amount": "1.822600000000000000",
+          "expected_pay": "2026-09-30",
+          "actual_pay": "2026-09-30",
+          "pass": true
+        },
+        {
+          "ex_date": "2026-06-26",
+          "expected_amount": "1.9622",
+          "actual_amount": "1.962200000000000000",
+          "expected_pay": "2026-06-30",
+          "actual_pay": "2026-06-30",
+          "pass": true
+        },
+        {
+          "ex_date": "2026-03-27",
+          "expected_amount": "1.8724",
+          "actual_amount": "1.872400000000000000",
+          "expected_pay": "2026-03-31",
+          "actual_pay": "2026-03-31",
+          "pass": true
+        },
+        {
+          "ex_date": "2025-12-22",
+          "expected_amount": "1.771",
+          "actual_amount": "1.771000000000000000",
+          "expected_pay": "2025-12-24",
+          "actual_pay": "2025-12-24",
+          "pass": true
+        },
+        {
+          "ex_date": "2025-09-29",
+          "expected_amount": "1.74",
+          "actual_amount": "1.740000000000000000",
+          "expected_pay": "2025-10-01",
+          "actual_pay": "2025-10-01",
+          "pass": true
+        },
+        {
+          "ex_date": "2025-06-30",
+          "expected_amount": "1.7447",
+          "actual_amount": "1.744700000000000000",
+          "expected_pay": "2025-07-02",
+          "actual_pay": "2025-07-02",
+          "pass": true
+        },
+        {
+          "ex_date": "2025-03-27",
+          "expected_amount": "1.8121",
+          "actual_amount": "1.812100000000000000",
+          "expected_pay": "2025-03-31",
+          "actual_pay": "2025-03-31",
+          "pass": true
+        },
+        {
+          "ex_date": "2024-12-23",
+          "expected_amount": "1.7385",
+          "actual_amount": "1.738500000000000000",
+          "expected_pay": "2024-12-26",
+          "actual_pay": "2024-12-26",
+          "pass": true
+        }
+      ],
+      "all_8_match": true,
+      "old_history_checks": [
+        {
+          "date": "2015-12-21",
+          "pass": true
+        },
+        {
+          "date": "2016-03-21",
+          "pass": true
+        },
+        {
+          "date": "2016-06-21",
+          "pass": true
+        },
+        {
+          "date": "2016-09-13",
+          "pass": true
+        }
+      ],
+      "older_history_preserved": true,
+      "oldest_after": "2015-12-21",
+      "issuer_canonical_rows": 8,
+      "price_guard_retained": true,
+      "technical_missing": [
+        "DIVIDEND_HISTORY_UNVERIFIED",
+        "US_DIVIDEND_PRICE_BASIS_UNVERIFIED"
+      ],
+      "future_complete": false,
+      "checked_at": "2026-11-16T16:31:43.799541+00:00"
+    },
+    {
+      "symbol": "VT",
+      "checks": [
+        {
+          "ex_date": "2026-09-18",
+          "expected_amount": "0.4084",
+          "actual_amount": "0.408400000000000000",
+          "expected_pay": "2026-09-22",
+          "actual_pay": "2026-09-22",
+          "pass": true
+        },
+        {
+          "ex_date": "2026-06-18",
+          "expected_amount": "0.5627",
+          "actual_amount": "0.562700000000000000",
+          "expected_pay": "2026-06-23",
+          "actual_pay": "2026-06-23",
+          "pass": true
+        },
+        {
+          "ex_date": "2026-03-20",
+          "expected_amount": "0.3272",
+          "actual_amount": "0.327200000000000000",
+          "expected_pay": "2026-03-24",
+          "actual_pay": "2026-03-24",
+          "pass": true
+        },
+        {
+          "ex_date": "2025-12-19",
+          "expected_amount": "1.1152",
+          "actual_amount": "1.115200000000000000",
+          "expected_pay": "2025-12-23",
+          "actual_pay": "2025-12-23",
+          "pass": true
+        },
+        {
+          "ex_date": "2025-09-19",
+          "expected_amount": "0.4781",
+          "actual_amount": "0.478100000000000000",
+          "expected_pay": "2025-09-23",
+          "actual_pay": "2025-09-23",
+          "pass": true
+        },
+        {
+          "ex_date": "2025-06-20",
+          "expected_amount": "0.5947",
+          "actual_amount": "0.594700000000000000",
+          "expected_pay": "2025-06-24",
+          "actual_pay": "2025-06-24",
+          "pass": true
+        },
+        {
+          "ex_date": "2025-03-21",
+          "expected_amount": "0.3852",
+          "actual_amount": "0.385200000000000000",
+          "expected_pay": "2025-03-25",
+          "actual_pay": "2025-03-25",
+          "pass": true
+        },
+        {
+          "ex_date": "2024-12-20",
+          "expected_amount": "0.8774",
+          "actual_amount": "0.877400000000000000",
+          "expected_pay": "2024-12-24",
+          "actual_pay": "2024-12-24",
+          "pass": true
+        }
+      ],
+      "all_8_match": true,
+      "old_history_checks": [
+        {
+          "date": "2015-12-21",
+          "pass": true
+        },
+        {
+          "date": "2016-03-15",
+          "pass": true
+        },
+        {
+          "date": "2016-06-14",
+          "pass": true
+        },
+        {
+          "date": "2016-09-13",
+          "pass": true
+        }
+      ],
+      "older_history_preserved": true,
+      "oldest_after": "2015-12-21",
+      "issuer_canonical_rows": 8,
+      "price_guard_retained": true,
+      "technical_missing": [
+        "DIVIDEND_HISTORY_UNVERIFIED",
+        "US_DIVIDEND_PRICE_BASIS_UNVERIFIED"
+      ],
+      "future_complete": false,
+      "checked_at": "2026-11-16T16:31:43.840476+00:00"
+    }
+  ],
+  "bff_unchanged": true,
+  "images_still_match": true,
+  "pass": true
+}

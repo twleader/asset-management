@@ -1,0 +1,59 @@
+{
+  "symbol": "VOO",
+  "pass": true,
+  "source": "VANGUARD_ISSUER、Yahoo Finance (nominal from verified splits)",
+  "checkedAt": "2026-11-16T16:31:47.155634+00:00",
+  "checkedEvents": [
+    {
+      "exDate": "2026-09-28",
+      "amount": 1.8226,
+      "payDate": "2026-09-30",
+      "pass": true
+    },
+    {
+      "exDate": "2026-06-26",
+      "amount": 1.9622,
+      "payDate": "2026-06-30",
+      "pass": true
+    },
+    {
+      "exDate": "2026-03-27",
+      "amount": 1.8724,
+      "payDate": "2026-03-31",
+      "pass": true
+    },
+    {
+      "exDate": "2025-12-22",
+      "amount": 1.771,
+      "payDate": "2025-12-24",
+      "pass": true
+    },
+    {
+      "exDate": "2025-09-29",
+      "amount": 1.74,
+      "payDate": "2025-10-01",
+      "pass": true
+    },
+    {
+      "exDate": "2025-06-30",
+      "amount": 1.7447,
+      "payDate": "2025-07-02",
+      "pass": true
+    },
+    {
+      "exDate": "2025-03-27",
+      "amount": 1.8121,
+      "payDate": "2025-03-31",
+      "pass": true
+    },
+    {
+      "exDate": "2024-12-23",
+      "amount": 1.7385,
+      "payDate": "2024-12-26",
+      "pass": true
+    }
+  ],
+  "allOlderDatesPreserved": true,
+  "rowCount": 43,
+  "placesOrders": false
+}

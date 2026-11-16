@@ -1,0 +1,69 @@
+{
+  "total": 70,
+  "suites": [
+    {
+      "module": "external-materials-service",
+      "class": "VanguardDividendClientTest",
+      "tests": 6,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "module": "external-materials-service",
+      "class": "DividendCanonicalProducerTest",
+      "tests": 14,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "module": "external-materials-service",
+      "class": "DividendFetchCoverageTest",
+      "tests": 15,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "module": "external-materials-service",
+      "class": "DividendPersisterAppendOnlyTest",
+      "tests": 2,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "module": "external-materials-service",
+      "class": "DividendSnapshotAppendOnlyTest",
+      "tests": 9,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "module": "backend",
+      "class": "VanguardDividendAuthorityTest",
+      "tests": 2,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "module": "backend",
+      "class": "CanonicalDividendResolverTest",
+      "tests": 18,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    },
+    {
+      "module": "backend",
+      "class": "CanonicalDividendFinancialGuardTest",
+      "tests": 4,
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0
+    }
+  ]
+}
