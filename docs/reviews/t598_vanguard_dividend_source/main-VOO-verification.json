@@ -1,0 +1,256 @@
+{
+  "symbol": "VOO",
+  "pass": true,
+  "source": "VANGUARD_ISSUER、Yahoo Finance (nominal from verified splits)",
+  "checkedAt": "2026-11-16T16:35:37.608242+00:00",
+  "checkedEvents": [
+    {
+      "exDate": "2026-09-28",
+      "amount": 1.8226,
+      "payDate": "2026-09-30",
+      "pass": true
+    },
+    {
+      "exDate": "2026-06-26",
+      "amount": 1.9622,
+      "payDate": "2026-06-30",
+      "pass": true
+    },
+    {
+      "exDate": "2026-03-27",
+      "amount": 1.8724,
+      "payDate": "2026-03-31",
+      "pass": true
+    },
+    {
+      "exDate": "2025-12-22",
+      "amount": 1.771,
+      "payDate": "2025-12-24",
+      "pass": true
+    },
+    {
+      "exDate": "2025-09-29",
+      "amount": 1.74,
+      "payDate": "2025-10-01",
+      "pass": true
+    },
+    {
+      "exDate": "2025-06-30",
+      "amount": 1.7447,
+      "payDate": "2025-07-02",
+      "pass": true
+    },
+    {
+      "exDate": "2025-03-27",
+      "amount": 1.8121,
+      "payDate": "2025-03-31",
+      "pass": true
+    },
+    {
+      "exDate": "2024-12-23",
+      "amount": 1.7385,
+      "payDate": "2024-12-26",
+      "pass": true
+    },
+    {
+      "exDate": "2024-09-27",
+      "amount": 1.6386,
+      "payDate": "2024-10-01",
+      "pass": true
+    },
+    {
+      "exDate": "2024-06-28",
+      "amount": 1.7835,
+      "payDate": "2024-07-02",
+      "pass": true
+    },
+    {
+      "exDate": "2024-03-22",
+      "amount": 1.5429,
+      "payDate": "2024-03-27",
+      "pass": true
+    },
+    {
+      "exDate": "2023-12-20",
+      "amount": 1.8011,
+      "payDate": "2023-12-26",
+      "pass": true
+    },
+    {
+      "exDate": "2023-09-28",
+      "amount": 1.4925,
+      "payDate": "2023-10-03",
+      "pass": true
+    },
+    {
+      "exDate": "2023-06-29",
+      "amount": 1.5762,
+      "payDate": "2023-07-05",
+      "pass": true
+    },
+    {
+      "exDate": "2023-03-24",
+      "amount": 1.4874,
+      "payDate": "2023-03-29",
+      "pass": true
+    },
+    {
+      "exDate": "2022-12-20",
+      "amount": 1.6717,
+      "payDate": "2022-12-23",
+      "pass": true
+    },
+    {
+      "exDate": "2022-09-28",
+      "amount": 1.4692,
+      "payDate": "2022-10-03",
+      "pass": true
+    },
+    {
+      "exDate": "2022-06-29",
+      "amount": 1.4321,
+      "payDate": "2022-07-05",
+      "pass": true
+    },
+    {
+      "exDate": "2022-03-24",
+      "amount": 1.3737,
+      "payDate": "2022-03-29",
+      "pass": true
+    },
+    {
+      "exDate": "2021-12-21",
+      "amount": 1.5329,
+      "payDate": "2021-12-27",
+      "pass": true
+    },
+    {
+      "exDate": "2021-09-29",
+      "amount": 1.3084,
+      "payDate": "2021-10-04",
+      "pass": true
+    },
+    {
+      "exDate": "2021-06-29",
+      "amount": 1.3329,
+      "payDate": "2021-07-02",
+      "pass": true
+    },
+    {
+      "exDate": "2021-03-26",
+      "amount": 1.2625,
+      "payDate": "2021-03-31",
+      "pass": true
+    },
+    {
+      "exDate": "2020-12-22",
+      "amount": 1.3829,
+      "payDate": "2020-12-28",
+      "pass": true
+    },
+    {
+      "exDate": "2020-09-29",
+      "amount": 1.3085,
+      "payDate": "2020-10-02",
+      "pass": true
+    },
+    {
+      "exDate": "2020-06-29",
+      "amount": 1.4333,
+      "payDate": "2020-07-02",
+      "pass": true
+    },
+    {
+      "exDate": "2020-03-10",
+      "amount": 1.178,
+      "payDate": "2020-03-13",
+      "pass": true
+    },
+    {
+      "exDate": "2019-12-23",
+      "amount": 1.4285,
+      "payDate": "2019-12-27",
+      "pass": true
+    },
+    {
+      "exDate": "2019-09-26",
+      "amount": 1.3014,
+      "payDate": "2019-10-01",
+      "pass": true
+    },
+    {
+      "exDate": "2019-06-27",
+      "amount": 1.3859,
+      "payDate": "2019-07-02",
+      "pass": true
+    },
+    {
+      "exDate": "2019-03-21",
+      "amount": 1.4551,
+      "payDate": "2019-03-26",
+      "pass": true
+    },
+    {
+      "exDate": "2018-12-17",
+      "amount": 1.289,
+      "payDate": "2018-12-20",
+      "pass": true
+    },
+    {
+      "exDate": "2018-09-26",
+      "amount": 1.2067,
+      "payDate": "2018-10-01",
+      "pass": true
+    },
+    {
+      "exDate": "2018-06-28",
+      "amount": 1.1573,
+      "payDate": "2018-07-03",
+      "pass": true
+    },
+    {
+      "exDate": "2018-03-26",
+      "amount": 1.0837,
+      "payDate": "2018-03-29",
+      "pass": true
+    },
+    {
+      "exDate": "2017-12-26",
+      "amount": 1.1839,
+      "payDate": "2017-12-29",
+      "pass": true
+    },
+    {
+      "exDate": "2017-09-20",
+      "amount": 1.176,
+      "payDate": "2017-09-25",
+      "pass": true
+    },
+    {
+      "exDate": "2017-06-23",
+      "amount": 1.01,
+      "payDate": "2017-06-29",
+      "pass": true
+    },
+    {
+      "exDate": "2017-03-22",
+      "amount": 0.998,
+      "payDate": "2017-03-28",
+      "pass": true
+    },
+    {
+      "exDate": "2016-12-22",
+      "amount": 1.296,
+      "payDate": "2016-12-29",
+      "pass": true
+    }
+  ],
+  "allOlderDatesPreserved": true,
+  "rowCount": 43,
+  "remainingMissingPayDates": [
+    "2016-09-13",
+    "2016-06-21",
+    "2016-03-21"
+  ],
+  "placesOrders": false
+}

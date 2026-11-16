@@ -19,7 +19,7 @@
 - [x] 598.1 specs機械檢查與獨立CLI spec review
 - [x] 598.2 adapter與來源順位、fixtures和targeted tests
 - [x] 598.3 架構審查、部署與真實readback驗收
-- [ ] 598.4 main merge/push與正式部署核對
+- [x] 598.4 main merge/push與正式部署核對
 
 ## 驗證
 
@@ -27,4 +27,4 @@
 
 ## 完成報告
 
-spec與架構round2均PASS 0/0/0；70例targeted測試通過。feature兩服務已重建，實際sync與canonical採用成功；主代理獨立9090比對VOO/VT近兩年共16筆amount/ex/pay完全等於官方原文，public各43筆且所有舊日期保留。main落地與正式部署待收尾核對。
+spec與架構round2均PASS 0/0/0；70例targeted測試通過。feature兩服務已重建，實際sync與canonical採用成功；主代理獨立9090比對VOO/VT近兩年共16筆amount/ex/pay完全等於官方原文，public各43筆且所有舊日期保留。程式main3826809a已no-ff merge/push並由乾淨main重建兩服務，主代理正式獨立驗收官方全部40/檔共80筆amount/ex/pay一致；舊日期全保留、BFF未重啟。另四個股20年同步170筆歷史逐筆與原生來源一致；未來公告與價格價基guard未解封。官方範圍外未知支付日詳final-summary.json，未假稱全部歷史完整。
