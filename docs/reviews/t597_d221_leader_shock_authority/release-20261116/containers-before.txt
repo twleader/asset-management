@@ -1,0 +1,10 @@
+asset-frontend cd264fb5e600 asset-management-frontend
+asset-bff 511c2ee6f1cc asset-management-bff
+asset-business-services b9dcd720e553 asset-management-business-services
+asset-srpp-simulator 863238bd41dc asset-management-srpp-simulator
+asset-external-materials-service 50db774a99e2 asset-management-external-materials-service
+asset-fubon-broker-service 212964deefab asset-management-fubon-broker-service
+asset-api-gateway aaab06740d9a asset-management-api-gateway
+asset-yuanta-broker-service c936a4131d00 asset-management-yuanta-broker-service
+asset-postgres 67320a18be6c postgres:16-alpine
+asset-redis d67df96cd49f redis:7-alpine

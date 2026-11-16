@@ -21,7 +21,7 @@
 - [x] 597.1 spec 與獨立 Codex 審查。
 - [x] 597.2 authority artifacts、golden、runtime export 精確同步。
 - [x] 597.3 authority check、formula V3 check、rubric hash 與 Java 離線回歸。
-- [ ] 597.4 獨立 Codex 架構審查、落地與發布驗收。
+- [x] 597.4 獨立 Codex 架構審查、落地與發布驗收。
 
 ## 驗證
 
@@ -29,4 +29,4 @@
 
 ## 完成報告
 
-離線同步、authority／formula／golden／runtime 檢查、Java 184 測例與 Codex spec／架構審查均通過，詳 `docs/reviews/t597_d221_leader_shock_authority/README.md`。發布（597.4 後半）見同目錄 release 收據。
+離線同步、authority／formula／golden／runtime 檢查、Java 184 測例與 Codex spec／架構審查均通過，詳 `docs/reviews/t597_d221_leader_shock_authority/README.md`。已發布：SRPP main 8eac362、asset main ec0ed5bf 推送並回讀；registry insert-only 56→57；business-services／srpp-simulator 自乾淨 main 重建，JAR authority 5/5、runtime 23/23 逐位元一致；SRPP host 三 GET PASS。report-calculations 正式採用 NOT_YET_EXECUTED（待 2026-11-17 09:05–13:30）；排程入口文字尚未部署，詳 release-20261116/deployment-proof.json。

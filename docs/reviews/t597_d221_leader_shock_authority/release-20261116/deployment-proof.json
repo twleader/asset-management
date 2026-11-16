@@ -1,0 +1,33 @@
+{
+ "bundle": "727be98b36a55a1127af02f4002c6797ab12cae56e603d466e7060e6f7d62d27",
+ "srpp": {
+  "feature": "dd59b1c6584da7923df5c422c50ed90e213bf123",
+  "main": "8eac36251a0eb8cb2fe1ccc75e03e2efdbe28c72",
+  "remote_readback": "match",
+  "live_checkout": "/Users/steven/Project/SRPP ff-only to 8eac362"
+ },
+ "asset": {
+  "feature": "76d43b0b5eb6134accc963737106ce25514332c7",
+  "main": "ec0ed5bf01375b5f8170394447c03090d7096acd",
+  "remote_readback": "match"
+ },
+ "registry": "insert-only 56->57, old rows unchanged, new row equals SQL (registry-proof.json)",
+ "deploy": {
+  "services": [
+   "business-services",
+   "srpp-simulator"
+  ],
+  "images": {
+   "business-services": "sha256:a40fade50790",
+   "srpp-simulator": "sha256:f9a62cdec910"
+  },
+  "health": "healthy",
+  "jar_authority_bytes": "5/5 identical",
+  "simulator_runtime_bytes": "23/23 identical",
+  "other_containers": "unchanged",
+  "startup": "exports all ran today; DIVIDEND_BACKFILL_ENABLED=false; startup-recovery started TW daily backup"
+ },
+ "connectivity": "9090-connectivity.json PASS (calendar 365, TWSE 21, quotes 23)",
+ "financial_adoption": "NOT_YET_EXECUTED (next legal window 2026-11-17 09:05-13:30)",
+ "schedule_entries": "NOT_DEPLOYED: Codex codex-srpp-09-30/codex-srpp prompts and Claude local SKILLs still carry pre-D221 D-204 sentence; update via Codex App and Claude entry update pending user"
+}

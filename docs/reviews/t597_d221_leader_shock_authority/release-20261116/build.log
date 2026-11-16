@@ -1,0 +1,132 @@
+ Image asset-management-srpp-simulator Building 
+ Image asset-management-business-services Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 1.73kB done
+#1 DONE 0.0s
+
+#2 [business-services internal] load build definition from Dockerfile
+#2 transferring dockerfile: 1.74kB done
+#2 DONE 0.0s
+
+#3 [srpp-simulator internal] load build definition from Dockerfile
+#3 transferring dockerfile: 529B done
+#3 DONE 0.0s
+
+#4 [business-services internal] load metadata for docker.io/library/eclipse-temurin:25-jre-alpine
+#4 DONE 0.0s
+
+#5 [business-services internal] load metadata for docker.io/library/maven:3.9-eclipse-temurin-25
+#5 DONE 0.0s
+
+#6 [business-services internal] load .dockerignore
+#6 transferring context: 2B done
+#6 DONE 0.0s
+
+#7 [business-services stage-1 1/6] FROM docker.io/library/eclipse-temurin:25-jre-alpine@sha256:3c0a9084927a221ccd1d007fcaf614465672c0af37aaa834c5184483afe56d61
+#7 resolve docker.io/library/eclipse-temurin:25-jre-alpine@sha256:3c0a9084927a221ccd1d007fcaf614465672c0af37aaa834c5184483afe56d61 done
+#7 DONE 0.0s
+
+#8 [business-services builder 1/6] FROM docker.io/library/maven:3.9-eclipse-temurin-25@sha256:93b8a14ea2f412782e4e842651273b4d903e35cc496284f178fbbe2d67d00976
+#8 resolve docker.io/library/maven:3.9-eclipse-temurin-25@sha256:93b8a14ea2f412782e4e842651273b4d903e35cc496284f178fbbe2d67d00976 done
+#8 DONE 0.0s
+
+#9 [business-services internal] load build context
+#9 transferring context: 1.76MB 0.0s done
+#9 DONE 0.0s
+
+#10 [business-services builder 2/6] WORKDIR /app
+#10 CACHED
+
+#11 [business-services builder 3/6] COPY pom.xml .
+#11 CACHED
+
+#12 [business-services builder 4/6] RUN mvn dependency:go-offline -q
+#12 CACHED
+
+#13 [business-services builder 5/6] COPY src ./src
+#13 DONE 0.2s
+
+#14 [srpp-simulator internal] load metadata for docker.io/library/python:3.12-slim
+#14 DONE 1.3s
+
+#15 [business-services builder 6/6] RUN mvn package -DskipTests -q
+#15 ...
+
+#16 [srpp-simulator internal] load .dockerignore
+#16 transferring context: 58B done
+#16 DONE 0.2s
+
+#17 [srpp-simulator internal] load build context
+#17 transferring context: 270.37kB done
+#17 DONE 0.0s
+
+#18 [srpp-simulator 1/5] FROM docker.io/library/python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+#18 resolve docker.io/library/python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b 0.0s done
+#18 DONE 0.0s
+
+#19 [srpp-simulator 2/5] WORKDIR /app
+#19 CACHED
+
+#20 [srpp-simulator 3/5] COPY requirements.txt /tmp/requirements.txt
+#20 CACHED
+
+#21 [srpp-simulator 4/5] RUN pip install --no-cache-dir -r /tmp/requirements.txt && useradd --uid 10001 --create-home simulator
+#21 CACHED
+
+#22 [srpp-simulator 5/5] COPY runtime/ /app/
+#22 DONE 0.0s
+
+#23 [srpp-simulator] exporting to image
+#23 exporting layers 0.1s done
+#23 exporting manifest sha256:a0456d1402363c947d63cf1147c5879e51a39137512aa7c9bfdb27d648ac39c1 done
+#23 exporting config sha256:9094553c5aec2ad37fb2948f5276a3f74536f41325e313559224862df7b03014 0.0s done
+#23 exporting attestation manifest sha256:4d77efe85f90c63dda61c279f16ee235ad7364337f9e24bcbb631d2d7ba081ba 0.0s done
+#23 exporting manifest list sha256:f9a62cdec91034bd661b39b93067ea940063f596cdb0958f778cf7ae9f4f6490 done
+#23 naming to docker.io/library/asset-management-srpp-simulator:latest done
+#23 unpacking to docker.io/library/asset-management-srpp-simulator:latest 0.0s done
+#23 DONE 0.2s
+
+#15 [business-services builder 6/6] RUN mvn package -DskipTests -q
+#15 ...
+
+#24 [srpp-simulator] resolving provenance for metadata file
+#24 DONE 0.0s
+
+#15 [business-services builder 6/6] RUN mvn package -DskipTests -q
+#15 3.723 WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+#15 3.723 WARNING: sun.misc.Unsafe::objectFieldOffset has been called by lombok.permit.Permit
+#15 3.723 WARNING: Please consider reporting this to the maintainers of class lombok.permit.Permit
+#15 3.723 WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+#15 DONE 15.9s
+
+#25 [business-services stage-1 2/6] WORKDIR /app
+#25 CACHED
+
+#26 [business-services stage-1 3/6] RUN apk add --no-cache curl postgresql16-client rclone fontconfig freetype ttf-dejavu font-noto-cjk     && fc-cache -f
+#26 CACHED
+
+#27 [business-services stage-1 4/6] RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+#27 CACHED
+
+#28 [business-services stage-1 5/6] COPY --from=builder /app/target/*.jar app.jar
+#28 DONE 0.1s
+
+#29 [business-services stage-1 6/6] RUN chown appuser:appgroup app.jar
+#29 DONE 0.2s
+
+#30 [business-services] exporting to image
+#30 exporting layers
+#30 exporting layers 2.3s done
+#30 exporting manifest sha256:323b9bc1ef925c5d45e8cdf5c99fafb0fb0ba8bc77ab3cb88835b0c88d90c040 done
+#30 exporting config sha256:592972a4de2e73dc651c6950ace9d64a58e26e00b28efe1c8e124720c164326c done
+#30 exporting attestation manifest sha256:c44eb8e3c2ebd8d98fc7c11086b19a822aa584c73a1bcf425bd529fc6f4b4184 done
+#30 exporting manifest list sha256:a40fade50790cad26537ba3ecfaf740ec04b90bc67ab2d13dd99d19e5d3d9023 done
+#30 naming to docker.io/library/asset-management-business-services:latest done
+#30 unpacking to docker.io/library/asset-management-business-services:latest
+#30 unpacking to docker.io/library/asset-management-business-services:latest 0.9s done
+#30 DONE 3.2s
+
+#31 [business-services] resolving provenance for metadata file
+#31 DONE 0.0s
+ Image asset-management-business-services Built 
+ Image asset-management-srpp-simulator Built 
