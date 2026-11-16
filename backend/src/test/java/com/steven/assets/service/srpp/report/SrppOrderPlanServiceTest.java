@@ -26,6 +26,18 @@ import static org.mockito.Mockito.*;
 
 /** Task497 business projection tests; the name is deliberately selected by the SDD Maven glob. */
 class SrppOrderPlanServiceTest {
+    @Test void waitRequiresAnExplicitAllowedReasonWithoutAnyDefault() {
+        var saved = packageWith(List.of(new Leg("0050", "台股", "BUY", 2, null)));
+        for (String suffix : List.of("WAIT", "WAIT~", "WAIT~UNKNOWN", "WAIT~OTHER~1", "VETO", "REDUCE~1", "REDUCE~~OTHER")) {
+            problem(() -> harness(saved).service().order(order(saved, "ASSET_RECONCILIATION.0~" + suffix)), "INVALID_REQUEST");
+        }
+        for (String reason : List.of("EVENT_RISK", "RISK_MODE", "MARKET_CONTEXT", "PRIORITY_ELSEWHERE", "EVIDENCE_CONFLICT", "OTHER")) {
+            var result = SrppJcs.parseStrict(harness(saved).service().order(order(saved, "ASSET_RECONCILIATION.0~WAIT~" + reason)));
+            assertThat(result.path("normalizedDecisions").get(0).path("reason").asText()).isEqualTo(reason);
+            assertThat(result.path("tradeAuthorization").asBoolean()).isFalse();
+        }
+    }
+
     @Test void projectsPackageOrderedLegsWithQuoteProofBuyGateSellAndReduceFallback() {
         var saved = packageWith(List.of(
                 new Leg("0050", "台股", "BUY", 2, null),

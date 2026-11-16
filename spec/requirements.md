@@ -7096,3 +7096,14 @@ Task552 Quota接口補充：QUOTA_EXHAUSTED與由同一全域quota退避衍生�
 - 歷史日期組成功輸出 PARTIAL、dateGroupsComplete=true、complete=false；不因此宣稱未來45日完整、沒有事件或撤回。未知／空列表不升EMPTY_COMPLETE。
 - 官方歷史 provider VANGUARD_ISSUER 配息來源順位高於Nasdaq/Yahoo；來源較早未覆蓋事件保留，未來完整門檻、US價格價基guard、SRPP規則／hash、公開API、排程、DB schema與交易權限皆不變。
 - 以保存真實官方兩檔fixture驗證8個近兩年事件金額／日期；測身份、幣別、日期、未知類別、傳輸失敗、分割衝突、fallback、去重與多來源衝突；部署後重跑同一受控sync與canonical preview/apply，9090 readback精確比對。
+
+
+#### Task599 投影請求契約修復（Requirement 191 補充）
+
+使用者故事：作為 SRPP 報告使用者，我需要已明確判斷的 WAIT 不因呼叫端漏傳原因而失敗，且凍結的六位數 ETF 代碼可由相同 API 與 consumer 驗證。
+
+驗收條件：
+1. WAIT/VETO 仍必須有六個既有 reason code 之一；REDUCE 必須有正數 amount 與 reason，ADOPT 不可夾帶兩欄。呼叫前本機純函式/CLI 驗證已驗證 base package 與逐 leg 明確判斷，依現有順序輸出 CSV；缺原因不發請求、不猜原因、不改為 ADOPT、不自動補 OTHER。
+2. 台股投影代碼保留 `[0-9]{4,5}[A-Z]?`，另接受精確六位 ASCII 數字；不接受六位數加字母、七位數、小寫、空白、重複或非 ASCII 數字。Java query parser、BFF query/response validator、OpenAPI symbol row 與 SRPP consumer 完全一致。格式有效不等於有市場/凍結證據，原本 package universe 與 UNAVAILABLE 邊界保留。
+3. 不改 risk、容量、價格、策略、交易權限、路由與排程；新 preflight 零 HTTP/DB I/O，完整驗證 consumer/base identity 後才產生待傳參數，回應仍須原投影 verifier 核對。
+4. 同步受控 Swagger mirrors、consumer metadata、runtime contract、manifest 與 backend authority，建立新 hash/insert-only registry 產物。離線測試與審查完成不等於已部署；正式兩專案 landing、registry、main rebuild/recreate 與合法時窗 readback 由既有發布順序完成，時窗外標 NOT_YET_EXECUTED，不重跑報告/寄信/交易。
