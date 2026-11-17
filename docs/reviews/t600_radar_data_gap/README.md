@@ -24,3 +24,12 @@
 - 雷達分鐘確認現為`MISSING_CONSECUTIVE_COMPLETED_BARS`，與來源抓取故障分開：DB所需12:40–12:49區間確實缺12:44棒。沒有補造未成交分鐘或放寬連續棒條件；本次成功是修復來源解析，並非宣稱買進條件已成立。
 
 精簡證據：`runtime-feature-summary.json`、`radar-feature-summary.json`及`capture-feature-{before,after}.txt`；完整build log留於本機/tmp/t600-release，未保存憑證或私人帳務。
+
+
+### Main 正式發布（2026-11-17 12:59）
+
+feature commit `3cd976befb636be777fa8ee3ed7f6739cbe768a4`、main no-ff merge `7fd6aaa6075c6598ef47c303d50ce0fd702513dc`均已push，兩個remote refs逐一讀回相同。從乾淨main以正式.env重新build/recreate必要兩服務，兩服務healthy、有效環境及唯讀掛載皆與main相同，沒有重啟BFF。
+
+main adapter實測HTTP200、canonical int1、AVAILABLE、225根分鐘棒。正常背景於12:59:00再次保存009826新capture，9090於12:59:10回`CONFIRMED/COMPLETED_PRICE_VOLUME_CONFIRMED`，5分完成12:55、1分完成12:58，來源`LOCAL_AGGREGATED_FUBON_1M`。這是來源恢復及連續分鐘區間自然具備後的真實確認；71/241根日K及MA240缺口仍使三軌維持NO_TRADE，未聲稱可買。
+
+重建期間00697B於12:56:05出現一次UPSTREAM_UNAVAILABLE，保留真實短暫中斷紀錄，之後既有背景輪替已自行恢復，最終22檔capture全部AVAILABLE。精簡正式證據為`radar-main-summary.json`、`runtime-main-summary.json`、`capture-main-after.txt`。其後提交只增加本段驗收收據，不改產品碼，不因文件重建映像。

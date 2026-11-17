@@ -1,0 +1,52 @@
+{
+  "phase": "MAIN_DEPLOYMENT",
+  "sourceCommit": "7fd6aaa6075c6598ef47c303d50ce0fd702513dc",
+  "featureCommit": "3cd976befb636be777fa8ee3ed7f6739cbe768a4",
+  "remoteRefsVerified": true,
+  "images": {
+    "business-services": {
+      "image": "sha256:9f678c4ec2cdbff3bf64af4c114e2c0e5731b3f3333ae17c4a92d05b02aaf7e7",
+      "health": "healthy",
+      "environmentMatchesMain": true,
+      "mountsMatchMain": true,
+      "composeWorkingDirectory": "/Users/steven/Project/asset-management-main"
+    },
+    "fubon-broker-service": {
+      "image": "sha256:e20747cdab17b3cd5793284821296736f84fb479b2a4fba2dd44d9f78ac60e58",
+      "health": "healthy",
+      "environmentMatchesMain": true,
+      "mountsMatchMain": true,
+      "composeWorkingDirectory": "/Users/steven/Project/asset-management-main"
+    }
+  },
+  "canonical": {
+    "httpStatus": 200,
+    "schemaVersion": 1,
+    "symbol": "009826",
+    "market": "台股",
+    "provider": "FUBON_SDK",
+    "sourceDate": "2026-11-17",
+    "observedAt": "2026-11-17T04:56:15.371148Z",
+    "instrumentType": "EQUITY",
+    "exchange": "TWSE",
+    "sourceMarket": "TSE",
+    "timeframe": 1,
+    "status": "AVAILABLE",
+    "reason": null,
+    "candleCount": 225,
+    "firstCandleAt": "2026-11-17T01:00:00Z",
+    "lastCandleAt": "2026-11-17T04:56:00Z",
+    "timeframePythonType": "int"
+  },
+  "captureCounts": {
+    "AVAILABLE": 22
+  },
+  "capture009826": "009826|AVAILABLE||2026-11-17 12:59:00.411522+08|2026-11-17 12:58:00+08",
+  "transientRecreationFailure": {
+    "symbol": "00697B",
+    "capturedAt": "2026-11-17T12:56:05.221725+08:00",
+    "reason": "UPSTREAM_UNAVAILABLE",
+    "latestSnapshotRecovered": true
+  },
+  "bffRestarted": false
+}
