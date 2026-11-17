@@ -1,0 +1,49 @@
+{
+  "generatedAt": "2026-11-17T12:54:19.470623222+08:00",
+  "ruleVersion": "TW_RULES_V28",
+  "actionPolicyVersion": "EVIDENCE_GATE_V2",
+  "dataComplete": false,
+  "actions": {
+    "action": "NO_TRADE",
+    "shortAction": "NO_TRADE",
+    "swingAction": "NO_TRADE"
+  },
+  "score": null,
+  "indicators": {
+    "monthlyMa": 10.09,
+    "quarterlyMa": 10.08,
+    "annualMa": null,
+    "kValue": 47.39,
+    "dValue": 52.67,
+    "annualConfirmation": "UNAVAILABLE"
+  },
+  "risks": [
+    "個股必要的 MA20／60／240、KD、241 根完成日 K 或大盤資料不足，今日不交易。",
+    "配息事件 evidence 缺漏／過期／不完整，僅列風險揭露；不改變 opportunity action。 ",
+    "配息事件資料狀態：STALE；證據已知時間：2026-11-04T09:00:08.528265Z；原因：decision-time 前有完整 snapshot，但 scope 未覆蓋 decision 日至 +45 日。",
+    "本次完成日 K 輸入：目前 71／241 根（不含盤中 K）；必要資料缺少：MA240、MA240 兩日確認。"
+  ],
+  "shortRisks": [
+    "必要資料不足，短期軌今日不交易。",
+    "配息事件 evidence 缺漏／過期／不完整，僅列風險揭露；不改變 opportunity action。 ",
+    "配息事件資料狀態：STALE；證據已知時間：2026-11-04T09:00:08.528265Z；原因：decision-time 前有完整 snapshot，但 scope 未覆蓋 decision 日至 +45 日。",
+    "盤中完成 K 線資料不足、過期或無法驗證，暫緩短線買進。原因：最近完整區間缺少連續分鐘 K（MISSING_CONSECUTIVE_COMPLETED_BARS）。來源日 2026-11-17。",
+    "本次完成日 K 輸入：目前 71／241 根（不含盤中 K）；必要資料缺少：MA240、MA240 兩日確認。"
+  ],
+  "swingRisks": [
+    "必要資料不足，1周~1月 軌今日不交易。",
+    "配息事件 evidence 缺漏／過期／不完整，僅列風險揭露；不改變 opportunity action。 ",
+    "配息事件資料狀態：STALE；證據已知時間：2026-11-04T09:00:08.528265Z；原因：decision-time 前有完整 snapshot，但 scope 未覆蓋 decision 日至 +45 日。",
+    "本次完成日 K 輸入：目前 71／241 根（不含盤中 K）；必要資料缺少：MA240、MA240 兩日確認。"
+  ],
+  "intradayCandleConfirmation": {
+    "status": "UNAVAILABLE",
+    "reason": "MISSING_CONSECUTIVE_COMPLETED_BARS",
+    "sourceDate": "2026-11-17",
+    "observedAt": null,
+    "lastCompletedAt": null,
+    "fiveMinuteAt": null,
+    "oneMinuteAt": null,
+    "aggregationSource": null
+  }
+}

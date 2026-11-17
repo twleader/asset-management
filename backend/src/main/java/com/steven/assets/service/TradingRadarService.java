@@ -1712,8 +1712,7 @@ public class TradingRadarService {
             // The strict profile is re-resolved after as-of valuation selection;
             // use its currency/provenance for both the evidence gate and output.
             currency = profile.underlyingCurrency();
-            TradingRadarRuleEngine.StockResult result = ruleEngine.evaluateStock(
-                    new TradingRadarRuleEngine.StockInput(
+            TradingRadarRuleEngine.StockInput stockInput = new TradingRadarRuleEngine.StockInput(
                             target.held(),
                             price,
                             ruleChangePercent,
@@ -1758,7 +1757,8 @@ public class TradingRadarService {
                                         ? UsdFxPurchaseContext.requiresUsd(target.code(), target.market(), profile.quoteCurrency())
                                             ? fxCache.computeIfAbsent("USD", ignored -> marketContextService.resolveFx("USD", decisionInstant))
                                             : TradingRadarMarketContextService.FxContext.EMPTY
-                                        : listEntry.usdPurchaseFx()).usdPurchaseData())));
+                                        : listEntry.usdPurchaseFx()).usdPurchaseData()));
+            TradingRadarRuleEngine.StockResult result = ruleEngine.evaluateStock(stockInput);
             TradingRadarEvidenceConfidenceResolver.MarketContext marketContext = marketSummary == null
                     ? TradingRadarEvidenceConfidenceResolver.MarketContext.EMPTY
                     : new TradingRadarEvidenceConfidenceResolver.MarketContext(
@@ -1852,6 +1852,16 @@ public class TradingRadarService {
                 swingReasons.addAll(nullSafe(result.swingReasons()));
                 swingRisks = new ArrayList<>(nullSafe(result.swingRisks()));
                 swingRisks.addAll(gated.swingDiagnostics());
+                if (result.score() == null) {
+                    String missingInputs = "本次完成日 K 輸入：目前 "
+                            + acceptedPrice.indicatorSeriesRows().size() + "／"
+                            + RadarObservationResolver.INDICATOR_SERIES_MAX_ROWS
+                            + " 根（不含盤中 K）；必要資料缺少："
+                            + String.join("、", ruleEngine.requiredInputGaps(stockInput)) + "。";
+                    risks.add(missingInputs);
+                    shortRisks.add(missingInputs);
+                    swingRisks.add(missingInputs);
+                }
                 if (!TWD.equals(currency) && fx.asOfDate() == null) {
                     String missingFx = "精確完成日匯率不可得，外幣債券 ETF 的匯率因子本日缺值。 ";
                     risks.add(missingFx);

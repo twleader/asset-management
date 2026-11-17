@@ -487,6 +487,34 @@ class TradingRadarEvidenceConfidenceResolverTest {
     }
 
     @Test
+    void staleDividendDisclosureKeepsExactResolutionReasonAndDoesNotChangeActions() {
+        var profile = TradingRadarAssetProfileResolver.resolve(
+                "0050", "台股", "ETF", null, null, null, null, null, null);
+        for (String reason : List.of("scope 未覆蓋 decision 日至 +45 日", "")) {
+            var stale = new DividendEventEvidenceResolver.Resolution(
+                    DividendEventEvidenceResolver.Status.STALE, null, 0, 0,
+                    "OFFICIAL", DECISION.minusSeconds(3600), DECISION.minusSeconds(3600), reason);
+            var evidence = resolve(profile, null, TradingRadarRuleEngine.MarketRegime.RISK_ON,
+                    false, TradingRadarRuleEngine.TimingState.NEUTRAL, "台股",
+                    TradingRadarEvidenceConfidenceResolver.RateObservation.notApplicable(), stale);
+            var gated = TradingRadarEvidenceGate.apply(
+                    TradingRadarRuleEngine.Action.NO_TRADE, TradingRadarRuleEngine.Action.NO_TRADE,
+                    TradingRadarRuleEngine.Action.NO_TRADE, true, profile, evidence);
+            String detail = gated.mediumDiagnostics().stream()
+                    .filter(x -> x.startsWith("配息事件資料狀態：")).findFirst().orElseThrow();
+            assertTrue(detail.contains("STALE"));
+            assertTrue(detail.contains(DECISION.minusSeconds(3600).toString()));
+            if (!reason.isBlank()) assertTrue(detail.contains(reason));
+            else assertFalse(detail.contains("；原因："));
+            assertTrue(gated.shortDiagnostics().contains(detail));
+            assertTrue(gated.swingDiagnostics().contains(detail));
+            assertEquals(TradingRadarRuleEngine.Action.NO_TRADE, gated.mediumAction());
+            assertEquals(TradingRadarRuleEngine.Action.NO_TRADE, gated.shortAction());
+            assertEquals(TradingRadarRuleEngine.Action.NO_TRADE, gated.swingAction());
+        }
+    }
+
+    @Test
     void dividendRiskUsesFiveAndTwentySessionBoundaries() {
         var profile = TradingRadarAssetProfileResolver.resolve(
                 "2330", "台股", "一般股票", null, null, "GROWTH", null, null, null);

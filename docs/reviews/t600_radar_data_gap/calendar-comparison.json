@@ -1,0 +1,11 @@
+{
+  "calendarAvailability": {
+    "status": "AVAILABLE",
+    "source": "TWSE/DGPA",
+    "message": null
+  },
+  "expectedCount": 71,
+  "actualCount": 71,
+  "missingDates": [],
+  "extraDates": []
+}

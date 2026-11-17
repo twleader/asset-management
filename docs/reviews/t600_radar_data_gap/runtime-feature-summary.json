@@ -1,0 +1,52 @@
+{
+  "phase": "FEATURE_ACCEPTANCE",
+  "capturedAt": "2026-11-17T12:54:19.470623222+08:00",
+  "composeProject": "asset-management",
+  "images": {
+    "business-services": {
+      "image": "sha256:a070882a07f2f0d74866b314357fc145cbcace6c45f5d7b63d16251a159d89fe",
+      "health": "healthy",
+      "environmentMatchesMain": true,
+      "mountsMatchMain": true
+    },
+    "fubon-broker-service": {
+      "image": "sha256:85515acde0b13db9e7fe65378f77e2183cc34fbf33731656dddcf765aefdfaa8",
+      "health": "healthy",
+      "environmentMatchesMain": true,
+      "mountsMatchMain": true
+    }
+  },
+  "captureBefore": {
+    "UNAVAILABLE_INVALID_RESPONSE": 22
+  },
+  "captureAfter": {
+    "AVAILABLE": 22
+  },
+  "capture009826": "009826|AVAILABLE||2026-11-17 12:54:00.52824+08|2026-11-17 12:53:00+08",
+  "realMinuteGap": {
+    "candleAt": "2026-11-17T12:44:00+08:00",
+    "expectedWindow": "12:40–12:49",
+    "meaning": "source did not return this minute; no zero-volume candle fabricated"
+  },
+  "bffRestarted": false,
+  "marketIndex9090": "JSON_OK",
+  "canonical": {
+    "httpStatus": 200,
+    "schemaVersion": 1,
+    "symbol": "009826",
+    "market": "台股",
+    "provider": "FUBON_SDK",
+    "sourceDate": "2026-11-17",
+    "observedAt": "2026-11-17T04:50:08.706028Z",
+    "instrumentType": "EQUITY",
+    "exchange": "TWSE",
+    "sourceMarket": "TSE",
+    "timeframe": 1,
+    "status": "AVAILABLE",
+    "reason": null,
+    "candleCount": 219,
+    "firstCandleAt": "2026-11-17T01:00:00Z",
+    "lastCandleAt": "2026-11-17T04:50:00Z",
+    "timeframePythonType": "int"
+  }
+}
