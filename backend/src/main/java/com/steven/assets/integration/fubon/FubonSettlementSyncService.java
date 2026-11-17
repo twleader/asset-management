@@ -25,6 +25,10 @@ public class FubonSettlementSyncService {
     private final FubonSettlementOutcomeCounters counters;
     private final boolean enabled;
     private final Clock clock;
+    private FubonSettlementReceiptCapture receipts;
+
+    @Autowired
+    void receiptCapture(FubonSettlementReceiptCapture receipts) { this.receipts=receipts; }
 
     @Autowired
     public FubonSettlementSyncService(FubonConfigState configState, FubonBrokerClient brokerClient,
@@ -78,7 +82,7 @@ public class FubonSettlementSyncService {
         FubonSyncOwnerPort.Decision owner = ownerPolicy.preflight();
         if (!owner.allowed()) return recorded(ownerOutcome(owner.denial()), dryRun, null);
         if (brokerRepository.findByCode("fubon").filter(b -> Boolean.TRUE.equals(b.getActive())).isEmpty()) {
-            return recorded(FubonSettlementOutcome.BROKER_MISSING, dryRun, null);
+            return failed(owner.ownerId(), FubonSettlementOutcome.BROKER_MISSING, dryRun);
         }
 
         FubonDtos.SettlementBatch observation;
@@ -86,16 +90,16 @@ public class FubonSettlementSyncService {
         try {
             FubonDtos.CallResult<FubonDtos.SettlementBatch> call = brokerClient.readSettlement();
             if (call == null || !call.success() || call.body() == null) {
-                return recorded(outcomeFor(call == null ? null : call.reason()), dryRun, null);
+                return failed(owner.ownerId(), outcomeFor(call == null ? null : call.reason()), dryRun);
             }
             observation = call.body();
             FubonAccountingContract.validateSettlement(observation, clock);
             FubonAccountingContract.fresh(observation.queryDate(), observation.observedAt(), clock);
             projection = FubonAccountingContract.settlementProjection(observation);
         } catch (FubonAccountingContract.Rejected rejected) {
-            return recorded(outcomeFor(rejected.getMessage()), dryRun, null);
+            return failed(owner.ownerId(), outcomeFor(rejected.getMessage()), dryRun);
         } catch (RuntimeException failure) {
-            return recorded(FubonSettlementOutcome.SETTLEMENT_FAILED, dryRun, null);
+            return failed(owner.ownerId(), FubonSettlementOutcome.SETTLEMENT_FAILED, dryRun);
         }
 
         if (dryRun) return recorded(FubonSettlementOutcome.DRY_RUN, true, projection);
@@ -105,13 +109,21 @@ public class FubonSettlementSyncService {
                     new FubonAccountingContract.SettlementProjection(committed.payableAmount(),
                             committed.receivableAmount(), projection.futureRowCount()));
         } catch (FubonSettlementWriter.WriteRejected rejected) {
-            return recorded(rejected.outcome(), false, null);
+            return failed(owner.ownerId(), rejected.outcome(), false);
         } catch (FubonAccountingContract.Rejected rejected) {
-            return recorded("STALE_QUERY".equals(rejected.getMessage()) ? FubonSettlementOutcome.STALE_QUERY
-                    : FubonSettlementOutcome.ROLLED_BACK, false, null);
+            return failed(owner.ownerId(), "STALE_QUERY".equals(rejected.getMessage()) ? FubonSettlementOutcome.STALE_QUERY
+                    : FubonSettlementOutcome.ROLLED_BACK, false);
         } catch (RuntimeException failure) {
-            return recorded(FubonSettlementOutcome.ROLLED_BACK, false, null);
+            return failed(owner.ownerId(), FubonSettlementOutcome.ROLLED_BACK, false);
         }
+    }
+
+    private SyncResult failed(long owner, FubonSettlementOutcome outcome, boolean dryRun) {
+        if (!dryRun && receipts != null) {
+            try { receipts.unavailable(owner, clock.instant(), outcome); }
+            catch (RuntimeException captureFailure) { log.warn("Fubon settlement receipt capture unavailable"); }
+        }
+        return recorded(outcome, dryRun, null);
     }
 
     private static FubonSettlementOutcome ownerOutcome(FubonSyncOwnerPort.Denial denial) {

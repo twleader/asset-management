@@ -6,6 +6,7 @@ import {
   canPreviewTradeReport,
   conflictReasonLabel,
   createTradeReportImportDraft,
+  feeProvenanceLabel,
   extractMessageIdHeader,
   getTradeReportConflictRows,
   importStatusLabel,
@@ -112,4 +113,28 @@ test('ALREADY_IMPORTED still needs explicit apply; conflicts never expose an app
 test('status labels make duplicate and conflict outcomes explicit', () => {
   assert.match(importStatusLabel('ALREADY_IMPORTED'), /待確認來源紀錄/)
   assert.match(importStatusLabel('CONFLICT'), /未寫入/)
+})
+
+test('fee provenance is a text-only display projection with exact backend as-of value', () => {
+  const asOf = '2026-11-17T03:04:05Z'
+  assert.equal(
+    feeProvenanceLabel({ status: 'DERIVED', asOf }),
+    `依官方交割與訂單資料推導（截至 ${asOf}），非原始郵件提供`
+  )
+  assert.match(feeProvenanceLabel({ status: 'DERIVED' }), /截至 時間未知/)
+  assert.match(feeProvenanceLabel({ status: 'RECORDED' }), /既有匯入記錄/)
+  assert.equal(feeProvenanceLabel(null), '')
+})
+
+test('UNAVAILABLE fee provenance shows a safe reason without creating a transaction conflict', () => {
+  const unavailable = { status: 'UNAVAILABLE', reason: 'SETTLEMENT_UNAVAILABLE' }
+  const preview = {
+    canApply: true,
+    conflictRows: [],
+    rows: [{ status: 'NEW', fee: null, transactionTax: null, feeProvenance: unavailable }]
+  }
+  assert.match(feeProvenanceLabel(unavailable), /最新官方交割資料不可用/)
+  assert.equal(getTradeReportConflictRows(preview).length, 0)
+  assert.equal(canApplyTradeReportPreview(preview), true)
+  assert.match(feeProvenanceLabel({ status: 'UNAVAILABLE', reason: 'UNRECOGNIZED' }), /官方交割／訂單證據不足/)
 })

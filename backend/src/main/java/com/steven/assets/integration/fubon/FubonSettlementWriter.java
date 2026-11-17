@@ -45,6 +45,10 @@ public class FubonSettlementWriter {
     private final FubonSettlementLedgerNoteReconciler noteReconciler;
     private final FubonPayableLedgerReconciler payableReconciler;
     private final Clock clock;
+    private FubonSettlementReceiptCapture receipts;
+
+    @Autowired
+    void receiptCapture(FubonSettlementReceiptCapture receipts) { this.receipts=receipts; }
 
     @Autowired
     public FubonSettlementWriter(AssetSnapshotMutationLock mutationLock, FubonSyncOwnerPort ownerPolicy,
@@ -134,12 +138,8 @@ public class FubonSettlementWriter {
                         net.signum() < 0 ? PAYABLE : RECEIVABLE, net, net.signum() < 0, verifiedNote);
             }
         }
-        if (!changed) {
-            return new CommitResult(false, projection.payableAmount(), projection.receivableAmount());
-        }
-
-        aggregates.recalculate(snapshot);
-        snapshots.saveAndFlush(snapshot);
+        FubonAccountingContract.fresh(observation.queryDate(), observation.observedAt(), clock);
+        if (receipts != null) receipts.verified(expectedOwnerId, observation);
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override public void beforeCommit(boolean readOnly) {
@@ -147,6 +147,12 @@ public class FubonSettlementWriter {
                 }
             });
         }
+        if (!changed) {
+            return new CommitResult(false, projection.payableAmount(), projection.receivableAmount());
+        }
+
+        aggregates.recalculate(snapshot);
+        snapshots.saveAndFlush(snapshot);
         return new CommitResult(true, projection.payableAmount(), projection.receivableAmount());
     }
 

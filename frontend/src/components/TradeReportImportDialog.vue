@@ -120,7 +120,14 @@
             <template #default="{ row }">{{ displayValue(row.amount) }}</template>
           </el-table-column>
           <el-table-column label="手續費" width="115" align="right">
-            <template #default="{ row }">{{ displayFeeOrTax(row.fee) }}</template>
+            <template #default="{ row }">
+              <div>{{ displayFeeOrTax(row.fee) }}</div>
+              <small
+                v-if="row.feeProvenance"
+                class="trade-import-provenance"
+                :class="{ 'is-unavailable': row.feeProvenance.status === 'UNAVAILABLE' }"
+              >{{ feeProvenanceLabel(row.feeProvenance) }}</small>
+            </template>
           </el-table-column>
           <el-table-column label="證交稅" width="115" align="right">
             <template #default="{ row }">{{ displayFeeOrTax(row.transactionTax) }}</template>
@@ -180,6 +187,7 @@ import {
   canPreviewTradeReport,
   conflictReasonLabel,
   createTradeReportImportDraft,
+  feeProvenanceLabel,
   getTradeReportConflictRows,
   importStatusLabel,
   invalidateTradeReportPreview,
@@ -399,6 +407,8 @@ watch(() => props.modelValue, (visible, wasVisible) => {
 .trade-import-hash code { overflow-wrap: anywhere; }
 .trade-import-alert { margin-top: 4px; }
 .trade-import-error { color: var(--el-color-danger); font-size: 12px; }
+.trade-import-provenance { display: block; color: var(--el-text-color-secondary); font-size: 11px; line-height: 1.4; white-space: normal; }
+.trade-import-provenance.is-unavailable { color: var(--el-color-warning); }
 .trade-import-conflicts { color: var(--el-color-danger); font-size: 13px; }
 .trade-import-conflicts ul { margin: 6px 0 0; padding-left: 22px; }
 .trade-import-conflicts li { margin: 4px 0; }

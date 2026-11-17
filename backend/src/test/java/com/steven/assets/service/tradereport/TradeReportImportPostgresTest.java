@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 @DataJpaTest(properties={"spring.jpa.hibernate.ddl-auto=create-drop","spring.liquibase.enabled=false"},showSql=false)
 @AutoConfigureTestDatabase(replace=AutoConfigureTestDatabase.Replace.NONE)
-@Import({AssetTransactionService.class,FubonTradeWriter.class,FubonSyncOwnerPolicy.class,FubonSyncOwnerDirectoryAdapter.class,JpaFubonSyncFreshness.class,TradeReportImportService.class,TradeReportParser.class,TradeReportLedgerGuard.class,JdbcTradeReportStore.class,TradeReportImportPostgresTest.Config.class})
+@Import({FubonSettlementReceiptRepository.class,FubonSettlementReceiptCapture.class,AssetTransactionService.class,FubonTradeWriter.class,FubonSyncOwnerPolicy.class,FubonSyncOwnerDirectoryAdapter.class,JpaFubonSyncFreshness.class,TradeReportImportService.class,TradeReportParser.class,TradeReportLedgerGuard.class,JdbcTradeReportStore.class,TradeReportImportPostgresTest.Config.class})
 @Testcontainers @Transactional(propagation=Propagation.NOT_SUPPORTED)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TradeReportImportPostgresTest {
@@ -47,9 +47,10 @@ class TradeReportImportPostgresTest {
  @MockitoSpyBean FubonSyncOwnerDirectoryAdapter directory;
  @Autowired AssetTransactionService manual; @Autowired FubonTradeWriter writer;
  @MockitoBean UserAdminService admins; @MockitoBean TransactionAssetClassService classification;
+ @MockitoSpyBean FubonSettlementReceiptStore settlements; @Autowired FubonSettlementReceiptCapture capture; @MockitoBean FubonSrppSourceStore orders;
  @MockitoBean TenantGuard tenant;@MockitoBean StockMasterService stocks;
  Long owner;
- @BeforeAll void schema()throws Exception{jdbc.execute(Files.readString(Path.of("src/main/resources/db/changelog/changes/v1.168.0-broker-trade-report-import.sql")));}
+ @BeforeAll void schema()throws Exception{jdbc.execute(Files.readString(Path.of("src/main/resources/db/changelog/changes/v1.168.0-broker-trade-report-import.sql")));jdbc.execute(Files.readString(Path.of("src/main/resources/db/changelog/changes/v1.169.0-fubon-settlement-receipt.sql")));}
  @BeforeEach void setup(){AppUser u=AppUser.builder().email(UUID.randomUUID()+"@example.invalid").name("synthetic").role("ADMIN").status("ACTIVE").build();owner=users.saveAndFlush(u).getId();if(brokers.findByCode("fubon").isEmpty())brokers.saveAndFlush(BrokerEntity.builder().code("fubon").displayName("富邦證券").active(true).build());doReturn(u.getEmail()).when(directory).syncOwnerEmail();when(admins.isConfiguredAdmin(u.getEmail())).thenReturn(true);
  when(classification.resolve(any(),any())).thenReturn(new TransactionAssetClassService.Classification(null,null,false));
  when(tenant.hasUser()).thenReturn(true);when(tenant.requireCurrentUserId()).thenReturn(owner);when(stocks.resolveNameLocalOnly("0050","台股")).thenReturn("測試ETF");}
@@ -115,5 +116,31 @@ class TradeReportImportPostgresTest {
    }
    assertThat(jdbc.queryForObject("select count(*) from broker_trade_report_receipt_line l join broker_trade_report_receipt r on r.id=l.receipt_id where r.owner_user_id=?",Integer.class,owner)).isEqualTo(1);
    assertThatThrownBy(()->jdbc.update("delete from broker_trade_report_receipt_line where receipt_id in (select id from broker_trade_report_receipt where owner_user_id=?)",owner)).hasMessageContaining("REPORT_EVIDENCE_IMMUTABLE");
+ }
+ @Test void savedFeeEvidenceSurvivesLatestFailureAndManualFeeEditConflicts(){
+   var imported=apply("fee-replay");long id=imported.rows().getFirst().transactionId();var saved=imported.rows().getFirst().feeProvenance();
+   when(settlements.latest(owner)).thenReturn(Optional.of(new FubonSettlementReceiptStore.Receipt(99,owner,TradeReportParserTest.DAY,java.time.Instant.now(),"UNAVAILABLE",null,"invalid",new ObjectMapper().createObjectNode(),"SETTLEMENT_UNAVAILABLE")));
+   var replay=service.preview(req("fee-alias",null));assertThat(replay.status()).isEqualTo("ALREADY_IMPORTED");assertThat(replay.rows().getFirst().feeProvenance()).isEqualTo(saved);
+   new TransactionTemplate(manager).execute(status->{guard.lock(owner);var ledger=tx.findById(id).orElseThrow();ledger.setFee(new BigDecimal("42"));tx.saveAndFlush(ledger);return null;});
+   assertThat(service.preview(req("fee-alias",null)).rows().getFirst().reason()).isEqualTo("LEDGER_CHANGED");assertThat(tx.findById(id).orElseThrow().getFee()).isEqualByComparingTo("42");
+ }
+ @ParameterizedTest @ValueSource(booleans={true,false}) void sourceAppendAndApplySerializeUnderSameOwner(boolean captureFirst)throws Exception{
+   String hash=service.preview(req("source-race",null)).previewHash();
+   CountDownLatch locked=new CountDownLatch(1),release=new CountDownLatch(1),started=new CountDownLatch(1);
+   org.mockito.stubbing.Answer<Object> pause=inv->{Object result=inv.callRealMethod();if(Thread.currentThread().getName().equals("first-source-writer")){locked.countDown();if(!release.await(10,TimeUnit.SECONDS))throw new AssertionError("timeout");}return result;};
+   doAnswer(pause).when(guard).lock(owner);doAnswer(pause).when(ownerPolicy).lockAndRevalidate(owner);
+   Runnable append=()->capture.unavailable(owner,java.time.Instant.now(),FubonSettlementOutcome.SETTLEMENT_FAILED);
+   Runnable importer=()->service.apply(req("source-race",hash));
+   try(var pool=Executors.newFixedThreadPool(2)){
+     var a=pool.submit(()->{Thread.currentThread().setName("first-source-writer");(captureFirst?append:importer).run();});
+     assertThat(locked.await(10,TimeUnit.SECONDS)).isTrue();
+     var b=pool.submit(()->{Thread.currentThread().setName("second-source-writer");started.countDown();try{(captureFirst?importer:append).run();return (Throwable)null;}catch(Throwable failure){return failure;}});
+     assertThat(started.await(5,TimeUnit.SECONDS)).isTrue();try{assertThatThrownBy(()->b.get(200,TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);}finally{release.countDown();}
+     a.get(15,TimeUnit.SECONDS);Throwable failure=b.get(15,TimeUnit.SECONDS);
+     if(captureFirst)assertThat(failure).isInstanceOf(TradeReportProblem.class).hasMessage("PREVIEW_HASH_MISMATCH");else assertThat(failure).isNull();
+   }finally{release.countDown();}
+   assertThat(settlements.latest(owner)).isPresent();
+   assertThat(jdbc.queryForObject("select count(*) from asset_transaction where owner_user_id=?",Integer.class,owner)).isEqualTo(captureFirst?0:1);
+   if(!captureFirst)assertThat(service.preview(req("source-race",null)).status()).isEqualTo("ALREADY_IMPORTED");
  }
 }

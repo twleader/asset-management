@@ -155,6 +155,28 @@ export function importStatusLabel(status) {
   })[status] || status || '—'
 }
 
+/** Text-only projection of backend fee provenance; never infers a fee or affects import eligibility. */
+export function feeProvenanceLabel(provenance) {
+  if (!provenance || typeof provenance !== 'object') return ''
+  if (provenance.status === 'DERIVED') {
+    const asOf = typeof provenance.asOf === 'string' && provenance.asOf.trim()
+      ? provenance.asOf
+      : '時間未知'
+    return `依官方交割與訂單資料推導（截至 ${asOf}），非原始郵件提供`
+  }
+  if (provenance.status === 'UNAVAILABLE') {
+    const reason = ({
+      ORDER_IDENTITY_UNVERIFIED: '無法唯一核對官方訂單',
+      SETTLEMENT_UNAVAILABLE: '最新官方交割資料不可用',
+      SETTLEMENT_AMBIGUOUS: '官方交割資料有歧義',
+      FEE_COMPONENTS_UNVERIFIED: '官方費用組成未能驗證'
+    })[provenance.reason] || '官方交割／訂單證據不足或無法驗證'
+    return `未能安全推導費用：${reason}`
+  }
+  if (provenance.status === 'RECORDED') return '既有匯入記錄，無官方推導證據'
+  return '費用來源狀態未提供'
+}
+
 export function conflictReasonLabel(reason) {
   return ({
     POSSIBLE_DUPLICATE: '帳本已有同日、同標的、同方向的其他交易，請先核對既有紀錄。',

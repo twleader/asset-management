@@ -166,4 +166,18 @@ class TradeReportImportBffTest {
             assertThat(mapper.readTree(controller.project("preview",200,json.getBytes()).getBody()).path("canApply").asBoolean()).isFalse();
         assertThat(controller.project("preview",200,"not-json".getBytes()).getStatusCode().value()).isEqualTo(502);
     }
+    @Test void feeProvenanceIsRenderedWithoutChangingEligibilityOrMoney() throws Exception {
+        var controller = new TradeReportImportBffController(WebClient.create());
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        for(String status : List.of("DERIVED","UNAVAILABLE","RECORDED")){
+            var report=mapper.createObjectNode().put("status","READY").put("previewHash","hash");
+            var row=report.putArray("rows").addObject().put("status","NEW");
+            row.putNull("fee");row.putNull("transactionTax");row.putNull("reason");
+            row.putObject("feeProvenance").put("status",status).put("reason","SETTLEMENT_UNAVAILABLE");
+            var actual=mapper.readTree(controller.project("preview",200,mapper.writeValueAsBytes(report)).getBody());
+            assertThat(actual.path("rows")).isEqualTo(report.path("rows"));
+            assertThat(actual.path("conflictRows").isEmpty()).isTrue();
+            assertThat(actual.path("canApply").asBoolean()).isTrue();
+        }
+    }
 }

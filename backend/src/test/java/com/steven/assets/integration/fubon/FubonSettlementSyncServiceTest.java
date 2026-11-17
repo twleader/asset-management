@@ -22,11 +22,13 @@ class FubonSettlementSyncServiceTest {
     private final FubonSyncOwnerPort owners = mock(FubonSyncOwnerPort.class);
     private final BrokerRepository brokers = mock(BrokerRepository.class);
     private final FubonSettlementWriter writer = mock(FubonSettlementWriter.class);
+    private final FubonSettlementReceiptCapture receipts = mock(FubonSettlementReceiptCapture.class);
     private final FubonSettlementOutcomeCounters counters = new FubonSettlementOutcomeCounters();
     private final FubonSettlementSyncService service = service(true);
 
     private FubonSettlementSyncService service(boolean enabled) {
-        return new FubonSettlementSyncService(config, client, owners, brokers, writer, counters, enabled, CLOCK);
+        var result = new FubonSettlementSyncService(config, client, owners, brokers, writer, counters, enabled, CLOCK);
+        result.receiptCapture(receipts); return result;
     }
 
     private void ready() {
@@ -174,5 +176,13 @@ class FubonSettlementSyncServiceTest {
         FubonSettlementSyncService.SyncResult result = service.syncManual(false);
         assertThat(result.outcome()).isEqualTo(FubonSettlementOutcome.SETTLEMENT_FAILED);
         assertThat(result.reason()).doesNotContain("raw-account-secret");
+    }
+    @Test void failedAttemptCapturedOnlyForRealSyncAndCaptureFailureDoesNotHideOutcome() {
+        ready();when(client.readSettlement()).thenReturn(null);
+        service.syncManual(true);verifyNoInteractions(receipts);
+        assertThat(service.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.SETTLEMENT_FAILED);
+        verify(receipts).unavailable(eq(9L),eq(CLOCK.instant()),eq(FubonSettlementOutcome.SETTLEMENT_FAILED));
+        doThrow(new IllegalStateException("synthetic-db-unavailable")).when(receipts).unavailable(anyLong(),any(),any());
+        assertThat(service.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.SETTLEMENT_FAILED);
     }
 }
