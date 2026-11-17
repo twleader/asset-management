@@ -209,6 +209,16 @@ export const bffApi = {
     classification: (params) => api.get('/bff/transaction/classification', { params, skipErrorToast: true }),
     list:        () => api.get('/bff/transaction'),
     lookupName:  (params) => api.get('/bff/transaction/lookup-name', { params, skipErrorToast: true }),  // 輸入代號自動帶股名，轉呼同一支 business /api/stock-alerts/lookup-name
+    // Task 601：專用 authenticated importer。兩支 exact POST 都帶局部同源保護標記；不走既有 transaction passthrough。
+    previewTradeReportImport: (data, { signal } = {}) => api.post('/bff/transaction/report-import/preview', data, {
+      headers: { 'Content-Type': 'application/json', 'X-Trade-Report-Import': '1' },
+      signal,
+      skipErrorToast: true
+    }),
+    applyTradeReportImport: (data) => api.post('/bff/transaction/report-import/apply', data, {
+      headers: { 'Content-Type': 'application/json', 'X-Trade-Report-Import': '1' },
+      skipErrorToast: true
+    }),
     // Task 251：依交易日期查匯率（轉呼同一支 business /api/market-data/exchange-rate/on-date）
     // 查無牌告時 BFF 回 200 {}；5xx／連線失敗才會走到呼叫端的 catch（頁面自己有欄位內提示，故抑制全域 toast）
     exchangeRate: (date) => api.get('/bff/transaction/exchange-rate', { params: { date }, skipErrorToast: true }),

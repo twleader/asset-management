@@ -21,6 +21,7 @@ public class FubonTradeWriter {
     private final FubonSyncOwnerPort ownerPolicy;
     private final BrokerRepository brokers;
     private final FubonSyncFreshness freshness;
+    private final com.steven.assets.service.tradereport.TradeReportLedgerGuard reportGuard;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, timeout = 30)
     public CommitResult insert(Long ownerId, Long expectedBrokerId, List<PreparedTrade> prepared) {
@@ -57,6 +58,9 @@ public class FubonTradeWriter {
                     || trade.amount().compareTo(FubonTradeContract.amount(trade.price(), trade.shares())) != 0) {
                 throw new WriteRejected(FubonTradeOutcome.TRADE_FAILED);
             }
+        }
+        for (PreparedTrade trade : batch) {
+            reportGuard.rejectEmailCollision(ownerId, trade.tradeDate(), trade.stockCode(), trade.transactionType(), "台股", "富邦證券", null);
         }
         int inserted = 0;
         int existing = 0;
