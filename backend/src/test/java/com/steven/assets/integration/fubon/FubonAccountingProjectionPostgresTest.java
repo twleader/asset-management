@@ -81,7 +81,7 @@ import static org.mockito.Mockito.*;
         "app.admin-email=sync-owner@example.invalid"
 })
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import({AssetSnapshotMutationLock.class, SnapshotAggregateCalculator.class, UserAdminService.class, AssetService.class,
+@Import({FubonSettlementReceiptCapture.class,com.steven.assets.repository.FubonSettlementReceiptRepository.class,AssetSnapshotMutationLock.class, SnapshotAggregateCalculator.class, UserAdminService.class, AssetService.class,
         FubonAccountingProjectionPostgresTest.Config.class})
 @Testcontainers
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -129,9 +129,12 @@ class FubonAccountingProjectionPostgresTest {
     @Autowired FubonSettlementSyncService settlementService;
     @Autowired FubonRealizedGainSyncService realizedService;
     @Autowired FubonSettlementWriter settlementWriter;
+    @Autowired FubonSettlementReceiptCapture receiptCapture;
     @Autowired FubonRealizedGainWriter realizedWriter;
     @Autowired MutableClock clock;
     @Autowired SqlTrace sqlTrace;
+    @Autowired com.steven.assets.service.fubon.FubonSettlementReceiptStore receipts;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
 
     private Long ownerId;
     private Long snapshotId;
@@ -144,6 +147,10 @@ class FubonAccountingProjectionPostgresTest {
         clearInvocations(aggregates);
         clock.set(NOW);
         sqlTrace.stop();
+        try {
+            jdbc.execute(java.nio.file.Files.readString(java.nio.file.Path.of("src/main/resources/db/changelog/changes/v1.169.0-fubon-settlement-receipt.sql")));
+            jdbc.execute("TRUNCATE TABLE fubon_settlement_receipt"); // isolated test DB only
+        } catch(java.io.IOException e) { throw new IllegalStateException(e); }
         tx(() -> {
             entityManager.createNativeQuery("DROP TRIGGER IF EXISTS reject_settlement_commit ON bank_deposit")
                     .executeUpdate();
@@ -191,6 +198,45 @@ class FubonAccountingProjectionPostgresTest {
         when(brokerClient.readRealizedGains()).thenReturn(FubonDtos.CallResult.success(realized()));
         when(stockNames.resolveNameLocalOnly("2330", "台股")).thenReturn("台積電");
         clearInvocations(aggregates);
+    }
+
+    @Test void receiptAppendWaitsForOwnerLockAndRejectsInactive() throws Exception {
+        var locked=new java.util.concurrent.CountDownLatch(1);var release=new java.util.concurrent.CountDownLatch(1);
+        var started=new java.util.concurrent.CountDownLatch(1);
+        try(var pool=Executors.newFixedThreadPool(2)) {
+            var holder=pool.submit(()->tx(()->{users.findByIdForUpdate(ownerId).orElseThrow();locked.countDown();try{if(!release.await(10,TimeUnit.SECONDS))throw new AssertionError("release timeout");}catch(InterruptedException e){throw new RuntimeException(e);}}));
+            assertThat(locked.await(5,TimeUnit.SECONDS)).isTrue();
+            var append=pool.submit(()->{started.countDown();receiptCapture.unavailable(ownerId,NOW,FubonSettlementOutcome.SETTLEMENT_FAILED);});
+            assertThat(started.await(5,TimeUnit.SECONDS)).isTrue();
+            try {org.assertj.core.api.Assertions.assertThatThrownBy(()->append.get(200,TimeUnit.MILLISECONDS)).isInstanceOf(java.util.concurrent.TimeoutException.class);assertThat(receipts.latest(ownerId)).isEmpty();}
+            finally {release.countDown();}
+            holder.get(10,TimeUnit.SECONDS);append.get(10,TimeUnit.SECONDS);
+        } finally {release.countDown();}
+        long id=receipts.latest(ownerId).orElseThrow().id();
+        tx(()->{var u=users.findByIdForUpdate(ownerId).orElseThrow();u.setStatus("DISABLED");users.saveAndFlush(u);});
+        org.assertj.core.api.Assertions.assertThatThrownBy(()->receiptCapture.unavailable(ownerId,NOW,FubonSettlementOutcome.SETTLEMENT_FAILED)).isInstanceOf(FubonSyncOwnerPort.Rejected.class);
+        assertThat(receipts.latest(ownerId).orElseThrow().id()).isEqualTo(id);
+    }
+
+    @Test void settlementReceiptCapturesNoChangeLatestFailureAndReapply() throws Exception {
+        when(brokerClient.readSettlement()).thenReturn(FubonDtos.CallResult.success(settlementWithBothDirections()));
+        assertThat(settlementService.syncManual(true).outcome()).isEqualTo(FubonSettlementOutcome.DRY_RUN);
+        assertThat(receipts.latest(ownerId)).isEmpty();
+        assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.SUCCESS);
+        var first=receipts.latest(ownerId).orElseThrow();
+        assertThat(first.status()).isEqualTo("VERIFIED");
+        assertThat(first.payloadHash()).isEqualTo(com.steven.assets.srpp.SrppJcs.hash(first.payload()));
+        assertThat(first.payload().path("details").get(0).path("buyValue").isTextual()).isTrue();
+        assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.SUCCESS);
+        assertThat(receipts.latest(ownerId).orElseThrow().id()).isGreaterThan(first.id());
+        when(brokerClient.readSettlement()).thenReturn(null);
+        assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.SETTLEMENT_FAILED);
+        var failed=receipts.latest(ownerId).orElseThrow();assertThat(failed.status()).isEqualTo("UNAVAILABLE");
+        String sql=java.nio.file.Files.readString(java.nio.file.Path.of("src/main/resources/db/changelog/changes/v1.169.0-fubon-settlement-receipt.sql"));
+        jdbc.execute(sql);jdbc.execute(sql);
+        assertThat(receipts.latest(ownerId).orElseThrow().id()).isEqualTo(failed.id());
+        org.assertj.core.api.Assertions.assertThatThrownBy(()->jdbc.update("DELETE FROM fubon_settlement_receipt WHERE id=?",failed.id())).hasMessageContaining("SETTLEMENT_RECEIPT_IMMUTABLE");
+        org.assertj.core.api.Assertions.assertThatThrownBy(()->jdbc.update("UPDATE fubon_settlement_receipt SET reason='x' WHERE id=?",failed.id())).hasMessageContaining("SETTLEMENT_RECEIPT_IMMUTABLE");
     }
 
     @Test
@@ -360,6 +406,8 @@ class FubonAccountingProjectionPostgresTest {
                     .executeUpdate();
         });
         assertThat(settlementService.syncManual(false).outcome()).isEqualTo(FubonSettlementOutcome.ROLLED_BACK);
+        assertThat(receipts.latest(ownerId).orElseThrow().status()).isEqualTo("UNAVAILABLE");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM fubon_settlement_receipt WHERE owner_user_id=? AND status='VERIFIED'",Integer.class,ownerId)).isZero();
         readSnapshot(snapshot -> {
             assertThat(transit(snapshot, PAYABLE)).hasSize(1);
             var row = transit(snapshot, PAYABLE).getFirst();
@@ -1078,6 +1126,8 @@ class FubonAccountingProjectionPostgresTest {
 
     @TestConfiguration
     static class Config {
+        @Bean org.springframework.jdbc.core.JdbcTemplate receiptJdbc(javax.sql.DataSource ds) { return new org.springframework.jdbc.core.JdbcTemplate(ds); }
+        @Bean com.fasterxml.jackson.databind.ObjectMapper receiptMapper() { return new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules(); }
         @Bean MutableClock accountingClock() { return new MutableClock(); }
         @Bean SqlTrace sqlTrace() { return new SqlTrace(); }
         @Bean HibernatePropertiesCustomizer tracing(SqlTrace trace) {
