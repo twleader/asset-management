@@ -37,9 +37,14 @@ public record SrppPolicyDocument(JsonNode document, SortedMap<String, BigDecimal
         if (!root.isObject()) throw new IllegalArgumentException("POLICY_NOT_OBJECT");
         Set<String> keys = new java.util.HashSet<>();
         root.fieldNames().forEachRemaining(keys::add);
-        if (!keys.equals(Set.of("schema", "targets"))) throw new IllegalArgumentException("POLICY_KEYS_INVALID");
+        boolean dynamic = SrppReserveAllocation.SCHEMA.equals(root.path("schema").asText());
+        if (!keys.equals(dynamic ? Set.of("schema", "targets", "targetSemantics", "reserveAllocation") : Set.of("schema", "targets"))) throw new IllegalArgumentException("POLICY_KEYS_INVALID");
+        if (dynamic) {
+            if (!root.path("targetSemantics").isTextual() || !SrppReserveAllocation.SEMANTICS.equals(root.path("targetSemantics").asText())) throw new IllegalArgumentException("POLICY_TARGET_SEMANTICS_INVALID");
+            SrppReserveAllocation.validateDocumentConfig(root.path("reserveAllocation"));
+        }
         JsonNode schema = root.get("schema");
-        if (!schema.isTextual() || !SCHEMA.equals(schema.textValue())) {
+        if (!schema.isTextual() || !(SCHEMA.equals(schema.textValue()) || dynamic)) {
             throw new IllegalArgumentException("POLICY_SCHEMA_INVALID");
         }
         JsonNode targets = root.get("targets");

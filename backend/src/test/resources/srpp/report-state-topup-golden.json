@@ -728,10 +728,10 @@
         "verified": true
       },
       "expected": {
-        "bondAllowance": "2000000",
+        "bondAllowance": "3000000",
         "eligible": true,
         "growingFill": true,
-        "ladderAmount": "240000",
+        "ladderAmount": "280000",
         "nextBatch": 0
       },
       "kind": "ladder",
@@ -743,11 +743,11 @@
         "active": true,
         "bondsSold": "0",
         "budget": [
-          "240000",
-          "360000",
-          "600000",
-          "750000",
-          "1050000"
+          "280000",
+          "420000",
+          "700000",
+          "875000",
+          "1225000"
         ],
         "fills": [
           0,
@@ -769,7 +769,7 @@
           "0"
         ],
         "verified": true,
-        "windowBudget": "3000000"
+        "windowBudget": "3500000"
       },
       "event": {
         "availableCash": 1000000,
@@ -786,10 +786,10 @@
         "verified": true
       },
       "expected": {
-        "bondAllowance": "2000000",
+        "bondAllowance": "3000000",
         "eligible": true,
         "growingFill": true,
-        "ladderAmount": "240000",
+        "ladderAmount": "280000",
         "nextBatch": 0
       },
       "kind": "ladder",
@@ -801,11 +801,11 @@
         "active": true,
         "bondsSold": "0",
         "budget": [
-          "240000",
-          "360000",
-          "600000",
-          "750000",
-          "1050000"
+          "280000",
+          "420000",
+          "700000",
+          "875000",
+          "1225000"
         ],
         "fills": [
           0,
@@ -827,7 +827,7 @@
           "0"
         ],
         "verified": true,
-        "windowBudget": "3000000"
+        "windowBudget": "3500000"
       },
       "event": {
         "availableCash": 1000000,
@@ -839,7 +839,7 @@
           {
             "bondSale": 0,
             "confirmed": true,
-            "deployed": "192000",
+            "deployed": "224000",
             "rung": 0,
             "session": 10
           }
@@ -852,7 +852,7 @@
         "verified": true
       },
       "expected": {
-        "bondAllowance": "2000000",
+        "bondAllowance": "3000000",
         "eligible": false,
         "growingFill": false,
         "ladderAmount": "0",
@@ -867,11 +867,11 @@
         "active": true,
         "bondsSold": "0",
         "budget": [
-          "240000",
-          "360000",
-          "600000",
-          "750000",
-          "1050000"
+          "280000",
+          "420000",
+          "700000",
+          "875000",
+          "1225000"
         ],
         "fills": [
           1,
@@ -882,18 +882,18 @@
         ],
         "highWaterGain": 0,
         "initialBonds": "3000000",
-        "lastAmount": "192000",
+        "lastAmount": "224000",
         "lastFill": 10,
         "pendingClose": false,
         "spent": [
-          "192000",
+          "224000",
           "0",
           "0",
           "0",
           "0"
         ],
         "verified": true,
-        "windowBudget": "3000000"
+        "windowBudget": "3500000"
       },
       "event": {
         "availableCash": 1000000,
@@ -910,10 +910,10 @@
         "verified": true
       },
       "expected": {
-        "bondAllowance": "2000000",
+        "bondAllowance": "3000000",
         "eligible": true,
         "growingFill": true,
-        "ladderAmount": "360000",
+        "ladderAmount": "420000",
         "nextBatch": 1
       },
       "kind": "ladder",
@@ -925,11 +925,11 @@
         "active": true,
         "bondsSold": "0",
         "budget": [
-          "240000",
-          "360000",
-          "600000",
-          "750000",
-          "1050000"
+          "280000",
+          "420000",
+          "700000",
+          "875000",
+          "1225000"
         ],
         "fills": [
           1,
@@ -940,18 +940,18 @@
         ],
         "highWaterGain": 0,
         "initialBonds": "3000000",
-        "lastAmount": "192000",
+        "lastAmount": "224000",
         "lastFill": 10,
         "pendingClose": false,
         "spent": [
-          "192000",
+          "224000",
           "0",
           "0",
           "0",
           "0"
         ],
         "verified": true,
-        "windowBudget": "3000000"
+        "windowBudget": "3500000"
       },
       "event": {
         "availableCash": 1000000,
@@ -968,7 +968,7 @@
         "verified": true
       },
       "expected": {
-        "bondAllowance": "2000000",
+        "bondAllowance": "3000000",
         "eligible": false,
         "growingFill": false,
         "ladderAmount": "0",
@@ -1037,7 +1037,7 @@
       "expectedRoom": "49994.8349086185",
       "feeRate": "0.001425",
       "group": 1400000,
-      "groupCap": "0.15",
+      "groupCap": "0.17",
       "kind": "topupRoom",
       "name": "1400000",
       "targetWeight": "0.0725",
@@ -1048,7 +1048,7 @@
       "expectedRoom": "9998.9669817237",
       "feeRate": "0.001425",
       "group": 1440000,
-      "groupCap": "0.15",
+      "groupCap": "0.17",
       "kind": "topupRoom",
       "name": "1440000",
       "targetWeight": "0.0725",
@@ -1059,7 +1059,7 @@
       "expectedRoom": "0",
       "feeRate": "0.001425",
       "group": 1450000,
-      "groupCap": "0.15",
+      "groupCap": "0.17",
       "kind": "topupRoom",
       "name": "1450000",
       "targetWeight": "0.0725",
@@ -1102,7 +1102,7 @@
   ],
   "originalCalculatorHashes": {
     "bear_ladder.py": "fd32d2655df96bcff2a006db136c711bd7830c004403abf2565e8e65bc40eb81",
-    "execution_policy.py": "8a6aa8f4a36c23fcd0edc371640e369538abbf8fadfad2c248b286eae11022aa",
+    "execution_policy.py": "66a86a9716acaf564fe76c23ac7f1e64964fd84a14f2eee4e748830257cfc4d1",
     "transition_ledger.py": "5760f96ee5c68e47a15fc44e62ef0c3dbfea6e2b86d9dbb8fb86081a908810d1"
   },
   "schema": "SRPP_STATE_TOPUP_GOLDEN_V1"

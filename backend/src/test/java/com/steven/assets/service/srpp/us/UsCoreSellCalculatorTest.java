@@ -38,6 +38,12 @@ class UsCoreSellCalculatorTest {
         assertThat(actual.path("results").get(0).path("status").asText()).isEqualTo("CORE_SELL_READY");
         assertThat(actual.path("stateBefore").path("GOOGL").path("high_water").asText()).isEqualTo("100");
     }
+    @Test void d222ProductionCorePathBlocksUnselectedVooButKeepsUnrelatedCoreTiming() throws Exception {
+        JsonNode all=fixture(),sample=all.path("core").get(0);ObjectNode model=all.path("model").deepCopy();((ObjectNode)model.path("execution_policy")).putObject("reserve_allocation_d222").put("enabled",true);
+        ObjectNode unrelated=UsCoreSellCalculator.calculate(sample.path("input"),model,sample.path("ledger"),"Codex");assertThat(unrelated.path("results").get(0).path("status").asText()).isEqualTo("CORE_SELL_READY");
+        JsonNode voo=M.readTree(sample.toString().replace("GOOGL","VOO"));ObjectNode blocked=UsCoreSellCalculator.calculate(voo.path("input"),model,voo.path("ledger"),"Codex");
+        assertThat(blocked.path("results").get(0).path("timing_pass").asBoolean()).isFalse();assertThat(blocked.path("results").get(0).path("reason").asText()).isEqualTo("D222_MARKET_SELECTION_REQUIRED");assertThat(blocked.path("reasonCodes").toString()).contains("D222_MARKET_SELECTION_REQUIRED");
+    }
     private static void assertEquivalent(JsonNode expected, JsonNode actual, String path) {
         if (expected.isNumber()) { assertThat(actual.isNumber() || actual.isTextual()).as(path).isTrue(); assertThat(new java.math.BigDecimal(actual.asText())).as(path).isEqualByComparingTo(new java.math.BigDecimal(expected.asText())); return; }
         if (expected.isObject()) { Set<String> names = new TreeSet<>(); expected.fieldNames().forEachRemaining(names::add); Set<String> actualNames = new TreeSet<>(); actual.fieldNames().forEachRemaining(actualNames::add); assertThat(actualNames).as(path).isEqualTo(names); for (String key : names) assertEquivalent(expected.get(key), actual.get(key), path + "." + key); return; }

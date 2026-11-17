@@ -945,7 +945,7 @@ def run(m, allocation, simulations, seed, guardrail, initial_total=None,
                     bear_sale_tax = (0. if start <= dt.date(2026,12,31) else .001) if deduct_costs else 0.
                     sale_fee = (.001425 + bear_sale_tax) if deduct_costs else 0.
                     buy_fee = .001425 if deduct_costs else 0.
-                    bond_room = np.maximum(assets[:, 1] - .10 * total, 0)
+                    bond_room = np.maximum(assets[:, 1] - m.BOND_TOTAL_ASSET_FLOOR * total, 0)
                     sale = np.minimum(np.maximum(requested - cash_used, 0),
                         np.minimum(bear_ladder.bond_allowance(), bond_room))
                     sale = np.minimum(sale, np.where(eligible, values, 0).sum(axis=1))

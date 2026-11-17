@@ -1,6 +1,6 @@
 {
-  "model_version": "3.24.0",
-  "policy_version": "2.69.0",
+  "model_version": "3.25.0",
+  "policy_version": "2.70.0",
   "base_currency": "TWD at August 2026 purchasing power",
   "simulation_count": 100000,
   "distribution": "multivariate Student-t",
@@ -43,7 +43,7 @@
     "equity": 0.5653,
     "bond_etfs": 0.2647,
     "cash_like_including_term_deposits_and_reserve": 0.17,
-    "model_mapping_note": "Cash-like has a 17% strategic allocation target only. Live TWD purchase funding is a separate D-193 post-purchase gate: daily elapsed-time indexed 2026-08-real TWD 800K emergency term deposits and TWD 1.55M total TWD deposits; the other 800K emergency target is Taiwan-listed 00865B in a separate reserve sub-ledger and is not a bank deposit."
+    "model_mapping_note": "D-222: these numeric weights are a reference baseline only, not final executable targets. Replace the former fixed 17% with indexed living term 1.5M + demand 0.75M + emergency term 0.8M + separately labelled emergency 00865B 0.8M. Both excess and shortfall against reference 17% require an explicit same-round market-based VOO/0050/00881 allocation; never assume a split. Use reserve_allocation.project_targets; never assume a split. Emergency ETF counted once outside strategic 00865B."
   },
   "global_equity_wrapper_assumptions": {
     "decision": "D-143",
@@ -53,15 +53,15 @@
     "009826_custody_fee_current_tier": 0.0012,
     "009826_current_recurring_fee_total": 0.0057,
     "009826_incremental_fee_vs_VT": 0.0051,
-    "009826_target_weight_total_assets": 0.025,
+    "009826_target_weight_total_assets": 0.0216666667,
     "equity_bucket_weight": 0.5653,
-    "target_weighted_equity_wrapper_drag": 0.00022554395895984435,
-    "core_real_compound_return_before_wrapper_overlay": 0.03480532871526343,
-    "base_real_compound_return_after_wrapper_overlay": 0.034579784756303585,
+    "target_weighted_equity_wrapper_drag": 0.00019547143139925704,
+    "core_real_compound_return_before_wrapper_overlay": 0.03474189368900782,
+    "base_real_compound_return_after_wrapper_overlay": 0.03454642225760856,
     "low_core_real_compound_return_before_wrapper_overlay": 0.015,
     "high_core_real_compound_return_before_wrapper_overlay": 0.06,
-    "low_real_compound_return_after_wrapper_overlay": 0.014774456041040156,
-    "high_real_compound_return_after_wrapper_overlay": 0.059774456041040154,
+    "low_real_compound_return_after_wrapper_overlay": 0.014804528568600742,
+    "high_real_compound_return_after_wrapper_overlay": 0.05980452856860074,
     "forward_return_assumptions": {
       "decision": "D-192",
       "forecast_horizon_years": 10,
@@ -126,7 +126,7 @@
         },
         {
           "asset_class": "Global equity proxy",
-          "portfolio_weight_total_assets": 0.05,
+          "portfolio_weight_total_assets": 0.0466666667,
           "nominal_return": 0.069,
           "estimator": "Median of five closely aligned global or international-equity institution estimates; source universes differ slightly.",
           "institution_estimates": [
@@ -171,7 +171,7 @@
         },
         {
           "asset_class": "Taiwan equity proxy",
-          "portfolio_weight_total_assets": 0.3153,
+          "portfolio_weight_total_assets": 0.3186333333,
           "nominal_return": 0.058,
           "estimator": "Single current Taiwan-specific institutional estimate; not a forecast for 00881 itself.",
           "institution_estimates": [
@@ -187,14 +187,15 @@
           "proxy_note": "Broad Taiwan equity is used for 0050, 00881 and the Taiwan dividend ETFs because institution sources do not publish a comparable long-term 00881 forecast. The model does not isolate Taiwan technology risk."
         }
       ],
-      "weighted_nominal_return": 0.058088448611356806,
-      "weighted_real_return_before_wrapper_overlay": 0.03480532871526343,
+      "weighted_nominal_return": 0.05802358629701044,
+      "weighted_real_return_before_wrapper_overlay": 0.03474189368900782,
       "real_return_formula": "(1 + weighted_nominal_return) / (1 + inflation_midpoint) - 1",
       "wrapper_overlay_treatment": "The existing target-weighted 009826 versus VT disclosed fee gap is deducted separately. Other individual ETF expenses are not separately modeled in this single-factor forward-return input.",
       "inflation_conversion_policy": "Nominal institution forecasts are converted to a real return at the 2.25% midpoint. The retirement engine operates in 2026-08 real purchasing power and simulates annual CPI separately from 2.0% to 2.5%; the CPI path changes real spending and nominal cash/bond conversions but does not rescale the real equity return each year. This means nominal realized equity returns implicitly move with CPI, while the equity-inflation correlation is not separately modeled.",
       "methodology_limitation": "Institution forecasts are not all published on the same date, for the same benchmark universe, or with the same arithmetic/geometric convention. Medians and the target-weighted composite are a transparent planning proxy, not a harmonized consensus or a point-precise forecast.",
       "model_limitation": "The retirement engine applies one shared equity market factor. This target-weighted mean is a portfolio-level planning assumption at the accepted allocation; it cannot estimate the success-rate effect, separate volatility or correlation of replacing VOO with 00881.",
-      "long_horizon_limitation": "Institutional forecasts cover roughly 10 years. Applying the weighted central estimate beyond that horizon is a planning assumption, not an institution forecast for the full retirement horizon."
+      "long_horizon_limitation": "Institutional forecasts cover roughly 10 years. Applying the weighted central estimate beyond that horizon is a planning assumption, not an institution forecast for the full retirement horizon.",
+      "d222_limitation": "Reference-weighted forecast only. Dynamic reserve allocation and any explicit market-based reductions must be projected before a formal target simulation; this reference estimate is not a current final-allocation forecast."
     },
     "tax_offset_treatment": "Do not estimate an unverified offset for 009826's possible avoidance of a second U.S. withholding layer on ex-U.S. dividends. Use the full disclosed fee gap as a conservative forward overlay until the fund has sufficient live tracking-difference and tax evidence.",
     "historical_proxy_treatment": "The ten-year 009826 row remains an explicitly labeled VT history proxy and is not altered by the forward wrapper overlay.",
@@ -214,7 +215,7 @@
     }
   },
   "detailed_target_allocation_2027": {
-    "009826": 0.025,
+    "009826": 0.0216666667,
     "VOO": 0.2,
     "VT": 0.025,
     "0050": 0.12,
@@ -222,7 +223,7 @@
     "00713": 0.0433333333,
     "0056": 0.0325,
     "00878": 0.0325,
-    "00919": 0.0216666667,
+    "00919": 0.025,
     "00865B": 0.025,
     "00719B": 0.1997,
     "SGOV": 0.02,
@@ -234,7 +235,7 @@
     "00751B": 0.0
   },
   "zero_target_do_not_rebuy": {
-    "note": "D-143 retains the D-109 Taiwan buy whitelist: 0050, 00881, 0056, 00878, 00713, 00919, 009826, 00865B, 00719B and 00697B. Other Taiwan securities remain zero-target and do-not-rebuy. The U.S. strategic purchase whitelist is VOO, VT and SGOV (D-185 lifted SGOV's prior no-new-purchase restriction; see sgov_new_purchase_policy_d185). The high-dividend group includes all four of 00713, 0056, 00878 and 00919, with aggregate target 13% and hard cap 15%. 00919 is not a zero-target exit or prohibited rebuy; retaining it does not authorize an immediate purchase, a new scheduled contribution or ignoring excess exposure.",
+    "note": "D-143 retains the D-109 Taiwan buy whitelist: 0050, 00881, 0056, 00878, 00713, 00919, 009826, 00865B, 00719B and 00697B. Other Taiwan securities remain zero-target and do-not-rebuy. The U.S. strategic purchase whitelist is VOO, VT and SGOV (D-185 lifted SGOV's prior no-new-purchase restriction; see sgov_new_purchase_policy_d185). The high-dividend group includes all four of 00713, 0056, 00878 and 00919, with aggregate target 13.33333333% and hard cap 17%. 00919 is not a zero-target exit or prohibited rebuy; retaining it does not authorize an immediate purchase, a new scheduled contribution or ignoring excess exposure.",
     "zero_target": [
       "006208",
       "00679B",
@@ -405,8 +406,8 @@
         "10-15"
       ],
       "bear_window": "D-202 per market: TWSE capitalization-weighted index for Taiwan-listed buys, S&P 500 for VOO. A market's window opens when its benchmark's latest completed close is at least 15% below its 24-month highest close, below its 200-session simple MA200, and RISK_OFF (close below MA200 and MA200 below its level 20 sessions earlier). Only legs of an open market may buy; the other market's share stays cash.",
-      "bear_action": "When the verified bear window holds, up to two-thirds of eligible bond ETFs may be sold and invested in stock ETFs after all costs, following the D-180 order: high-dividend back to its 13% target first, then all remaining proceeds into VOO and 0050 at 4:1. TWD funding may use only amounts that leave the daily elapsed-time indexed 2026-08-real TWD 800K emergency term-deposit and TWD 1.55M total-deposit floors intact; up to the daily elapsed-time indexed 2026-08-real TWD 1.5M living-reserve component may contribute, while its TWD 750K floor and all-bank USD earmarked for VOO remain protected. The emergency reserve is never tactical funding.",
-      "bear_tactical_cap": "No fixed amount. The maximum candidate pool is refreshed from /api/assets/latest and includes no more than two-thirds of bond ETFs; it is not a forced trade amount.",
+      "bear_action": "When the verified bear window holds, up to the capacity above the 3% non-emergency bond floor of eligible bond ETFs may be sold and invested in stock ETFs after all costs, following the D-180 order: high-dividend back to its 13.33333333% target first, then all remaining proceeds into VOO and 0050 at 4:1. TWD funding may use only amounts that leave the daily elapsed-time indexed 2026-08-real TWD 800K emergency term-deposit and TWD 1.55M total-deposit floors intact; up to the daily elapsed-time indexed 2026-08-real TWD 1.5M living-reserve component may contribute, while its TWD 750K floor and all-bank USD earmarked for VOO remain protected. The emergency reserve is never tactical funding.",
+      "bear_tactical_cap": "No fixed amount. The maximum candidate pool is refreshed from /api/assets/latest and includes non-emergency bond ETF capacity above 3% of total assets; it is not a forced trade amount.",
       "bull_high_window": "D-202: the benchmark of the proposed stock's listing market (TWSE for Taiwan-listed holdings including 009826; S&P 500 for VOO and VT) and the proposed stock both at or above MA200, MA200 not below its level 20 sessions earlier, week52Position >= 0.95, benchmark drawdown from its 24-month high < 20% and not RISK_OFF; week52Position and short-term overheat qualify initial arming only, not an already-armed pullback tranche; market benchmark, price, radar, funding, capacity, cooldown and other hard gates still apply.",
       "bull_action": "D-156 profit capture: the trend-confirmation and short-term-overheat gates arm, but do not immediately sell, five growing tranches (8/12/20/25/35% of one locked release budget). Let a verified same-basis high-water mark rise while the trend continues; each tranche requires both its gain-above-anchor rung (15/20/25/30/35%) and a subsequent high-water pullback rung (3/4/5/6/8%). Refill the three-year living reserve to its ceiling first, then buy eligible below-target bonds with the remainder.",
       "daily_bull_profit_capture_d156": {
@@ -525,7 +526,7 @@
         "0056": 0.0325,
         "00713": 0.0433333333
       },
-      "aggregate_policy": "D-141: include 00919 in the four-fund 15% hard cap; every purchase must fit after fees. No 00919 scheduled contribution is authorized and existing monthly amounts are unchanged.",
+      "aggregate_policy": "D-141: include 00919 in the four-fund 17% hard cap; every purchase must fit after fees. No 00919 scheduled contribution is authorized and existing monthly amounts are unchanged.",
       "restart": "never automatic after an instruction stops; requires a new Accepted decision"
     },
     "review_governance_d115": {
@@ -544,7 +545,7 @@
     },
     "post_retirement_daily_rebalancing_d116": {
       "reports_continue": true,
-      "bear_action": "daily reports may recommend a small D-130 buy tranche when the verified bear window, allocation capacity and all hard gates pass; at most two-thirds of bond ETFs are eligible and stock purchases follow the D-180 order: high-dividend to its 13% target first, then VOO and 0050 at 4:1; the system does not place orders",
+      "bear_action": "daily reports may recommend a small D-130 buy tranche when the verified bear window, allocation capacity and all hard gates pass; up to the capacity above the 3% non-emergency bond floor of bond ETFs are eligible and stock purchases follow the D-180 order: high-dividend to its 13.33333333% target first, then VOO and 0050 at 4:1; the system does not place orders",
       "bull_action": "daily reports may recommend the next D-156 profit-capture tranche only after its gain rung is armed and a verified pullback from the ratcheted high-water mark occurs; new highs are held rather than sold immediately, and all over-allocation, evidence, radar, liquidity, limit-price and capacity gates still apply",
       "changes_targets": false,
       "places_orders": false
@@ -570,40 +571,41 @@
       "observation_only_through": "2026-10-31",
       "earliest_buy_date": "2026-11-02",
       "earliest_buy_date_requires_tw_true": true,
-      "target_and_purchase_cap": 0.025,
+      "target_and_purchase_cap": 0.0216666667,
       "passive_drift_forces_sale": false,
       "overflow_candidates": [
         "VT",
         "00713"
       ],
-      "overflow_rule": "Stop new 009826 purchases at 2.5% (D-214; 5% before 2026-11-13). If passive drift leaves it above 2.5%, trim only when 009826 is high/overbought and the same-round approved buyer is below target, low/oversold and has capacity; VT is the preferred global-core buyer, while 00713 may be used only when the accepted high-dividend allocation also needs it."
+      "overflow_rule": "Stop new 009826 purchases at 2.16666667% (D-214; 5% before 2026-11-13). If passive drift leaves it above 2.16666667%, trim only when 009826 is high/overbought and the same-round approved buyer is below target, low/oversold and has capacity; VT is the preferred global-core buyer, while 00713 may be used only when the accepted high-dividend allocation also needs it."
     },
     "global_equity_wrapper_policy_d141": {
       "decision": "D-180",
-      "global_equity_target": 0.25,
+      "global_equity_target": 0.2466666667,
       "VOO_target": 0.2,
       "VOO_lower_band": 0.17,
       "VOO_upper_band": 0.23,
-      "009826_target_and_purchase_cap": 0.025,
+      "009826_target_and_purchase_cap": 0.0216666667,
       "009826_forced_sale_on_passive_drift": false,
       "VT_target": 0.025,
       "VT_lower_band": 0.015,
       "VT_upper_band": 0.035,
       "VOO_role": "Primary global-equity core. Continue existing USD installments using all-bank USD deposits; separate strategic purchases may use Cathay TWD sub-brokerage only from eligible excess cash or a verified stock-rotation reserve and only when radar, valuation, FX, price and settlement evidence are compatible.",
       "VT_role": "Existing position retained as a secondary global-diversification satellite (developed ex-US and emerging-market exposure that VOO does not carry). No new strategic build; ordinary rebalancing, withdrawals and the age-70-to-80 disposal window apply.",
-      "009826_role": "Taiwan-listed accumulating satellite only. No purchase before 2026-11-02; stop new buying at 2.5% (D-214). Passive market drift above 2.5% is reported and may be trimmed only at a favorable high, never by selling low solely to restore the cap. 009826 is paired with VT (not VOO) below because both are global all-cap total-world index funds; VOO is a separate US-only S&P 500 holding and was never part of this fund-family pair (D-139).",
+      "009826_role": "Taiwan-listed accumulating satellite only. No purchase before 2026-11-02; stop new buying at 2.16666667% (D-214). Passive market drift above 2.16666667% is reported and may be trimmed only at a favorable high, never by selling low solely to restore the cap. 009826 is paired with VT (not VOO) below because both are global all-cap total-world index funds; VOO is a separate US-only S&P 500 holding and was never part of this fund-family pair (D-139).",
       "fx_direction": "Both wrappers are unhedged global-equity exposure: TWD strength is favorable for buying and adverse for selling; TWD weakness is favorable for selling. FX is a timing input, never a sole trigger.",
       "estate_tax_role": "Excluded from allocation optimization, purchase caps and trade gates at the user's direction; it may be disclosed factually but cannot reduce VOO or force a sale.",
       "execution": "Prefer same-round high-to-low rotations from qualified zero-target or over-limit sellers into VOO or 009826. Do not sell low, buy high, chase a deadline, or treat the large VOO gap as an order.",
       "review": "Refresh wrapper fees, fund size, spread, tracking difference, internal withholding evidence, Cathay fees and tax law at each semiannual review.",
       "global_pair_note": "This pair is 009826+VT specifically (same global all-cap fund family per D-139/D-141), independent of which of VOO/VT currently holds the larger 'primary core' target. It does not become 009826+VOO after D-180's role swap.",
-      "global_pair_target": 0.05,
+      "global_pair_target": 0.0466666667,
       "within_pair_weights": {
-        "009826": 0.5,
-        "VT": 0.5
+        "009826": 0.4642857142857143,
+        "VT": 0.5357142857142857
       },
-      "global_equity_group_floor": 0.22,
-      "global_equity_group_cap": 0.28
+      "global_equity_group_floor": 0.2166666667,
+      "global_equity_group_cap": 0.2766666667,
+      "dynamic_target_source": "execution_policy.reserve_allocation_d222; reference bands shift by the projected VOO target delta, no fixed global target fallback"
     },
     "global_equity_build_cadence_d141": {
       "decision": "D-180",
@@ -655,11 +657,11 @@
         "window": "2026-11-02 to 2027-06-30",
         "monthly_baseline_twd": 140000,
         "monthly_cap_twd": 210000,
-        "max_lots_per_week": 3,
-        "stop_at_weight": 0.025,
+        "max_lots_per_week": 6,
+        "stop_at_weight": 0.0216666667,
         "earliest_buy_date": "2026-11-02",
         "earliest_buy_date_requires_tw_true": true,
-        "max_lots_per_day": 1,
+        "max_lots_per_day": 3,
         "lot_note": "Whichever binds first: 3 lots per verified Taiwan trading week, 1 lot per day, and the 210,000 TWD monthly cap. Lot count depends on the prevailing price, the TWD cap governs.",
         "build_clarification": "2026-11-02 clarification of D-143; no cadence number changed.",
         "tool": "execution_policy.py --global-build-009826",
@@ -688,7 +690,7 @@
       "precedence": "Inside the rotation window through 2028-06-30 the 40% floor governs. Equity between 40% and 50% is a disclosed rotation state, not an ordinary band breach, and does not create an obligation to buy back. The 20-session forced deployment of STOCK_ROTATION_RESERVE still applies and is the mechanism that returns equity toward target. From 2027-07-01 the ordinary 50%-60% band resumes only for paths whose full managed rotation subset is reconciled; this is not full-funds completion; from 2028-07-01 it governs entirely."
     },
     "two_track_consistency_d144": {
-      "decision": "D-221",
+      "decision": "D-222",
       "purpose": "Three under-specified rules let the Claude and Codex tracks produce different lot counts from an identical policy bundle on 2026-09-04 09:30. Each is now a boolean the rule scanner asserts, so neither track can reintroduce its own reading.",
       "single_stock_batch_per_day": false,
       "single_stock_batch_per_day_note": "There is NO one-stock-per-trading-day limit and no 'earlier completion date first, others deferred' rule. Every symbol that independently clears the D-101 trigger and all section 6.8 hard gates becomes its own executable line on the same day. Only shared capacity (post-sale equity floor, rotation buy-leg capacity, fill de-duplication and the five-session cooldown) can reduce the count; when it truly binds, rank by week52Position descending, then larger excess-over-target amount, then lower symbol code, and name every deferred symbol.",
@@ -742,7 +744,9 @@
           "id": "us_to_taiwan_market",
           "label": "美股→台股市場連動",
           "source_index": "IXIC",
-          "additional_source_indices": ["SOX"],
+          "additional_source_indices": [
+            "SOX"
+          ],
           "combine": "LOWEST_SCORE",
           "use": "Most recent completed Nasdaq Composite and Philadelphia Semiconductor closes are advisory inputs for Taiwan-listed securities (D-221). Each is scored with the same bands and the lower score is used; if only one is verified, use it and name the missing one. The D-216 crash warning still uses IXIC only."
         },
@@ -857,7 +861,7 @@
       "TWD_term_deposits": "Use 1.7% source-accrual and total-return yield for the current projection and refresh with Taiwan central-bank rate changes. The D-193 emergency TWD term-deposit sleeve renews its interest and excludes it from spendable cash-income reporting, while still retaining any applicable tax treatment.",
       "all_taxes": "Classify each security and ETF payment by official distribution components. Apply the 2.11% supplementary premium per chargeable payment event only when that component reaches TWD 20,000; current deposit cadence is an explicit upper-bound uncertainty and target term deposits use three equal tranches. Compare the official Taiwan combined progressive method with refundable 8.5% dividend credit against 28% separate tax. Apply 30% withholding to VOO and VT, zero investor cash withholding to 009826, 0% to SGOV, and any applicable overseas AMT; classify 00882 as overseas income. The 2027 filing includes TWD 1,348,500 gross salary (voluntary pension excluded from taxable salary) and TWD 134,850 prepayment, with only the settlement difference booked in May 2028. Recalculate after any large disposal and semiannual review."
     },
-    "post_retirement_high_dividend_glide": "D-141 REMOVED. The age-60 two-thirds high-dividend path is deleted because it implied 36.7% of total assets against the then-current 12% hard cap (historical, not the D-220 15% cap). D-143's 550,000 TWD all-accrual cash-income evidence included emergency-term interest; D-193 excludes renewed emergency-term interest from spendable cash income and treats strategic SGOV cash distributions as spent. Emergency 00865B has no cash payout; its indexed TWD market-value gap is checked and planned at annual review. High-dividend remains at the accepted 13% target and 15% cap unless a new Accepted decision changes it; the review threshold never auto-trades to an unapproved target.",
+    "post_retirement_high_dividend_glide": "D-141 REMOVED. The age-60 two-thirds high-dividend path is deleted because it implied 36.7% of total assets against the then-current 12% hard cap (historical, not the D-220 15% cap). D-143's 550,000 TWD all-accrual cash-income evidence included emergency-term interest; D-193 excludes renewed emergency-term interest from spendable cash income and treats strategic SGOV cash distributions as spent. Emergency 00865B has no cash payout; its indexed TWD market-value gap is checked and planned at annual review. High-dividend remains at the accepted 13.33333333% target and 17% cap unless a new Accepted decision changes it; the review threshold never auto-trades to an unapproved target.",
     "age_60_cash_income_reference": "TWD 750,000 is not a hard goal. Report after-all-tax cash income and use the actual available living reserve (TWD 2.25M target, not a guaranteed funded balance) to bridge shortfalls while waiting for a suitable stock or bond sale.",
     "bear_market_distribution_cuts": {
       "market_growth": 0.2,
@@ -875,7 +879,7 @@
     "equity": {
       "fee": 0.0,
       "method": "Every current and final stock security has ten rolling anniversary observations disclosed, but the preceding-eight-period historical average is diagnostic only. D-192 uses the target-weighted 10-year institutional nominal forecast in global_equity_wrapper_assumptions.forward_return_assumptions, converts it using 2.25% midpoint inflation, deducts the target-weighted 009826 incremental wrapper-fee overlay, then numerically solves the arithmetic input. Low and high stress sensitivities apply the same overlay to 1.5% and 6.0% real core assumptions.",
-      "real_compound_target_after_wrapper": 0.034579784756303585,
+      "real_compound_target_after_wrapper": 0.03454642225760856,
       "forward_calibration": "Derive arithmetic input at runtime from the shared compound target, the same period grid, observed volatility and Student-t/FX specification. No historical average is a forward mean."
     },
     "bonds": {
@@ -982,11 +986,11 @@
     "age_75_to_80_spend": 700000,
     "age_75_to_80_spend_note": "D-193: from the 75th birthday until the 80th birthday, annual living spending is 700000 TWD in 2026-08-real TWD because mobility and travel are expected to decline.",
     "market_spend_adjustment_d193": {
-      "decision": "D-221",
+      "decision": "D-222",
       "annual_adjustment_twd_2026_real": 50000,
       "applies_to_all_age_tiers": true,
       "bear_regime": "Existing MonthlySignals proxy: broad equity drawdown at least 15% and price below a falling 10-month average; confirmation at month end, effective from the next modeled period.",
-      "strong_bull_regime": "Existing D-156 MonthlySignals proxy: rising 10-month average, price at least 15% above the locked anchor, and at least 6 months in the window; confirmation at month end, effective from the next modeled period. Use a separate market-state observer with a fixed six-month window, never tactical wait selection or prior-sale state.",
+      "strong_bull_regime": "Existing D-156 MonthlySignals proxy: rising 10-month average, price at least 15% above the locked anchor, and at least 6 months in the window; confirmation at month end, effective from the next modeled period. Use a separate market-state observer with a fixed twelve-month window, never tactical wait selection or prior-sale state.",
       "precedence_if_signals_conflict": "BEAR_MARKET_REDUCTION",
       "application": "Change the annualized real spending rate by -50000 in bear months or +50000 in strong-bull months; prorate by actual modeled period days. Neutral months use the age-tier base. No future-month look-ahead.",
       "base_case_included": true,
@@ -1051,7 +1055,7 @@
     "verification_required": "Planning estimate assumes the age-60 claim qualifies: insurance history must reach 15 years and insured employment must end before claim. The TWD 20,017 base benefit and highest-60-month wage/service record are not independently verified; no unverified service-year increase is added for later claims."
   },
   "execution_policy": {
-    "decision": "D-221",
+    "decision": "D-222",
     "retirement_cash_ratio": 0.17,
     "permanent_reserve": 1600000,
     "three_year_living_reserve": 2250000,
@@ -1084,7 +1088,7 @@
       }
     },
     "stock_purchase_funding_policy_d150": {
-      "decision": "D-221",
+      "decision": "D-222",
       "twd_term_deposit_floor_twd": 800000,
       "twd_total_deposit_floor_twd": 1550000,
       "twd_living_reserve_ceiling_twd": 2250000,
@@ -1155,7 +1159,7 @@
     "crash_trigger_drawdown": 0.25,
     "crash_deployment_limit": null,
     "crash_tranches": null,
-    "crash_deployment_rule": "D-152 has no fixed order size. A qualified bear market may use up to TWD 1,500,000 from the three-year living reserve for low buys, but must leave TWD 800,000 in term deposits and at least TWD 1,550,000 in total TWD deposits after the purchase. USD remains investment-only. Then eligible cash and at most two-thirds of eligible bond ETFs may be used: fill four-fund high-dividend deficits to the 13% target first, then route remaining capacity to VOO and 0050 at 4:1 after all costs.",
+    "crash_deployment_rule": "D-152 has no fixed order size. A qualified bear market may use up to TWD 1,500,000 from the three-year living reserve for low buys, but must leave TWD 800,000 in term deposits and at least TWD 1,550,000 in total TWD deposits after the purchase. USD remains investment-only. Then eligible cash and up to the capacity above the 3% non-emergency bond floor of eligible bond ETFs may be used: fill four-fund high-dividend deficits to the 13.33333333% target first, then route remaining capacity to VOO and 0050 at 4:1 after all costs.",
     "dynamic_allocation_policy_d141": {
       "clarified_by": "D-192",
       "normal_equity_floor": 0.5,
@@ -1165,7 +1169,7 @@
       "monthly_bull_first_equity_target": 0.5,
       "additional_overheat_equity_floor": 0.45,
       "bull_reduced_target_release": "D-156 retains one locked release budget (equity above the 50% floor) but replaces immediate selling into successive highs with profit capture after a high-water reversal. Each of five growing tranches requires its gain-above-anchor rung and its pullback-from-high-water rung; new highs ratchet the watermark and continue to hold. A 10% correction evaluates at most the next eligible tranche, then closes the window without forcing the remainder. See bull_ladder_d156. The 45% additional-overheat floor and no-automatic-below-40% protection remain discretionary extensions beyond this ladder.",
-      "total_bond_floor": 0.1,
+      "total_bond_floor": 0.03,
       "total_bond_cap": 0.31,
       "bond_allocation_band_d143": {
         "strategic_target": 0.2647,
@@ -1175,18 +1179,18 @@
         "cash_floor_aware_floor_formula": "min(24%, 100% - protected_cash_weight - 60% equity cap)",
         "cash_floor_aware_cap_formula": "min(31%, 100% - protected_cash_weight - 50% equity floor)",
         "transition_rotation_cap_formula": "min(42%, 100% - protected_cash_weight - 40% pre-retirement rotation equity floor)",
-        "absolute_bear_tactical_floor": 0.1,
-        "rule": "26.47% (D-214; 28% before 2026-11-13) remains the strategic target when the protected cash floor permits it. The 24%–31% normal band is cash-floor aware rather than a forced allocation; the 10% floor is only a bear-sale safety floor, never a normal target."
+        "absolute_bear_tactical_floor": 0.03,
+        "rule": "26.47% (D-214; 28% before 2026-11-13) remains the strategic target when the protected cash floor permits it. The 24%–31% normal band is cash-floor aware rather than a forced allocation; the 3% non-emergency bond floor is only a bear-sale safety floor, never a normal target."
       },
       "intermediate_bond_max_share_of_bonds": 0.3,
-      "bear_bond_sale_max_share": 0.6666666666666666,
+      "bear_bond_sale_max_share": 1.0,
       "historical_annual_bear_start_probability": 0.10084033613445378,
       "note": "D-143 base uses only the 56.53% strategic target (D-214; 55% before 2026-11-13) and 50%-60% ordinary rebalancing band, with neither bull nor bear tactical timing. Monthly 3/6/9/12-month tactical results are paired, separately labeled sensitivities.",
       "bear_stock_purchase_order_d143": {
         "step_1": {
           "target": "four-fund high-dividend group",
-          "target_weight": 0.13,
-          "hard_cap": 0.15,
+          "target_weight": 0.1333333333,
+          "hard_cap": 0.17,
           "allocation": "pro-rata by each constituent's remaining target deficit"
         },
         "step_2": {
@@ -1204,9 +1208,9 @@
       },
       "bear_window_global_equity_cap": 0.5,
       "bear_window_voo_cap": 0.42,
-      "bear_window_high_dividend_cap": 0.15,
-      "bear_window_cap_note": "Relaxed global-equity and VOO caps apply only inside a verified bear window. The 15% high-dividend cap is never relaxed. After the window closes (drawdown back inside 10%), trim global equity back to 25% +/-3 (D-220) over at most 24 months, only at qualified bull highs, never by selling low.",
-      "bear_bond_sale_order_d141": "D-141 replaces 'sell the shorter duration first'. Sell bond ETFs in descending order of trailing 12-month total return. A disinflationary bear (stocks down, duration up) therefore sells 00697B first, which is the genuine rebalancing trade; an inflationary bear (stocks and bonds both down) sells 00865B first and halves the deployment size for that round. The 10% total-bond floor still binds before any of this.",
+      "bear_window_high_dividend_cap": 0.17,
+      "bear_window_cap_note": "Relaxed global-equity and VOO caps apply only inside a verified bear window. The 17% high-dividend cap is never relaxed. After the window closes (drawdown back inside 10%), trim global equity back to 25% +/-3 (D-220) over at most 24 months, only at qualified bull highs, never by selling low.",
+      "bear_bond_sale_order_d141": "D-141 replaces 'sell the shorter duration first'. Sell bond ETFs in descending order of trailing 12-month total return. A disinflationary bear (stocks down, duration up) therefore sells 00697B first, which is the genuine rebalancing trade; an inflationary bear (stocks and bonds both down) sells 00865B first and halves the deployment size for that round. The 3% non-emergency total-bond floor still binds before any of this.",
       "bear_ladder_d141": [
         {
           "drawdown": 0.15,
@@ -1229,10 +1233,10 @@
           "share_of_window_budget": 0.35
         }
       ],
-      "bear_ladder_note": "Lock one whole-window funding budget from eligible all-bank TWD cash plus eligible bond ETF sales (up to 2/3, total bond floor 10%), bounded by equity headroom. D-219: drawdown rungs 15/20/25/30/35% use five increasing batches 8/12/20/25/35%; first <=10%; five-session cooldown. Partial fill consumes a batch; wait if next actual amount cannot exceed previous. New cash during an active window does not enlarge its locked budget.",
+      "bear_ladder_note": "Lock one whole-window funding budget from eligible all-bank TWD cash plus eligible bond ETF sales (up to the capacity above the 3% non-emergency bond floor, non-emergency bond floor 3% of total assets), bounded by equity headroom. D-219: drawdown rungs 15/20/25/30/35% use five increasing batches 8/12/20/25/35%; first <=10%; five-session cooldown. Partial fill consumes a batch; wait if next actual amount cannot exceed previous. New cash during an active window does not enlarge its locked budget.",
       "bear_precedence_over_rotation_d141": "If a verified bear window opens during the pre-retirement or transition rotation, the bear window takes precedence: rotation buying pauses, rotation deadlines extend by the length of the window, and DEADLINE_RADAR_EXCEPTION items accrued inside the window are excluded from the incompletion rate.",
-      "bear_bond_sale_order_basis": "Trailing 12-month TWD total return of each bond ETF (price change plus distributions, from the same /api/quotes/one series used for the ten-year diagnostics), ranked highest first among 00865B, 00719B and 00697B. SGOV keeps its own age-70-to-80 disposal rule and is not part of this ranking. Ties break to the longer effective duration. Recompute every round; never carry a previous rounds ranking.",
-      "bear_ladder_budget_basis": "Lock one whole-window funding budget from eligible all-bank TWD cash plus eligible bond ETF sales (up to 2/3, total bond floor 10%), bounded by equity headroom. D-219: drawdown rungs 15/20/25/30/35% use five increasing batches 8/12/20/25/35%; first <=10%; five-session cooldown. Partial fill consumes a batch; wait if next actual amount cannot exceed previous. New cash during an active window does not enlarge its locked budget.",
+      "bear_bond_sale_order_basis": "D-222: rank all eligible non-emergency bond ETFs, including SGOV, by verified trailing 12-month TWD total return, highest first; exclude Cathay emergency 00865B. Recompute every round; preserve all sell qualifications and settlement requirements.",
+      "bear_ladder_budget_basis": "Lock one whole-window funding budget from eligible all-bank TWD cash plus eligible bond ETF sales (up to the capacity above the 3% non-emergency bond floor, non-emergency bond floor 3% of total assets), bounded by equity headroom. D-219: drawdown rungs 15/20/25/30/35% use five increasing batches 8/12/20/25/35%; first <=10%; five-session cooldown. Partial fill consumes a batch; wait if next actual amount cannot exceed previous. New cash during an active window does not enlarge its locked budget.",
       "bull_ladder_d156": [
         {
           "gain_above_anchor": 0.15,
@@ -1266,7 +1270,8 @@
         "enabled": true,
         "aggregate_target_source": "normal_equity_target",
         "per_symbol_target_source": "detailed_target_allocation_2027"
-      }
+      },
+      "target_source": "execution_policy.reserve_allocation_d222; normal_equity_target is reference only"
     },
     "tactical_profit_policy": {
       "estimate_gross_price_gain_scenarios": true,
@@ -1366,14 +1371,36 @@
       "decision": "D-221",
       "calculator": "scripts/leader_shock.py",
       "category": "semiconductor_cycle_and_advanced_process",
-      "companies": ["NVDA", "TSMC", "SAMSUNG", "SK_HYNIX", "AVGO", "AMD", "INTC", "ASML", "AAPL", "MU"],
-      "event_types": ["UNPLANNED_LEADER_DEPARTURE", "FORMAL_INVESTIGATION", "NEW_EXPORT_CONTROL_OR_SANCTION"],
-      "source_kinds": ["OFFICIAL_COMPANY", "REGULATOR", "PUBLIC_INFO_TITLE"],
+      "companies": [
+        "NVDA",
+        "TSMC",
+        "SAMSUNG",
+        "SK_HYNIX",
+        "AVGO",
+        "AMD",
+        "INTC",
+        "ASML",
+        "AAPL",
+        "MU"
+      ],
+      "event_types": [
+        "UNPLANNED_LEADER_DEPARTURE",
+        "FORMAL_INVESTIGATION",
+        "NEW_EXPORT_CONTROL_OR_SANCTION"
+      ],
+      "source_kinds": [
+        "OFFICIAL_COMPANY",
+        "REGULATOR",
+        "PUBLIC_INFO_TITLE"
+      ],
       "window_taiwan_sessions": 5,
       "taiwan_close_time": "13:30",
       "sox_single_session_decline_pct_at_or_below": -3.0,
       "sox_two_session_cumulative_decline_pct_at_or_below": -5.0,
-      "scores": {"event_in_window": 1, "event_in_window_with_sox_confirmation": 2},
+      "scores": {
+        "event_in_window": 1,
+        "event_in_window_with_sox_confirmation": 2
+      },
       "rule": "UNPLANNED_LEADER_DEPARTURE means an unplanned exit of the founder, chief executive or chair (resignation, removal or unannounced interim appointment). FORMAL_INVESTIGATION means the company or its top executive becomes the subject of a formal criminal, congressional or regulator investigation. NEW_EXPORT_CONTROL_OR_SANCTION means a major government announces a new export control or sanction naming the company. Each event needs a traceable official company or regulator source, or a permitted public_info item whose title states the event itself. The window starts on the first Taiwan session that opens at or after the announcement (an announcement after the 13:30 Taiwan close starts the next session) and lasts five Taiwan sessions. SOX confirmation uses only completed SOX daily closes dated on or after the announcement date in New York. The floor never exceeds 2 and never by itself changes thresholds, maxima or defensive rules."
     },
     "semiconductor_risk_inputs": [
@@ -1461,7 +1488,7 @@
       ]
     },
     "high_dividend_execution_policy": {
-      "decision": "D-221",
+      "decision": "D-222",
       "broker": "Cathay Securities",
       "symbols": [
         "00713",
@@ -1469,15 +1496,15 @@
         "00878",
         "00919"
       ],
-      "aggregate_target_at_retirement": 0.13,
-      "pre_retirement_aggregate_hard_cap": 0.15,
-      "aggregate_hard_cap": 0.15,
+      "aggregate_target_at_retirement": 0.1333333333,
+      "pre_retirement_aggregate_hard_cap": 0.17,
+      "aggregate_hard_cap": 0.17,
       "aggregate_denominator": "Latest whole-portfolio total assets counting the D-193 emergency reserve once at current asset value; numerator is the combined current value of all four named ETFs across all accounts.",
       "individual_targets": {
         "00713": 0.0433333333,
         "0056": 0.0325,
         "00878": 0.0325,
-        "00919": 0.0216666667
+        "00919": 0.025
       },
       "individual_lower_bounds": {
         "00713": 0.0325,
@@ -1493,8 +1520,8 @@
       },
       "aggregate_limit_precedes_individual_bands": true,
       "new_00919_scheduled_contribution_authorized": false,
-      "cost_aware_transition": "Retain four funds; do not sell merely to reduce the number of holdings or reach exact targets immediately. Use eligible cash flows for below-target positions only within the shared cap. Report passive or inherited breaches, stop adding and trim only at qualified non-adverse windows. Retained funds become reduction candidates only above an individual upper band or when the four-fund aggregate breaches 15%; reduce excess toward the positive target, not to zero. No calendar deadline forces liquidation of 00919.",
-      "post_retirement_projection": "D-143: no age-based glide. High-dividend stays at the 13% target and 15% hard cap after retirement; market-cap ETFs stay at or above one third of equity before age 80 (satisfied at 77.00% under the D-220 targets). Exact symbol targets require an Accepted semiannual decision and are not automatic trades. The base freezes accepted targets; the conditional high-dividend planning path is a separate model sensitivity.",
+      "cost_aware_transition": "Retain four funds; do not sell merely to reduce the number of holdings or reach exact targets immediately. Use eligible cash flows for below-target positions only within the shared cap. Report passive or inherited breaches, stop adding and trim only at qualified non-adverse windows. Retained funds become reduction candidates only above an individual upper band or when the four-fund aggregate breaches 17%; reduce excess toward the positive target, not to zero. No calendar deadline forces liquidation of 00919.",
+      "post_retirement_projection": "D-143: no age-based glide. High-dividend stays at the 13.33333333% target and 17% hard cap after retirement; market-cap ETFs stay at or above one third of equity before age 80 (satisfied at 77.00% under the D-220 targets). Exact symbol targets require an Accepted semiannual decision and are not automatic trades. The base freezes accepted targets; the conditional high-dividend planning path is a separate model sensitivity.",
       "scheduled_contributions_twd": {
         "00878_day_7": 8500,
         "0056_day_17": 5500,
@@ -1507,12 +1534,12 @@
         "00713": 0.0433333333,
         "0056": 0.0325,
         "00878": 0.0325,
-        "00919": 0.0216666667
+        "00919": 0.025
       },
       "resume_only_below_individual_lower_band": false,
       "restart_policy": "Once an individual instruction reaches its target and stops, a price decline or semiannual target increase does not restart it. Restart, new amount or redirection requires a new Accepted decision.",
       "daily_topup_d170": {
-        "decision": "D-221",
+        "decision": "D-222",
         "supersedes": "D-170 base-lot rule",
         "symbols": [
           "00713",
@@ -1526,7 +1553,7 @@
         "max_lots_per_day": 3,
         "weekly_total_lot_cap": 5,
         "weekly_scope": "All four high-dividend funds combined, separate from the D-130 bond cap; unused capacity expires at week end.",
-        "capacity": "Post-buy market value plus this week's scheduled but unfilled DCA for that fund must not exceed its individual target; the four-fund total must stay at or below the 15% hard cap.",
+        "capacity": "Post-buy market value plus this week's scheduled but unfilled DCA for that fund must not exceed its individual target; the four-fund total must stay at or below the 17% hard cap.",
         "stop_rule": "No top-up once a fund reaches its individual target; later price drift below target does not restart it without a new Accepted decision. Scheduled DCA keeps its own D-143 stop rule.",
         "defensive_mode_blocks": true,
         "bear_window": "When REBALANCE_BEAR_WINDOW is active, the D-143 bear sequence replaces this top-up.",
@@ -1541,7 +1568,7 @@
       "cash_income_floor_note": "D-193: the semiannual 550,000 TWD review floor uses spendable annual distributions plus interest after excluding renewed emergency TWD term-deposit interest; strategic SGOV distributions are included as spendable because they are spent. Emergency 00865B does not distribute cash and its reserve value has a separate annual inflation-indexed market-value check and refill plan. D-143 historical all-accrual figures cannot evidence the current test; use one fresh asset snapshot and formal same-run model output. The floor is not a trade trigger, and the P10 asset path may stay below it by design while the 2.25M living reserve bridges the gap."
     },
     "llm_orchestrated_api_d197": {
-      "decision": "D-221",
+      "decision": "D-222",
       "controller": "LLM",
       "slots": [
         "09:05",
@@ -1805,7 +1832,7 @@
     },
     "daily_topup_tier_policy": {
       "decision": "D-170",
-      "current_entry_rule_decision": "D-221",
+      "current_entry_rule_decision": "D-222",
       "applies_to": [
         "D-198 high-dividend autonomous top-up price ceiling"
       ],
@@ -1900,7 +1927,7 @@
       },
       "evidence_gate_classification": "Required evidence is a separate fail-closed execution gate, not a fifth market or policy pause condition."
     },
-    "emergency_reserve_last_use": "D-193: the actual emergency reserve is a segregated 2026-08-real TWD 800,000 term-deposit target plus 800,000 emergency 00865B in the user's Cathay Securities Taiwan brokerage account, separate from the strategic 00865B holdings at Fubon Securities. It may be used before other assets are exhausted only for sudden third-party accident liability/compensation or sudden serious illness/hospitalization, then each actual withdrawal must be fully restored within six calendar months. The base Monte Carlo retains its aggregate locked-reserve proxy and does not model these events, broker-specific instrument split, annual target gap or six-month refill.",
+    "emergency_reserve_last_use": "D-193: the actual emergency reserve is a segregated 2026-08-real TWD 800,000 term-deposit target plus 800,000 emergency 00865B in the user's Cathay Securities Taiwan brokerage account, separate from the strategic 00865B holdings at Fubon Securities. It may be used before other assets are exhausted only for sudden third-party accident liability/compensation or sudden serious illness/hospitalization, then each actual withdrawal must be fully restored within twelve calendar months. The base Monte Carlo retains its aggregate locked-reserve proxy and does not model these events, broker-specific instrument split, annual target gap or twelve-month refill.",
     "misorder_correction_policy": {
       "decision": "D-080",
       "scope": "Unintended position changes caused by order-entry errors (wrong side, wrong symbol, wrong size) or broker booking errors. Not a market judgement, therefore not a fifth policy pause condition.",
@@ -1943,13 +1970,13 @@
       "runtime_unchanged": "D-200: Every daily core targets completion, MIME readback and validation by minute 40. Freeze core content when its Gmail draft is created; later appendix hard evidence is disclosed in the appendix and never rewrites that core. Before draft creation, verified hard evidence must correct the core even after minute 40, with CORE_DEADLINE_MISSED recorded. No new external queries or price refresh after minute 35. Every track and slot still stops by minute 60, completing appendix MIME readback and validation when possible."
     },
     "living_runway_policy_d145": {
-      "decision": "D-221",
+      "decision": "D-222",
       "purpose": "The 2026-08-real TWD 2,250,000 three-year living reserve is daily elapsed-time indexed for live nominal checks and replenished in a qualified bull market. In a qualified bear market, up to the daily elapsed-time indexed 2026-08-real TWD 1,500,000 may be used for low buys, but its daily elapsed-time indexed 2026-08-real TWD 750,000 one-year floor is never crossed.",
       "permanent_reserve_instrument": "D193_EMERGENCY_RESERVE_800K_TWD_TERM_DEPOSIT_PLUS_800K_TWD_VALUE_TAIWAN_LISTED_00865B",
       "permanent_reserve_twd": 1600000,
       "amount_basis": "2026_08_REAL_TWD_ELAPSED_DAY_INDEXED_FOR_LIVE_GATES",
       "permanent_reserve_interest_treatment": "TERM_HALF_INTEREST_REINVESTED;00865B_FUND_INCOME_RETAINED_IN_NAV_NO_DISTRIBUTION",
-      "permanent_reserve_note": "D-193: emergency-only reserve target is 2026-08-real TWD 1,600,000, split into TWD 800,000 term deposits and TWD 800,000 of Taiwan-listed 00865B, purchased in TWD through the user's Cathay Securities Taiwan brokerage account. The user's existing strategic 00865B holdings are at Fubon Securities and must remain separately tracked. The reserve may be drawn before other assets are exhausted only for sudden third-party accident liability/compensation or sudden serious illness/hospitalization. Restore each emergency withdrawal by its own six-calendar-month deadline. Emergency 00865B is separately tracked and excluded from the strategic 00865B target (2.5% under D-214) holdings. Its fund income is not distributed and remains in NAV. At every annual review, calculate max(0, inflation-indexed TWD 800,000 target less verified Cathay emergency 00865B TWD market value) and plan a compliant refill if below target; this annual check is separate from each emergency withdrawal deadline. The baseline model simplifies both reserve sleeves as an aggregate locked real-TWD proxy.",
+      "permanent_reserve_note": "D-193: emergency-only reserve target is 2026-08-real TWD 1,600,000, split into TWD 800,000 term deposits and TWD 800,000 of Taiwan-listed 00865B, purchased in TWD through the user's Cathay Securities Taiwan brokerage account. The user's existing strategic 00865B holdings are at Fubon Securities and must remain separately tracked. The reserve may be drawn before other assets are exhausted only for sudden third-party accident liability/compensation or sudden serious illness/hospitalization. Restore each emergency withdrawal by its own twelve-calendar-month deadline. Emergency 00865B is separately tracked and excluded from the strategic 00865B target (2.5% under D-214) holdings. Its fund income is not distributed and remains in NAV. At every annual review, calculate max(0, inflation-indexed TWD 800,000 target less verified Cathay emergency 00865B TWD market value) and plan a compliant refill if below target; this annual check is separate from each emergency withdrawal deadline. The baseline model simplifies both reserve sleeves as an aggregate locked real-TWD proxy.",
       "living_reserve_ceiling_twd": 2250000,
       "living_reserve_floor_months": 12,
       "living_reserve_floor_twd": 750000,
@@ -2295,26 +2322,27 @@
       "kd_overbought_d_greater_than": 80
     },
     "emergency_reserve_policy_d193": {
-      "decision": "D-221",
+      "decision": "D-222",
       "amount_basis": "2026_08_REAL_TWD_ELAPSED_DAY_INDEXED_FOR_LIVE_GATES",
       "total_target_twd_2026_real": 1600000,
       "term_deposit_target_twd_2026_real": 800000,
       "ordinary_living_or_investment_use": false,
       "permitted_emergency_use": [
         "sudden third-party accident liability or compensation, including a vehicle accident",
-        "sudden serious illness, hospitalization or urgent medical payment"
+        "sudden serious illness, hospitalization or urgent medical payment",
+        "end of life only when all other funding has been exhausted"
       ],
       "may_draw_before_other_assets_exhausted": true,
-      "replenishment_deadline_calendar_months": 6,
+      "replenishment_deadline_calendar_months": 12,
       "deadline_starts": "Each emergency withdrawal date; later withdrawals do not reset earlier deadlines.",
       "replenish_to": "Restore each withdrawn amount and maintain the inflation-indexed 2026-08-real TWD 800,000 term-deposit and TWD 800,000 emergency 00865B targets; annual review checks the ETF market-value gap.",
-      "replenishment_source_preference": "Start planning immediately after an emergency withdrawal. Prefer selling equities at qualified highs. In weak equity markets, eligible bond ETFs above the D-152 10% total-bond floor may be used. By the fifth month, identify and recommend a compliant source sufficient to settle by the six-month deadline. Market timing cannot extend the deadline; every actual transaction still requires current SRPP evidence and user execution.",
-      "settlement_bridge": "Taiwan-listed 00865B in the Cathay Securities Taiwan brokerage account is traded in TWD and follows Taiwan T+2 settlement; weekends and market holidays can extend proceeds availability to approximately five or six calendar days. The separate three-year living reserve can bridge staged emergency payments while proceeds settle; the bridge does not change each emergency withdrawal's six-month replenishment deadline.",
+      "replenishment_source_preference": "Start planning immediately after an emergency withdrawal. Prefer selling equities at qualified highs. In weak equity markets, eligible non-emergency bond ETFs above the D-222 8% total-assets floor may be used. Recommend a compliant source and timing sufficient to settle by the twelve-month deadline. Market timing cannot extend the deadline; every actual transaction still requires current SRPP evidence and user execution.",
+      "settlement_bridge": "Taiwan-listed 00865B in the Cathay Securities Taiwan brokerage account is traded in TWD and follows Taiwan T+2 settlement; weekends and market holidays can extend proceeds availability to approximately five or six calendar days. The separate three-year living reserve can bridge staged emergency payments while proceeds settle; the bridge does not change each emergency withdrawal's twelve-month replenishment deadline.",
       "baseline_monte_carlo_models_emergency_events": false,
       "baseline_monte_carlo_models_instrument_split": false,
-      "model_limit": "The baseline treats the D-193 emergency reserve as an aggregate protected real-TWD proxy for ordinary retirement solvency. For that proxy it applies the TWD term-deposit rate to the full reserve and maintains the real floor from operating cash each modeled period. It does not explicitly model the actual 800K term-deposit/800K emergency 00865B split, 00865B-specific return, annual reserve-gap amount/source/timing, random accident liability, emergency-reserve withdrawals, or six-month refills. It includes the currently dated car, hospitalization and dental expenses as ordinary scheduled portfolio outflows. Therefore the reported success rate is conditional on modeled age- and market-conditioned spending and listed dated expenses; it is not a probability estimate for accident/medical emergency adequacy, annual reserve-maintenance cash demand, or the instrument-split reserve return.",
+      "model_limit": "The baseline treats the D-193 emergency reserve as an aggregate protected real-TWD proxy for ordinary retirement solvency. For that proxy it applies the TWD term-deposit rate to the full reserve and maintains the real floor from operating cash each modeled period. It does not explicitly model the actual 800K term-deposit/800K emergency 00865B split, 00865B-specific return, annual reserve-gap amount/source/timing, random accident liability, emergency-reserve withdrawals, or twelve-month refills. It includes the currently dated car, hospitalization and dental expenses as ordinary scheduled portfolio outflows. Therefore the reported success rate is conditional on modeled age- and market-conditioned spending and listed dated expenses; it is not a probability estimate for accident/medical emergency adequacy, annual reserve-maintenance cash demand, or the instrument-split reserve return.",
       "baseline_monte_carlo_models_emergency_withdrawal_and_refill": false,
-      "permanent_reserve_note": "D-193: emergency-only reserve target is 2026-08-real TWD 1,600,000, split into TWD 800,000 term deposits and TWD 800,000 of Taiwan-listed 00865B, purchased in TWD through the user's Cathay Securities Taiwan brokerage account. The user's existing strategic 00865B holdings are at Fubon Securities and must remain separately tracked. The reserve may be drawn before other assets are exhausted only for sudden third-party accident liability/compensation or sudden serious illness/hospitalization. Restore each emergency withdrawal by its own six-calendar-month deadline. Emergency 00865B is separately tracked and excluded from the strategic 00865B target (2.5% under D-214) holdings. Its fund income is not distributed and remains in NAV. At every annual review, calculate max(0, inflation-indexed TWD 800,000 target less verified Cathay emergency 00865B TWD market value) and plan a compliant refill if below target; this annual check is separate from each emergency withdrawal deadline. The baseline model simplifies both reserve sleeves as an aggregate locked real-TWD proxy.",
+      "permanent_reserve_note": "D-193: emergency-only reserve target is 2026-08-real TWD 1,600,000, split into TWD 800,000 term deposits and TWD 800,000 of Taiwan-listed 00865B, purchased in TWD through the user's Cathay Securities Taiwan brokerage account. The user's existing strategic 00865B holdings are at Fubon Securities and must remain separately tracked. The reserve may be drawn before other assets are exhausted only for sudden third-party accident liability/compensation or sudden serious illness/hospitalization. Restore each emergency withdrawal by its own twelve-calendar-month deadline. Emergency 00865B is separately tracked and excluded from the strategic 00865B target (2.5% under D-214) holdings. Its fund income is not distributed and remains in NAV. At every annual review, calculate max(0, inflation-indexed TWD 800,000 target less verified Cathay emergency 00865B TWD market value) and plan a compliant refill if below target; this annual check is separate from each emergency withdrawal deadline. The baseline model simplifies both reserve sleeves as an aggregate locked real-TWD proxy.",
       "reserve_etf_code": "00865B",
       "reserve_etf_target_twd_2026_real": 800000,
       "reserve_etf_purchase_channel": "Purchase the 2026-08-real TWD 800,000 emergency 00865B sleeve in TWD through the user's Cathay Securities Taiwan brokerage account. The user's existing strategic 00865B holdings are at Fubon Securities and remain a separately reconciled strategic sub-ledger.",
@@ -2322,7 +2350,7 @@
       "reserve_etf_income_policy": "00865B does not distribute income; fund income remains in NAV and is not spendable cash. No payout reinvestment is needed, but price, USD/TWD and inflation can create a target gap.",
       "reserve_etf_subledger_policy": "Track emergency 00865B units, TWD market value, purchases and emergency withdrawals only in a separately labelled Cathay Securities account sub-ledger, reconciled to current Cathay holdings and completed transactions. The user's existing strategic 00865B holdings at Fubon Securities remain a separate strategic sub-ledger. Never count Fubon strategic units toward the emergency reserve or Cathay emergency units toward the strategic 00865B target (2.5% under D-214). If either broker/account split cannot be reconciled, report the emergency reserve as UNVERIFIED and do not issue any executable 00865B BUY recommendation.",
       "annual_review_reserve_maintenance": {
-        "decision": "D-221",
+        "decision": "D-222",
         "required": true,
         "target_etf_code": "00865B",
         "target_twd_2026_real": 800000,
@@ -2335,13 +2363,15 @@
           "inflation since 2026-08-31"
         ],
         "review_action": "At every annual review, reconcile the Cathay emergency 00865B sub-ledger separately from the Fubon strategic 00865B holdings, calculate the target gap, and include the proposed replenishment amount, compliant funding source and timing in the annual plan until the inflation-indexed TWD target is restored. No separate refill is triggered solely by fund income because 00865B does not distribute cash.",
-        "source_preference": "Use only funding sources allowed by current SRPP rules and hard gates; prefer eligible equity sales at qualified highs, and in weak equity markets consider only eligible bond ETFs above the D-152 10% total-bond floor. No annual review date overrides a failed data, calendar, price, radar, best-five, settlement, allocation or funding gate.",
-        "emergency_withdrawal_deadline_calendar_months": 6,
+        "source_preference": "Use only funding sources allowed by current SRPP rules and hard gates; prefer eligible equity sales at qualified highs, and in weak equity markets consider only eligible bond ETFs above the D-152 3% non-emergency total-bond floor. No annual review date overrides a failed data, calendar, price, radar, best-five, settlement, allocation or funding gate.",
+        "emergency_withdrawal_deadline_calendar_months": 12,
         "does_not_reset_or_extend_emergency_withdrawal_deadline": true,
         "automatic_order_authorized": false,
         "unreconciled_sleeve_action": "UNVERIFIED: disclose that Cathay emergency 00865B units, TWD market value and reserve gap cannot be calculated separately from Fubon strategic 00865B; do not issue any executable 00865B buy recommendation until both account ledgers reconcile."
       },
-      "daily_emergency_00865b_build_guidance": "On every verified Taiwan-market trading day, first apply the SRPP calendar hard gate and require tw:true. Report BUY or HOLD for the separately tracked emergency 00865B sleeve held in the user's Cathay Securities Taiwan brokerage account until its elapsed-day-indexed TWD market-value target is full. The user's current strategic 00865B holdings at Fubon Securities are not emergency reserve. A BUY recommendation must pass all current SRPP hard gates, including same-round live price, exact single-symbol radar detail, the D-195 emergency price-selection quota from execution_policy.py --bond-price-select (buy only at a suitable price, 1 lot or 2 lots at the two-lot drawdown, separate from and never competing with the D-130 Taiwan-listed bond purchase cadence strategic quota), best-five depth, price and TWD funding checks, and separately reconciled Cathay emergency and Fubon strategic 00865B sub-ledgers. Emergency units never count toward the strategic 00865B target (2.5% under D-214). If either account cannot be reconciled, report UNVERIFIED and do not issue an executable recommendation; never place an order. Effective 2026-09-27, every daily core and appendix must each include a two-row 00865B sub-ledger table: emergency reserve/Cathay and strategic allocation/Fubon, with units, TWD market value, target/gap, today's recommended lots and amount, and post-buy account assignment. No trade is also shown as 0 lots with a reason. If either account sub-ledger is UNVERIFIED, no executable 00865B buy recommendation is allowed."
+      "daily_emergency_00865b_build_guidance": "On every verified Taiwan-market trading day, first apply the SRPP calendar hard gate and require tw:true. Report BUY or HOLD for the separately tracked emergency 00865B sleeve held in the user's Cathay Securities Taiwan brokerage account until its elapsed-day-indexed TWD market-value target is full. The user's current strategic 00865B holdings at Fubon Securities are not emergency reserve. A BUY recommendation must pass all current SRPP hard gates, including same-round live price, exact single-symbol radar detail, the D-195 emergency price-selection quota from execution_policy.py --bond-price-select (buy only at a suitable price, 1 lot or 2 lots at the two-lot drawdown, separate from and never competing with the D-130 Taiwan-listed bond purchase cadence strategic quota), best-five depth, price and TWD funding checks, and separately reconciled Cathay emergency and Fubon strategic 00865B sub-ledgers. Emergency units never count toward the strategic 00865B target (2.5% under D-214). If either account cannot be reconciled, report UNVERIFIED and do not issue an executable recommendation; never place an order. Effective 2026-09-27, every daily core and appendix must each include a two-row 00865B sub-ledger table: emergency reserve/Cathay and strategic allocation/Fubon, with units, TWD market value, target/gap, today's recommended lots and amount, and post-buy account assignment. No trade is also shown as 0 lots with a reason. If either account sub-ledger is UNVERIFIED, no executable 00865B buy recommendation is allowed.",
+      "end_of_life_requires_other_funds_exhausted": true,
+      "replenishment_applies_to": "Each accident or serious-illness withdrawal; end-of-life exhaustion use is distinct."
     },
     "twd_term_deposit_ladder_policy": {
       "transition_monitoring_basis": "Use the latest GET /api/assets/latest snapshot.deposits and sum each verified term-deposit row by bank and currency; preserve original currency and use the API TWD amount only for portfolio totals.",
@@ -2439,12 +2469,12 @@
       "post_buy_term_deposit_floor_twd_2026_real": 800000,
       "post_buy_total_twd_deposit_floor_twd_2026_real": 3050000,
       "bond_sale_max_share": 0.6666666666666666,
-      "total_bond_floor": 0.1,
+      "total_bond_floor": 0.03,
       "equity_cap": 0.6,
       "deep_drawdown": 0.3,
       "deep_equity_cap": 0.7,
       "purchase_order": "execution_policy.dynamic_allocation_policy_d141.bear_stock_purchase_order_d143",
-      "window_caps": "Same as the D-141 bear window: global equity group up to 50%, VOO up to 42%; the 15% high-dividend cap is never relaxed.",
+      "window_caps": "Same as the D-141 bear window: global equity group up to 50%, VOO up to 42%; the 17% high-dividend cap is never relaxed.",
       "rotation_precedence": "Same as D-141 bear_precedence_over_rotation: rotation buying pauses and deadlines extend while the correction window is active.",
       "ai_cycle_break": {
         "status_values": [
@@ -2477,7 +2507,7 @@
         "unverified_action": "APPLY_D202_BEAR_RULES"
       },
       "routing": "AI-cycle NOT_PRESENT: a market drawdown of at least 15% opens the correction window regardless of MA200 or RISK_OFF, and the D-141 bear ladder is not used. PRESENT or UNVERIFIED: the D-219 revision of the D-202 bear window opens at 15% drawdown only with below-MA200 and RISK_OFF, using D-141 rungs 15/20/25/30/35% and shares 8/12/20/25/35%. Each evaluation selects only one window. A status change closes the other window for new batches; filled positions are kept. Existing pending orders, earmarks and confirmed fills remain included in shared funding and deduplication evidence; missing evidence never creates another available budget.",
-      "funding_rule": "Correction batches never use the TWD 2,250,000 living reserve: post-buy all-bank TWD deposits must stay at least the daily elapsed-time indexed 2026-08-real TWD 3,050,000 (800,000 emergency term deposits plus the full 2,250,000 living reserve), with the 800,000 term-deposit floor unchanged; up to two-thirds of eligible bond ETFs may be sold while total bonds stay at least 10%. The window budget is locked once at opening and split 30/25/20/15/10.",
+      "funding_rule": "Correction batches never use the TWD 2,250,000 living reserve: post-buy all-bank TWD deposits must stay at least the daily elapsed-time indexed 2026-08-real TWD 3,050,000 (800,000 emergency term deposits plus the full 2,250,000 living reserve), with the 800,000 term-deposit floor unchanged; up to the capacity above the 3% non-emergency bond floor of eligible bond ETFs may be sold while total bonds stay at least 10%. The window budget is locked once at opening and split 30/25/20/15/10.",
       "model_scope": "Model v3.22.0 base excludes tactical timing and cannot simulate the AI-cycle evidence; a research sensitivity (research/dip_buying) is not a formal result.",
       "tsmc_exposure_waiver": {
         "decision": "D-212",
@@ -2612,7 +2642,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "93194e593b8c7192cb9fd31fd283ef5c09008553f9df05ae7e304acad34e01b3"
+          "source_sha256": "2425cdc2ec853665d2951b1b9ccce4d95206de208314fae20b449565c3609f77"
         },
         {
           "stock_code": "00881",
@@ -2620,7 +2650,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "93194e593b8c7192cb9fd31fd283ef5c09008553f9df05ae7e304acad34e01b3"
+          "source_sha256": "2425cdc2ec853665d2951b1b9ccce4d95206de208314fae20b449565c3609f77"
         },
         {
           "stock_code": "0056",
@@ -2628,7 +2658,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "93194e593b8c7192cb9fd31fd283ef5c09008553f9df05ae7e304acad34e01b3"
+          "source_sha256": "2425cdc2ec853665d2951b1b9ccce4d95206de208314fae20b449565c3609f77"
         },
         {
           "stock_code": "00878",
@@ -2636,7 +2666,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "93194e593b8c7192cb9fd31fd283ef5c09008553f9df05ae7e304acad34e01b3"
+          "source_sha256": "2425cdc2ec853665d2951b1b9ccce4d95206de208314fae20b449565c3609f77"
         },
         {
           "stock_code": "00713",
@@ -2644,7 +2674,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "93194e593b8c7192cb9fd31fd283ef5c09008553f9df05ae7e304acad34e01b3"
+          "source_sha256": "2425cdc2ec853665d2951b1b9ccce4d95206de208314fae20b449565c3609f77"
         },
         {
           "stock_code": "00919",
@@ -2652,7 +2682,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "93194e593b8c7192cb9fd31fd283ef5c09008553f9df05ae7e304acad34e01b3"
+          "source_sha256": "2425cdc2ec853665d2951b1b9ccce4d95206de208314fae20b449565c3609f77"
         },
         {
           "stock_code": "009826",
@@ -2660,7 +2690,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "93194e593b8c7192cb9fd31fd283ef5c09008553f9df05ae7e304acad34e01b3"
+          "source_sha256": "2425cdc2ec853665d2951b1b9ccce4d95206de208314fae20b449565c3609f77"
         },
         {
           "stock_code": "006208",
@@ -2668,7 +2698,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "93194e593b8c7192cb9fd31fd283ef5c09008553f9df05ae7e304acad34e01b3"
+          "source_sha256": "2425cdc2ec853665d2951b1b9ccce4d95206de208314fae20b449565c3609f77"
         },
         {
           "stock_code": "009804",
@@ -2676,7 +2706,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "93194e593b8c7192cb9fd31fd283ef5c09008553f9df05ae7e304acad34e01b3"
+          "source_sha256": "2425cdc2ec853665d2951b1b9ccce4d95206de208314fae20b449565c3609f77"
         },
         {
           "stock_code": "00850",
@@ -2684,7 +2714,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "93194e593b8c7192cb9fd31fd283ef5c09008553f9df05ae7e304acad34e01b3"
+          "source_sha256": "2425cdc2ec853665d2951b1b9ccce4d95206de208314fae20b449565c3609f77"
         },
         {
           "stock_code": "00882",
@@ -2692,7 +2722,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "93194e593b8c7192cb9fd31fd283ef5c09008553f9df05ae7e304acad34e01b3"
+          "source_sha256": "2425cdc2ec853665d2951b1b9ccce4d95206de208314fae20b449565c3609f77"
         },
         {
           "stock_code": "00865B",
@@ -2700,7 +2730,7 @@
           "instrument_kind": "BOND_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "93194e593b8c7192cb9fd31fd283ef5c09008553f9df05ae7e304acad34e01b3"
+          "source_sha256": "2425cdc2ec853665d2951b1b9ccce4d95206de208314fae20b449565c3609f77"
         },
         {
           "stock_code": "00719B",
@@ -2708,7 +2738,7 @@
           "instrument_kind": "BOND_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "93194e593b8c7192cb9fd31fd283ef5c09008553f9df05ae7e304acad34e01b3"
+          "source_sha256": "2425cdc2ec853665d2951b1b9ccce4d95206de208314fae20b449565c3609f77"
         },
         {
           "stock_code": "00697B",
@@ -2716,7 +2746,7 @@
           "instrument_kind": "BOND_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "93194e593b8c7192cb9fd31fd283ef5c09008553f9df05ae7e304acad34e01b3"
+          "source_sha256": "2425cdc2ec853665d2951b1b9ccce4d95206de208314fae20b449565c3609f77"
         },
         {
           "stock_code": "00679B",
@@ -2724,7 +2754,7 @@
           "instrument_kind": "BOND_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "93194e593b8c7192cb9fd31fd283ef5c09008553f9df05ae7e304acad34e01b3"
+          "source_sha256": "2425cdc2ec853665d2951b1b9ccce4d95206de208314fae20b449565c3609f77"
         },
         {
           "stock_code": "00751B",
@@ -2732,7 +2762,7 @@
           "instrument_kind": "BOND_ETF",
           "quote_currency": "TWD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "93194e593b8c7192cb9fd31fd283ef5c09008553f9df05ae7e304acad34e01b3"
+          "source_sha256": "2425cdc2ec853665d2951b1b9ccce4d95206de208314fae20b449565c3609f77"
         },
         {
           "stock_code": "VOO",
@@ -2740,7 +2770,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "USD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "93194e593b8c7192cb9fd31fd283ef5c09008553f9df05ae7e304acad34e01b3"
+          "source_sha256": "2425cdc2ec853665d2951b1b9ccce4d95206de208314fae20b449565c3609f77"
         },
         {
           "stock_code": "VT",
@@ -2748,7 +2778,7 @@
           "instrument_kind": "EQUITY_ETF",
           "quote_currency": "USD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "93194e593b8c7192cb9fd31fd283ef5c09008553f9df05ae7e304acad34e01b3"
+          "source_sha256": "2425cdc2ec853665d2951b1b9ccce4d95206de208314fae20b449565c3609f77"
         },
         {
           "stock_code": "SGOV",
@@ -2756,7 +2786,7 @@
           "instrument_kind": "BOND_ETF",
           "quote_currency": "USD",
           "source_document": "research/ETF_UNIVERSE.md",
-          "source_sha256": "93194e593b8c7192cb9fd31fd283ef5c09008553f9df05ae7e304acad34e01b3"
+          "source_sha256": "2425cdc2ec853665d2951b1b9ccce4d95206de208314fae20b449565c3609f77"
         },
         {
           "stock_code": "GOOG",
@@ -2764,7 +2794,7 @@
           "instrument_kind": "STOCK",
           "quote_currency": "USD",
           "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
-          "source_sha256": "c42df7dad6762e1860b383ad24f1bdea9dbcd758aa154b8cda514e6631121ccb"
+          "source_sha256": "8168db2fe556e7ae8e1f2a7cb6bc30c67158b077d787d545486c5178be2f9d9e"
         },
         {
           "stock_code": "GOOGL",
@@ -2772,7 +2802,7 @@
           "instrument_kind": "STOCK",
           "quote_currency": "USD",
           "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
-          "source_sha256": "c42df7dad6762e1860b383ad24f1bdea9dbcd758aa154b8cda514e6631121ccb"
+          "source_sha256": "8168db2fe556e7ae8e1f2a7cb6bc30c67158b077d787d545486c5178be2f9d9e"
         },
         {
           "stock_code": "MSFT",
@@ -2780,7 +2810,7 @@
           "instrument_kind": "STOCK",
           "quote_currency": "USD",
           "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
-          "source_sha256": "c42df7dad6762e1860b383ad24f1bdea9dbcd758aa154b8cda514e6631121ccb"
+          "source_sha256": "8168db2fe556e7ae8e1f2a7cb6bc30c67158b077d787d545486c5178be2f9d9e"
         },
         {
           "stock_code": "AVGO",
@@ -2788,7 +2818,7 @@
           "instrument_kind": "STOCK",
           "quote_currency": "USD",
           "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
-          "source_sha256": "c42df7dad6762e1860b383ad24f1bdea9dbcd758aa154b8cda514e6631121ccb"
+          "source_sha256": "8168db2fe556e7ae8e1f2a7cb6bc30c67158b077d787d545486c5178be2f9d9e"
         },
         {
           "stock_code": "NVDA",
@@ -2796,7 +2826,7 @@
           "instrument_kind": "STOCK",
           "quote_currency": "USD",
           "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
-          "source_sha256": "c42df7dad6762e1860b383ad24f1bdea9dbcd758aa154b8cda514e6631121ccb"
+          "source_sha256": "8168db2fe556e7ae8e1f2a7cb6bc30c67158b077d787d545486c5178be2f9d9e"
         },
         {
           "stock_code": "AAPL",
@@ -2804,7 +2834,7 @@
           "instrument_kind": "STOCK",
           "quote_currency": "USD",
           "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
-          "source_sha256": "c42df7dad6762e1860b383ad24f1bdea9dbcd758aa154b8cda514e6631121ccb"
+          "source_sha256": "8168db2fe556e7ae8e1f2a7cb6bc30c67158b077d787d545486c5178be2f9d9e"
         },
         {
           "stock_code": "AMZN",
@@ -2812,7 +2842,7 @@
           "instrument_kind": "STOCK",
           "quote_currency": "USD",
           "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
-          "source_sha256": "c42df7dad6762e1860b383ad24f1bdea9dbcd758aa154b8cda514e6631121ccb"
+          "source_sha256": "8168db2fe556e7ae8e1f2a7cb6bc30c67158b077d787d545486c5178be2f9d9e"
         }
       ],
       "final_report_composition": {
@@ -2890,6 +2920,55 @@
       "runtime_scope": "saved-evidence budget diagnostics; exact supported business API capacity remains required for executable report quantities",
       "document": "docs/VOO_TAIWAN_BRIDGE.md",
       "prefer_verified_direct_voo_buy": true
+    },
+    "reserve_allocation_d222": {
+      "decision": "D-222",
+      "enabled": true,
+      "inflation_base_date": "2026-08-31",
+      "annual_inflation_rate": 0.0225,
+      "living_term_deposit_twd_2026_real": 1500000,
+      "living_demand_deposit_twd_2026_real": 750000,
+      "emergency_term_deposit_twd_2026_real": 800000,
+      "emergency_etf_twd_2026_real": 800000,
+      "emergency_etf_symbol": "00865B",
+      "reference_cash_weight": 0.17,
+      "shortfall_symbols": [
+        "VOO",
+        "0050",
+        "00881"
+      ],
+      "shortfall_requires_explicit_allocation": true,
+      "baseline_not_executable": true,
+      "emergency_etf_excluded_from_strategic_bond_floor": true,
+      "target_calculator": "scripts/reserve_allocation.py",
+      "target_date_required": true,
+      "reserve_amounts_are_part_of_total_assets": true,
+      "unallocated_shortfall_action": "MARKET_ALLOCATION_REQUIRED; no guessed split, fixed target fallback or executable allocation recommendation",
+      "ordinary_buy_post_purchase_floors_unchanged": true,
+      "excess_symbols": [
+        "VOO",
+        "0050",
+        "00881"
+      ],
+      "excess_requires_explicit_allocation": true,
+      "ordinary_tw_core_caps": {
+        "0050": 0.13,
+        "00881": 0.0753
+      },
+      "market_selector": {
+        "symbols": [
+          "VOO",
+          "0050",
+          "00881"
+        ],
+        "position_basis": "ADJUSTED_52_WEEK_RANGE",
+        "buy_selection": "LOWEST_POSITION",
+        "sell_selection": "HIGHEST_POSITION",
+        "requires_all_three_verified": true,
+        "tie_action": "AMBIGUOUS_TIE",
+        "no_capacity_reflow": true,
+        "fx_policy": "execution_policy.usd_asset_fx_preference_d215"
+      }
     }
   },
   "major_illness_events": {
@@ -2941,7 +3020,7 @@
     "trade_cost_policy": "Deduct actual modeled commissions, Taiwan ETF sale tax and conservative post-2026 bond ETF sale tax from withdrawals, rebalancing, bear rotations and labor-retirement purchases.",
     "refresh_rule": "Recalculate tax after every large disposal and every semiannual review; thresholds and enacted bond-ETF tax law override these assumptions."
   },
-  "decision": "D-221",
+  "decision": "D-222",
   "global_market_cap_boundary_policy": {
     "decision": "D-143",
     "normal_max_rank": 10,
@@ -2962,7 +3041,7 @@
     "00882_overseas_income_uses_actual_notice": true
   },
   "simulation_contract": {
-    "decision": "D-221",
+    "decision": "D-222",
     "annual_spending_retirement_to_age_75": 750000,
     "annual_spending_age_75_to_age_80": 700000,
     "annual_spending_age_80_to_age_90": 1400000,
@@ -3092,7 +3171,14 @@
       "daily_policy_equivalence": false,
       "model_patch": "D214 target correction; D216 monthly core retention; overdue VOO requires simulated qualification; all-funds completion separate from legacy rotation completion",
       "transition_end": "2028-06-30 observation cutoff; any paused/unfilled residues remain unfinished. No assumed post-cutoff extension or automatic fill.",
-      "accepted_allocation_change": "D220 final: VOO 27% to 20%; 3pp to Taiwan dividend ETFs (total13%, cap15%); another4pp split equally into0050 12% and00881 6.53%; equity56.53%, bonds26.47%, cash17% unchanged."
+      "accepted_allocation_change": "D-222 supersedes D-220 final targets. Reference equity56.53/bonds26.47/cash17 are baseline only; fixed-real reserve3.85M replaces cash17, both excess/shortfall allocated by same-round market evidence among VOO/0050/00881. Four dividend funds target13.33333333%, cap17%; 00919 2.5%,009826 2.16666667%. Legacy aggregate-reserve model is not a formal D-222 allocation projection."
+    },
+    "reserve_allocation_d222": {
+      "formal_four_sleeve_model_supported": false,
+      "legacy_target_income_supported": false,
+      "dynamic_target_facts_supported": true,
+      "formal_result_status": "NOT_YET_EXECUTED",
+      "reason": "Legacy aggregate reserve proxy does not explicitly model indexed living term/demand and emergency term/ETF sleeves or market-based target reductions; use reserve_allocation.py facts, do not relabel prior results."
     }
   },
   "result_authority": {

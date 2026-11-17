@@ -41,6 +41,18 @@ def expected(srpp_root: Path) -> str:
     hashes["SRPP/" + PYTHON_SOURCE] = hashlib.sha256((srpp_root / PYTHON_SOURCE).read_bytes()).hexdigest()
     legacy["calculations"]["dividendStabilization"] = {
         "calculationId": CALCULATION_ID, "sourceSha256": hashes}
+    reserve_java = (
+        "backend/src/main/java/com/steven/assets/srpp/SrppReserveAllocation.java",
+        "backend/src/main/java/com/steven/assets/srpp/SrppPolicyDocument.java",
+        "backend/src/main/java/com/steven/assets/srpp/SrppModuleCalculator.java",
+        "backend/src/main/java/com/steven/assets/service/srpp/report/SrppReportModuleCalculator.java",
+        "backend/src/main/java/com/steven/assets/service/srpp/report/SrppReportShortUsCalculator.java",
+        "backend/src/main/java/com/steven/assets/service/srpp/report/SrppReportStateCalculator.java",
+        "backend/src/main/java/com/steven/assets/service/srpp/us/UsCoreSellCalculator.java",
+    )
+    reserve_hashes = {"asset-management/" + p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest() for p in reserve_java}
+    reserve_hashes["SRPP/scripts/reserve_allocation.py"] = hashlib.sha256((srpp_root / "scripts/reserve_allocation.py").read_bytes()).hexdigest()
+    legacy["calculations"]["reserveAllocation"] = {"calculationId": "REAL_TWD_RESERVE_ALLOCATION_D222", "sourceSha256": reserve_hashes}
     return canonical(legacy)
 
 

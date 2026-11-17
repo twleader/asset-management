@@ -12485,12 +12485,12 @@
     }
   ],
   "originalCalculatorHashes": {
-    "execution_policy.py": "8a6aa8f4a36c23fcd0edc371640e369538abbf8fadfad2c248b286eae11022aa",
-    "short_term_opportunities.py": "fa673abd138f54e1cbf293070cd415b942a01fb696e13ca8692ab163648d66a2",
+    "execution_policy.py": "66a86a9716acaf564fe76c23ac7f1e64964fd84a14f2eee4e748830257cfc4d1",
+    "short_term_opportunities.py": "c828bd7244a19749620686ce07b4c60c2e71045896ac88def93146fe353f5294",
     "short_term_sleeve.py": "e7909fe13ffc13ea5e4986fef92cdf35141c8b22e568845400f3ed51d397caf0",
     "test_long_short_term_exit.py": "47661e96d8a3b47fe1071a073f1b37d4d362c743f40807bb740fef6400e40658",
     "test_short_term_sleeve.py": "1ecc80296e97c20793d24c47a386bbdf6f5274c789d0ce10a47c4a5cd9337a02"
   },
-  "policyBundleSha256": "d2e3a305c450efe5a2c290bf54abd8fe3db28424e1da02c26ddddb2ae2b1ee5f",
+  "policyBundleSha256": "47ffc4cae823f790c5e8811a0ee3b8b9df44b4b89eb6f690adeca4978151140c",
   "schema": "SRPP_LONG_SHORT_EXIT_GOLDEN_V1"
 }

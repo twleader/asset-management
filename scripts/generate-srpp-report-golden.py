@@ -43,16 +43,10 @@ def canonical_decimal(value):
  return rendered or '0'
 
 def formal_policy_document(model):
- allocations=model.get('detailed_target_allocation_2027') if isinstance(model,dict) else None
- if not isinstance(allocations,dict) or not allocations: raise SystemExit('SRPP_REPORT_FORMAL_TARGET_MISSING')
- targets={}
- for code,weight in allocations.items():
-  if not isinstance(code,str): raise SystemExit('SRPP_REPORT_FORMAL_TARGET_CODE_INVALID')
-  if code=='TWD_term_deposits': key='CASH:TWD:TERM'
-  elif code=='demand_deposits_and_cash': key='CASH:TWD:DEMAND'
-  else: key=f"STOCK:{'美股' if code.isascii() and all(c.isupper() or c=='.' for c in code) else '台股'}:{code}"
-  targets[key]=canonical_decimal(weight)
- return (json.dumps({'schema':'SRPP_POLICY_DOCUMENT_V1','targets':targets},ensure_ascii=False,sort_keys=True,separators=(',',':'))+'\n').encode('utf-8')
+ import importlib.util
+ spec=importlib.util.spec_from_file_location('report_authority',ROOT/'scripts/check-srpp-report-authority.py')
+ authority=importlib.util.module_from_spec(spec);spec.loader.exec_module(authority)
+ return (authority.expected_formal_document(model)+'\n').encode('utf-8')
 
 MODEL_BYTES=(SRPP/'assumptions/model_inputs.json').read_bytes()
 MANIFEST_BYTES=(SRPP/'assumptions/policy_manifest.json').read_bytes()

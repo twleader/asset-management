@@ -38446,7 +38446,9 @@
       "expected": {
         "netDownsidePct": "8.5368",
         "netUpsidePct": "19.2998",
-        "reasons": [],
+        "reasons": [
+          "D222_MARKET_SELECTION_REQUIRED"
+        ],
         "reboundPct": "8.6957",
         "rewardRisk": "2.2608"
       },
@@ -39270,12 +39272,12 @@
   "originalCalculatorHashes": {
     "bear_ladder.py": "fd32d2655df96bcff2a006db136c711bd7830c004403abf2565e8e65bc40eb81",
     "core_sell_guard.py": "57f7ed48c6061db900f03e40349e157ce947d8ba0e6af1b145c957602d2128d7",
-    "execution_policy.py": "8a6aa8f4a36c23fcd0edc371640e369538abbf8fadfad2c248b286eae11022aa",
+    "execution_policy.py": "66a86a9716acaf564fe76c23ac7f1e64964fd84a14f2eee4e748830257cfc4d1",
     "pre_retirement_cashflow.py": "b0de2efe12db72587e48c430d0e463987615ce361da435a82528a66547e6df13",
-    "short_term_opportunities.py": "fa673abd138f54e1cbf293070cd415b942a01fb696e13ca8692ab163648d66a2",
+    "short_term_opportunities.py": "c828bd7244a19749620686ce07b4c60c2e71045896ac88def93146fe353f5294",
     "strategic_buy_gate.py": "e2312e870d97ceccbe547a334e721bbfecc1624f818998b2efbb704577954b69",
     "us_tactical_order_check.py": "931aedbef8b7970a7996af1af80dfd70448a4c24e64c16fd5b3b495a801fb86d"
   },
-  "policyBundleSha256": "d2e3a305c450efe5a2c290bf54abd8fe3db28424e1da02c26ddddb2ae2b1ee5f",
+  "policyBundleSha256": "47ffc4cae823f790c5e8811a0ee3b8b9df44b4b89eb6f690adeca4978151140c",
   "schema": "SRPP_REPORT_SAME_INPUT_GOLDEN_V1"
 }

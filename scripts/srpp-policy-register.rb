@@ -22,6 +22,7 @@
 require 'json'
 require 'digest'
 require 'bigdecimal'
+require 'date'
 require 'optparse'
 
 Encoding.default_external = Encoding::UTF_8
@@ -106,8 +107,31 @@ module SrppPolicyRegister
 
   def validate_policy!(policy)
     raise Error, 'policy must be a JSON object' unless policy.is_a?(Hash)
-    raise Error, 'policy must have exactly schema and targets' unless policy.keys.sort == %w[schema targets]
-    raise Error, 'policy schema must be SRPP_POLICY_DOCUMENT_V1' unless policy['schema'] == 'SRPP_POLICY_DOCUMENT_V1'
+    dynamic = policy['schema'] == 'SRPP_POLICY_DOCUMENT_V2'
+    expected_keys = dynamic ? %w[schema targets targetSemantics reserveAllocation].sort : %w[schema targets]
+    raise Error, 'policy keys invalid' unless policy.keys.sort == expected_keys
+    raise Error, 'policy schema invalid' unless dynamic || policy['schema'] == 'SRPP_POLICY_DOCUMENT_V1'
+    if dynamic
+      reserve = policy['reserveAllocation']
+      fields = %w[decision enabled inflation_base_date annual_inflation_rate living_term_deposit_twd_2026_real living_demand_deposit_twd_2026_real emergency_term_deposit_twd_2026_real emergency_etf_twd_2026_real emergency_etf_symbol reference_cash_weight excess_symbols excess_requires_explicit_allocation shortfall_symbols shortfall_requires_explicit_allocation market_selector]
+      numeric = %w[annual_inflation_rate living_term_deposit_twd_2026_real living_demand_deposit_twd_2026_real emergency_term_deposit_twd_2026_real emergency_etf_twd_2026_real reference_cash_weight]
+      valid = policy['targetSemantics'] == 'BASELINE_NOT_EXECUTABLE' && reserve.is_a?(Hash) && reserve.keys.sort == fields.sort
+      valid &&= reserve['decision'] == 'D-222' && reserve['enabled'] == true && reserve['shortfall_requires_explicit_allocation'] == true && reserve['excess_requires_explicit_allocation'] == true
+      valid &&= reserve['emergency_etf_symbol'] == '00865B' && reserve['shortfall_symbols'] == %w[VOO 0050 00881] && reserve['excess_symbols'] == %w[VOO 0050 00881]
+      valid &&= reserve['market_selector'] == { 'symbols' => %w[VOO 0050 00881], 'position_basis' => 'ADJUSTED_52_WEEK_RANGE', 'buy_selection' => 'LOWEST_POSITION', 'sell_selection' => 'HIGHEST_POSITION', 'requires_all_three_verified' => true, 'tie_action' => 'AMBIGUOUS_TIE', 'no_capacity_reflow' => true, 'fx_policy' => 'execution_policy.usd_asset_fx_preference_d215' }
+      raise Error, 'D222_RESERVE_POLICY_INVALID' unless valid
+      numeric.each do |key|
+        value = reserve[key]
+        raise Error, 'D222_RESERVE_POLICY_INVALID' unless value.is_a?(String) && CANONICAL_DECIMAL.match?(value) && value != '-0'
+        number = BigDecimal(value)
+        raise Error, 'D222_RESERVE_POLICY_INVALID' if number.negative? || key != 'annual_inflation_rate' && number.zero? || %w[annual_inflation_rate reference_cash_weight].include?(key) && number >= 1
+      end
+      begin
+        raise Error, 'D222_RESERVE_POLICY_INVALID' unless Date.iso8601(reserve['inflation_base_date']).iso8601 == reserve['inflation_base_date']
+      rescue Date::Error, TypeError
+        raise Error, 'D222_RESERVE_POLICY_INVALID'
+      end
+    end
 
     targets = policy['targets']
     raise Error, 'targets must be an object' unless targets.is_a?(Hash)
