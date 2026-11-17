@@ -59,7 +59,23 @@ module SrppReportPolicyRegister
       value = weight.is_a?(BigDecimal) ? weight.to_s('F').sub(/\.0+\z/, '').sub(/(\.[0-9]*?)0+\z/, '\1') : weight.to_s
       targets[key] = value
     end
-    SrppPolicyRegister.jcs('schema' => 'SRPP_POLICY_DOCUMENT_V1', 'targets' => targets)
+    document = { 'schema' => 'SRPP_POLICY_DOCUMENT_V1', 'targets' => targets }
+    reserve = model.dig('execution_policy', 'reserve_allocation_d222')
+    if reserve.is_a?(Hash) && reserve['enabled'] == true
+      fields = %w[decision enabled inflation_base_date annual_inflation_rate living_term_deposit_twd_2026_real living_demand_deposit_twd_2026_real emergency_term_deposit_twd_2026_real emergency_etf_twd_2026_real emergency_etf_symbol reference_cash_weight excess_symbols excess_requires_explicit_allocation shortfall_symbols shortfall_requires_explicit_allocation market_selector]
+      numbers = %w[annual_inflation_rate living_term_deposit_twd_2026_real living_demand_deposit_twd_2026_real emergency_term_deposit_twd_2026_real emergency_etf_twd_2026_real reference_cash_weight]
+      projected = fields.to_h do |key|
+        raise SrppPolicyRegister::Error, 'D222_RESERVE_POLICY_INVALID' unless reserve.key?(key)
+        value = reserve[key]
+        if numbers.include?(key)
+          raise SrppPolicyRegister::Error, 'D222_RESERVE_POLICY_INVALID' unless value.is_a?(Integer) || value.is_a?(BigDecimal)
+          value = BigDecimal(value.to_s).to_s('F').sub(/\.0+\z/, '').sub(/(\.[0-9]*?)0+\z/, '\1')
+        end
+        [key, value]
+      end
+      document.merge!('schema' => 'SRPP_POLICY_DOCUMENT_V2', 'targetSemantics' => 'BASELINE_NOT_EXECUTABLE', 'reserveAllocation' => projected)
+    end
+    SrppPolicyRegister.jcs(document)
   end
 
   def generate(model_bytes:, manifest_bytes:, formal_policy_bytes:, formula_bytes:)

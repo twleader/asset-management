@@ -88,6 +88,8 @@ def return_assumptions(model,values):
 
 def simulate_one(context,values,input_data,simulations,seed):
     model=context.model;asof,nominal_total,payload=validate_input(input_data)
+    if model['execution_policy'].get('reserve_allocation_d222',{}).get('enabled'):
+        raise SettingsError('D222_SCENARIO_UNSUPPORTED','D-222固定實質四袖套及同輪市場分攤尚未納入舊情境引擎；請使用動態配置事實，不得沿用固定17%推估存續率。')
     birth=_date(values['birthDate'],'生日');retire=_date(values['retirementDate'],'退休')
     end=_birthday(birth,values['planningAge'])
     if birth>asof or asof>=end or retire>=end:raise SettingsError('CONFIG_INVALID','生日及規劃終點必須符合本輪日期與退休日期。')

@@ -1,0 +1,3843 @@
+{
+  "cases": [
+    {
+      "candidates": [
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "474b71945b8379af43bf6b4d9920b818f3c57c4ec1068debf5867c7ba9467967",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "f7dd936b022225258dec9972560da153d7743de388e1b6141eff703693d26e7c",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 20,
+              "stock_code": "VOO",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "d1098f4abb8a2338c40b6df576e7851979f33041179c9a8b710a25b1cd2b005d",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "405caa79026e8d8d4bf02b5a81c1e93cdcf052255ac097426e5ea884896e0d95",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "24c2f700ca844f8c07554af2df9be2995b44d36053a0bd64175298f068078f69",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 50,
+              "stock_code": "0050",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "987db975e450438b4a3f0ed16a4c388fa18d3292082f51b10a44e98f04117a9a",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "246abd11d5871829100a3fba3deadfdf6ce3dfdf505a465603113ac025946e2f",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "7d08e1b5f09d513c6a86bf21c4695d8116517c15a19fb9f212b0cdaf36b90ef2",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 80,
+              "stock_code": "00881",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "4027798cc91f974485a1acd3f72eb9cef3488c94891f5e696852ea6d8d53fc7c",
+            "source_ref": "isolated-synthetic-original"
+          }
+        }
+      ],
+      "date": "2026-08-31",
+      "expected": {
+        "adjustment_mode": "INITIAL_ALLOCATION",
+        "allocation_twd": {
+          "VOO": 1250000.0
+        },
+        "api_capacity_acceptance": false,
+        "candidates": {
+          "0050": {
+            "capacity_twd": 2000000,
+            "eligible": true,
+            "position": 0.4
+          },
+          "00881": {
+            "capacity_twd": 2000000,
+            "eligible": true,
+            "position": 0.7
+          },
+          "VOO": {
+            "capacity_twd": 2000000,
+            "eligible": true,
+            "position": 0.1
+          }
+        },
+        "decision": "D-222",
+        "remaining_adjustment_twd": 0.0,
+        "selected_symbol": "VOO",
+        "side": "BUY",
+        "source_consistency_only": true,
+        "status": "ALLOCATION_REVIEW",
+        "target_projection": {
+          "bank_deposit_target": 0.10166666666666666,
+          "decision": "D-222",
+          "economic_bond_target": 0.29136666666666666,
+          "equity_target": 0.6069666666666667,
+          "global_equity_monitoring_band": [
+            0.25833333336666664,
+            0.3183333333666667
+          ],
+          "global_equity_target": 0.28833333336666667,
+          "inflation_factor": 1.0,
+          "protected_target_twd": 3850000.0,
+          "reference_cash_delta_twd": 1250000.0,
+          "reference_targets_are_executable": false,
+          "reserve_amounts_twd": {
+            "emergency_etf_twd_2026_real": 800000.0,
+            "emergency_term_deposit_twd_2026_real": 800000.0,
+            "living_demand_deposit_twd_2026_real": 750000.0,
+            "living_term_deposit_twd_2026_real": 1500000.0
+          },
+          "status": "TARGETS_READY",
+          "strategic_bond_target": 0.2647,
+          "target_weights": {
+            "0050": 0.12,
+            "0056": 0.0325,
+            "00679B": 0.0,
+            "00697B": 0.02,
+            "00713": 0.0433333333,
+            "00719B": 0.1997,
+            "00751B": 0.0,
+            "00850": 0.0,
+            "00865B": 0.025,
+            "00878": 0.0325,
+            "00881": 0.0653,
+            "00919": 0.025,
+            "009826": 0.0216666667,
+            "SGOV": 0.02,
+            "TWD_term_deposits": 0.07666666666666666,
+            "VOO": 0.24166666666666667,
+            "VT": 0.025,
+            "demand_deposits_and_cash": 0.025,
+            "emergency_00865B": 0.02666666666666667
+          },
+          "total_assets_twd": 30000000.0,
+          "transaction_authorized": false,
+          "valuation_date": "2026-08-31",
+          "voo_monitoring_band": [
+            0.21166666666666667,
+            0.27166666666666667
+          ]
+        },
+        "transaction_authorized": false
+      },
+      "living": null,
+      "mode": "INITIAL_ALLOCATION",
+      "name": "initial_buy_lowest",
+      "total": 30000000
+    },
+    {
+      "candidates": [
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "f7dd936b022225258dec9972560da153d7743de388e1b6141eff703693d26e7c",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "SELL": {
+              "payload": {
+                "scope": "SELL",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "d1f91dc2e1d4e09da23f607f2e40eb73d6f833f5cf1757d65c97ff74310871fc",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 20,
+              "stock_code": "VOO",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "d1098f4abb8a2338c40b6df576e7851979f33041179c9a8b710a25b1cd2b005d",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "24c2f700ca844f8c07554af2df9be2995b44d36053a0bd64175298f068078f69",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "SELL": {
+              "payload": {
+                "scope": "SELL",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "c1990c076bed437b5faafa636493494b7bc19990444e0b5f31f710a35c1fd9fa",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 50,
+              "stock_code": "0050",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "987db975e450438b4a3f0ed16a4c388fa18d3292082f51b10a44e98f04117a9a",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "7d08e1b5f09d513c6a86bf21c4695d8116517c15a19fb9f212b0cdaf36b90ef2",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "SELL": {
+              "payload": {
+                "scope": "SELL",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "ecc6cf23d9bcf625f59d6e14c20c35fc8a6e7302b04847b788eb038abed6f7da",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 80,
+              "stock_code": "00881",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "4027798cc91f974485a1acd3f72eb9cef3488c94891f5e696852ea6d8d53fc7c",
+            "source_ref": "isolated-synthetic-original"
+          }
+        }
+      ],
+      "date": "2026-08-31",
+      "expected": {
+        "adjustment_mode": "INITIAL_ALLOCATION",
+        "allocation_twd": {
+          "00881": 449999.99999999953
+        },
+        "api_capacity_acceptance": false,
+        "candidates": {
+          "0050": {
+            "capacity_twd": 2000000,
+            "eligible": true,
+            "position": 0.4
+          },
+          "00881": {
+            "capacity_twd": 2000000,
+            "eligible": true,
+            "position": 0.7
+          },
+          "VOO": {
+            "capacity_twd": 2000000,
+            "eligible": true,
+            "position": 0.1
+          }
+        },
+        "decision": "D-222",
+        "remaining_adjustment_twd": 0.0,
+        "selected_symbol": "00881",
+        "side": "SELL",
+        "source_consistency_only": true,
+        "status": "ALLOCATION_REVIEW",
+        "target_projection": {
+          "bank_deposit_target": 0.1525,
+          "decision": "D-222",
+          "economic_bond_target": 0.30469999999999997,
+          "equity_target": 0.5428000000000001,
+          "global_equity_monitoring_band": [
+            0.2166666667,
+            0.2766666667
+          ],
+          "global_equity_target": 0.2466666667,
+          "inflation_factor": 1.0,
+          "protected_target_twd": 3850000.0,
+          "reference_cash_delta_twd": -449999.99999999953,
+          "reference_targets_are_executable": false,
+          "reserve_amounts_twd": {
+            "emergency_etf_twd_2026_real": 800000.0,
+            "emergency_term_deposit_twd_2026_real": 800000.0,
+            "living_demand_deposit_twd_2026_real": 750000.0,
+            "living_term_deposit_twd_2026_real": 1500000.0
+          },
+          "status": "TARGETS_READY",
+          "strategic_bond_target": 0.2647,
+          "target_weights": {
+            "0050": 0.12,
+            "0056": 0.0325,
+            "00679B": 0.0,
+            "00697B": 0.02,
+            "00713": 0.0433333333,
+            "00719B": 0.1997,
+            "00751B": 0.0,
+            "00850": 0.0,
+            "00865B": 0.025,
+            "00878": 0.0325,
+            "00881": 0.04280000000000002,
+            "00919": 0.025,
+            "009826": 0.0216666667,
+            "SGOV": 0.02,
+            "TWD_term_deposits": 0.115,
+            "VOO": 0.2,
+            "VT": 0.025,
+            "demand_deposits_and_cash": 0.0375,
+            "emergency_00865B": 0.04
+          },
+          "total_assets_twd": 20000000.0,
+          "transaction_authorized": false,
+          "valuation_date": "2026-08-31",
+          "voo_monitoring_band": [
+            0.17,
+            0.23
+          ]
+        },
+        "transaction_authorized": false
+      },
+      "living": null,
+      "mode": "INITIAL_ALLOCATION",
+      "name": "initial_sell_highest",
+      "total": 20000000
+    },
+    {
+      "candidates": [
+        {
+          "capacity_twd": 1000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "474b71945b8379af43bf6b4d9920b818f3c57c4ec1068debf5867c7ba9467967",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "f7dd936b022225258dec9972560da153d7743de388e1b6141eff703693d26e7c",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 20,
+              "stock_code": "VOO",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "d1098f4abb8a2338c40b6df576e7851979f33041179c9a8b710a25b1cd2b005d",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "405caa79026e8d8d4bf02b5a81c1e93cdcf052255ac097426e5ea884896e0d95",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "24c2f700ca844f8c07554af2df9be2995b44d36053a0bd64175298f068078f69",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 50,
+              "stock_code": "0050",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "987db975e450438b4a3f0ed16a4c388fa18d3292082f51b10a44e98f04117a9a",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "246abd11d5871829100a3fba3deadfdf6ce3dfdf505a465603113ac025946e2f",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "7d08e1b5f09d513c6a86bf21c4695d8116517c15a19fb9f212b0cdaf36b90ef2",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 80,
+              "stock_code": "00881",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "4027798cc91f974485a1acd3f72eb9cef3488c94891f5e696852ea6d8d53fc7c",
+            "source_ref": "isolated-synthetic-original"
+          }
+        }
+      ],
+      "date": "2026-08-31",
+      "expected": {
+        "adjustment_mode": "INITIAL_ALLOCATION",
+        "allocation_twd": {
+          "VOO": 1000000
+        },
+        "api_capacity_acceptance": false,
+        "candidates": {
+          "0050": {
+            "capacity_twd": 2000000,
+            "eligible": true,
+            "position": 0.4
+          },
+          "00881": {
+            "capacity_twd": 2000000,
+            "eligible": true,
+            "position": 0.7
+          },
+          "VOO": {
+            "capacity_twd": 1000000,
+            "eligible": true,
+            "position": 0.1
+          }
+        },
+        "decision": "D-222",
+        "remaining_adjustment_twd": 250000.0,
+        "selected_symbol": "VOO",
+        "side": "BUY",
+        "source_consistency_only": true,
+        "status": "PARTIAL_CAPACITY_WAIT",
+        "transaction_authorized": false
+      },
+      "living": null,
+      "mode": "INITIAL_ALLOCATION",
+      "name": "selected_capacity_no_reflow",
+      "total": 30000000
+    },
+    {
+      "candidates": [
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "474b71945b8379af43bf6b4d9920b818f3c57c4ec1068debf5867c7ba9467967",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "f7dd936b022225258dec9972560da153d7743de388e1b6141eff703693d26e7c",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 20,
+              "stock_code": "VOO",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "d1098f4abb8a2338c40b6df576e7851979f33041179c9a8b710a25b1cd2b005d",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "405caa79026e8d8d4bf02b5a81c1e93cdcf052255ac097426e5ea884896e0d95",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "24c2f700ca844f8c07554af2df9be2995b44d36053a0bd64175298f068078f69",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 20,
+              "stock_code": "0050",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "4cc971e163bd8897c1075e60cd449c5c8fc1d81ce41aad5a7b45b2a22904c789",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "246abd11d5871829100a3fba3deadfdf6ce3dfdf505a465603113ac025946e2f",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "7d08e1b5f09d513c6a86bf21c4695d8116517c15a19fb9f212b0cdaf36b90ef2",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 80,
+              "stock_code": "00881",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "4027798cc91f974485a1acd3f72eb9cef3488c94891f5e696852ea6d8d53fc7c",
+            "source_ref": "isolated-synthetic-original"
+          }
+        }
+      ],
+      "date": "2026-08-31",
+      "expected": {
+        "adjustment_mode": "INITIAL_ALLOCATION",
+        "allocation_twd": {},
+        "api_capacity_acceptance": false,
+        "candidates": {
+          "0050": {
+            "capacity_twd": 2000000,
+            "eligible": true,
+            "position": 0.1
+          },
+          "00881": {
+            "capacity_twd": 2000000,
+            "eligible": true,
+            "position": 0.7
+          },
+          "VOO": {
+            "capacity_twd": 2000000,
+            "eligible": true,
+            "position": 0.1
+          }
+        },
+        "decision": "D-222",
+        "remaining_adjustment_twd": 1250000.0,
+        "selected_symbol": null,
+        "side": "BUY",
+        "source_consistency_only": true,
+        "status": "AMBIGUOUS_TIE",
+        "transaction_authorized": false
+      },
+      "living": null,
+      "mode": "INITIAL_ALLOCATION",
+      "name": "position_tie",
+      "total": 30000000
+    },
+    {
+      "candidates": [
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "474b71945b8379af43bf6b4d9920b818f3c57c4ec1068debf5867c7ba9467967",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "f7dd936b022225258dec9972560da153d7743de388e1b6141eff703693d26e7c",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 20,
+              "stock_code": "VOO",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "d1098f4abb8a2338c40b6df576e7851979f33041179c9a8b710a25b1cd2b005d",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "405caa79026e8d8d4bf02b5a81c1e93cdcf052255ac097426e5ea884896e0d95",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "24c2f700ca844f8c07554af2df9be2995b44d36053a0bd64175298f068078f69",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 50,
+              "stock_code": "0050",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "987db975e450438b4a3f0ed16a4c388fa18d3292082f51b10a44e98f04117a9a",
+            "source_ref": "isolated-synthetic-original"
+          }
+        }
+      ],
+      "date": "2026-08-31",
+      "expected": {
+        "adjustment_mode": "INITIAL_ALLOCATION",
+        "allocation_twd": {},
+        "api_capacity_acceptance": false,
+        "decision": "D-222",
+        "reason": "D222_ALL_THREE_CANDIDATES_REQUIRED",
+        "remaining_adjustment_twd": 1250000.0,
+        "selected_symbol": null,
+        "side": "BUY",
+        "source_consistency_only": true,
+        "status": "UNVERIFIED",
+        "transaction_authorized": false
+      },
+      "living": null,
+      "mode": "INITIAL_ALLOCATION",
+      "name": "missing_third_range",
+      "total": 30000000
+    },
+    {
+      "candidates": [
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "474b71945b8379af43bf6b4d9920b818f3c57c4ec1068debf5867c7ba9467967",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "f7dd936b022225258dec9972560da153d7743de388e1b6141eff703693d26e7c",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 20,
+              "stock_code": "VOO",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "405caa79026e8d8d4bf02b5a81c1e93cdcf052255ac097426e5ea884896e0d95",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "24c2f700ca844f8c07554af2df9be2995b44d36053a0bd64175298f068078f69",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 50,
+              "stock_code": "0050",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "987db975e450438b4a3f0ed16a4c388fa18d3292082f51b10a44e98f04117a9a",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "246abd11d5871829100a3fba3deadfdf6ce3dfdf505a465603113ac025946e2f",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "7d08e1b5f09d513c6a86bf21c4695d8116517c15a19fb9f212b0cdaf36b90ef2",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 80,
+              "stock_code": "00881",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "4027798cc91f974485a1acd3f72eb9cef3488c94891f5e696852ea6d8d53fc7c",
+            "source_ref": "isolated-synthetic-original"
+          }
+        }
+      ],
+      "date": "2026-08-31",
+      "expected": {
+        "adjustment_mode": "INITIAL_ALLOCATION",
+        "allocation_twd": {},
+        "api_capacity_acceptance": false,
+        "decision": "D-222",
+        "reason": "D222_SOURCE_HASH_UNVERIFIED",
+        "remaining_adjustment_twd": 1250000.0,
+        "selected_symbol": null,
+        "side": "BUY",
+        "source_consistency_only": true,
+        "status": "UNVERIFIED",
+        "transaction_authorized": false
+      },
+      "living": null,
+      "mode": "INITIAL_ALLOCATION",
+      "name": "tampered_range_hash",
+      "total": 30000000
+    },
+    {
+      "candidates": [
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "474b71945b8379af43bf6b4d9920b818f3c57c4ec1068debf5867c7ba9467967",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_BLOCKED",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "3c27a995fd9dcb579443dba2719b9461c3be4dde6a0a78c1446a964df18a4d0a",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 20,
+              "stock_code": "VOO",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "d1098f4abb8a2338c40b6df576e7851979f33041179c9a8b710a25b1cd2b005d",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "405caa79026e8d8d4bf02b5a81c1e93cdcf052255ac097426e5ea884896e0d95",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "24c2f700ca844f8c07554af2df9be2995b44d36053a0bd64175298f068078f69",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 50,
+              "stock_code": "0050",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "987db975e450438b4a3f0ed16a4c388fa18d3292082f51b10a44e98f04117a9a",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "246abd11d5871829100a3fba3deadfdf6ce3dfdf505a465603113ac025946e2f",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "7d08e1b5f09d513c6a86bf21c4695d8116517c15a19fb9f212b0cdaf36b90ef2",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 80,
+              "stock_code": "00881",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "4027798cc91f974485a1acd3f72eb9cef3488c94891f5e696852ea6d8d53fc7c",
+            "source_ref": "isolated-synthetic-original"
+          }
+        }
+      ],
+      "date": "2026-08-31",
+      "expected": {
+        "adjustment_mode": "INITIAL_ALLOCATION",
+        "allocation_twd": {
+          "0050": 300000.0000000003
+        },
+        "api_capacity_acceptance": false,
+        "candidates": {
+          "0050": {
+            "capacity_twd": 2000000,
+            "eligible": true,
+            "position": 0.4
+          },
+          "00881": {
+            "capacity_twd": 2000000,
+            "eligible": true,
+            "position": 0.7
+          },
+          "VOO": {
+            "capacity_twd": 2000000,
+            "eligible": false,
+            "position": 0.1
+          }
+        },
+        "decision": "D-222",
+        "remaining_adjustment_twd": 949999.9999999998,
+        "selected_symbol": "0050",
+        "side": "BUY",
+        "source_consistency_only": true,
+        "status": "PARTIAL_CAPACITY_WAIT",
+        "transaction_authorized": false
+      },
+      "living": null,
+      "mode": "INITIAL_ALLOCATION",
+      "name": "lowest_fx_blocked_select_next_eligible_with_original_cap",
+      "total": 30000000
+    },
+    {
+      "candidates": [
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "474b71945b8379af43bf6b4d9920b818f3c57c4ec1068debf5867c7ba9467967",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 20,
+              "stock_code": "VOO",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "d1098f4abb8a2338c40b6df576e7851979f33041179c9a8b710a25b1cd2b005d",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "405caa79026e8d8d4bf02b5a81c1e93cdcf052255ac097426e5ea884896e0d95",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "24c2f700ca844f8c07554af2df9be2995b44d36053a0bd64175298f068078f69",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 50,
+              "stock_code": "0050",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "987db975e450438b4a3f0ed16a4c388fa18d3292082f51b10a44e98f04117a9a",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "246abd11d5871829100a3fba3deadfdf6ce3dfdf505a465603113ac025946e2f",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "7d08e1b5f09d513c6a86bf21c4695d8116517c15a19fb9f212b0cdaf36b90ef2",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 80,
+              "stock_code": "00881",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "4027798cc91f974485a1acd3f72eb9cef3488c94891f5e696852ea6d8d53fc7c",
+            "source_ref": "isolated-synthetic-original"
+          }
+        }
+      ],
+      "date": "2026-08-31",
+      "expected": {
+        "adjustment_mode": "INITIAL_ALLOCATION",
+        "allocation_twd": {},
+        "api_capacity_acceptance": false,
+        "decision": "D-222",
+        "reason": "'FX'",
+        "remaining_adjustment_twd": 1250000.0,
+        "selected_symbol": null,
+        "side": "BUY",
+        "source_consistency_only": true,
+        "status": "UNVERIFIED",
+        "transaction_authorized": false
+      },
+      "living": null,
+      "mode": "INITIAL_ALLOCATION",
+      "name": "missing_fx_original",
+      "total": 30000000
+    },
+    {
+      "candidates": [
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "f7dd936b022225258dec9972560da153d7743de388e1b6141eff703693d26e7c",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "SELL": {
+              "payload": {
+                "scope": "SELL",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "d1f91dc2e1d4e09da23f607f2e40eb73d6f833f5cf1757d65c97ff74310871fc",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 20,
+              "stock_code": "VOO",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "d1098f4abb8a2338c40b6df576e7851979f33041179c9a8b710a25b1cd2b005d",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "24c2f700ca844f8c07554af2df9be2995b44d36053a0bd64175298f068078f69",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "SELL": {
+              "payload": {
+                "scope": "SELL",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "c1990c076bed437b5faafa636493494b7bc19990444e0b5f31f710a35c1fd9fa",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 50,
+              "stock_code": "0050",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "987db975e450438b4a3f0ed16a4c388fa18d3292082f51b10a44e98f04117a9a",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "7d08e1b5f09d513c6a86bf21c4695d8116517c15a19fb9f212b0cdaf36b90ef2",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "SELL": {
+              "payload": {
+                "scope": "SELL",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "ecc6cf23d9bcf625f59d6e14c20c35fc8a6e7302b04847b788eb038abed6f7da",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 80,
+              "stock_code": "00881",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "4027798cc91f974485a1acd3f72eb9cef3488c94891f5e696852ea6d8d53fc7c",
+            "source_ref": "isolated-synthetic-original"
+          }
+        }
+      ],
+      "date": "2026-08-31",
+      "expected": {
+        "adjustment_mode": "LIVING_RESERVE_REBALANCE",
+        "api_capacity_acceptance": false,
+        "decision": "D-222",
+        "reason": "'NoneType' object is not subscriptable",
+        "status": "UNVERIFIED",
+        "transaction_authorized": false
+      },
+      "living": null,
+      "mode": "LIVING_RESERVE_REBALANCE",
+      "name": "living_missing_ledger",
+      "total": 30000000
+    },
+    {
+      "candidates": [
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "f7dd936b022225258dec9972560da153d7743de388e1b6141eff703693d26e7c",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "SELL": {
+              "payload": {
+                "scope": "SELL",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "d1f91dc2e1d4e09da23f607f2e40eb73d6f833f5cf1757d65c97ff74310871fc",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 20,
+              "stock_code": "VOO",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "d1098f4abb8a2338c40b6df576e7851979f33041179c9a8b710a25b1cd2b005d",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "24c2f700ca844f8c07554af2df9be2995b44d36053a0bd64175298f068078f69",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "SELL": {
+              "payload": {
+                "scope": "SELL",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "c1990c076bed437b5faafa636493494b7bc19990444e0b5f31f710a35c1fd9fa",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 50,
+              "stock_code": "0050",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "987db975e450438b4a3f0ed16a4c388fa18d3292082f51b10a44e98f04117a9a",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "7d08e1b5f09d513c6a86bf21c4695d8116517c15a19fb9f212b0cdaf36b90ef2",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "SELL": {
+              "payload": {
+                "scope": "SELL",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "ecc6cf23d9bcf625f59d6e14c20c35fc8a6e7302b04847b788eb038abed6f7da",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 80,
+              "stock_code": "00881",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "4027798cc91f974485a1acd3f72eb9cef3488c94891f5e696852ea6d8d53fc7c",
+            "source_ref": "isolated-synthetic-original"
+          }
+        }
+      ],
+      "date": "2026-08-31",
+      "expected": {
+        "adjustment_mode": "LIVING_RESERVE_REBALANCE",
+        "allocation_twd": {
+          "00881": 250000.0
+        },
+        "api_capacity_acceptance": false,
+        "candidates": {
+          "0050": {
+            "capacity_twd": 2000000,
+            "eligible": true,
+            "position": 0.4
+          },
+          "00881": {
+            "capacity_twd": 2000000,
+            "eligible": true,
+            "position": 0.7
+          },
+          "VOO": {
+            "capacity_twd": 2000000,
+            "eligible": true,
+            "position": 0.1
+          }
+        },
+        "decision": "D-222",
+        "remaining_adjustment_twd": 0.0,
+        "selected_symbol": "00881",
+        "side": "SELL",
+        "source_consistency_only": true,
+        "status": "ALLOCATION_REVIEW",
+        "transaction_authorized": false
+      },
+      "living": {
+        "payload": {
+          "ledger_scope": "LIVING_RESERVE_EXCLUDING_EMERGENCY",
+          "living_demand_twd": 1000000,
+          "living_term_twd": 1000000,
+          "reconciled_deposit_ids": [
+            "term-1",
+            "demand-1"
+          ],
+          "settled_unrestricted_available_twd": 0,
+          "valuation_date": "2026-08-31"
+        },
+        "sha256": "de0c3225c920a0523f645139245f81c018d91260052c1d4f89af2dc45d131078",
+        "source_ref": "isolated-synthetic-original"
+      },
+      "mode": "LIVING_RESERVE_REBALANCE",
+      "name": "living_deficit_uses_ledger_not_reference_cash",
+      "total": 30000000
+    },
+    {
+      "candidates": [
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "474b71945b8379af43bf6b4d9920b818f3c57c4ec1068debf5867c7ba9467967",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "f7dd936b022225258dec9972560da153d7743de388e1b6141eff703693d26e7c",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 20,
+              "stock_code": "VOO",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "d1098f4abb8a2338c40b6df576e7851979f33041179c9a8b710a25b1cd2b005d",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "405caa79026e8d8d4bf02b5a81c1e93cdcf052255ac097426e5ea884896e0d95",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "24c2f700ca844f8c07554af2df9be2995b44d36053a0bd64175298f068078f69",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 50,
+              "stock_code": "0050",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "987db975e450438b4a3f0ed16a4c388fa18d3292082f51b10a44e98f04117a9a",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "246abd11d5871829100a3fba3deadfdf6ce3dfdf505a465603113ac025946e2f",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "7d08e1b5f09d513c6a86bf21c4695d8116517c15a19fb9f212b0cdaf36b90ef2",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 80,
+              "stock_code": "00881",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "4027798cc91f974485a1acd3f72eb9cef3488c94891f5e696852ea6d8d53fc7c",
+            "source_ref": "isolated-synthetic-original"
+          }
+        }
+      ],
+      "date": "2026-08-31",
+      "expected": {
+        "adjustment_mode": "LIVING_RESERVE_REBALANCE",
+        "allocation_twd": {
+          "VOO": 100000
+        },
+        "api_capacity_acceptance": false,
+        "candidates": {
+          "0050": {
+            "capacity_twd": 2000000,
+            "eligible": true,
+            "position": 0.4
+          },
+          "00881": {
+            "capacity_twd": 2000000,
+            "eligible": true,
+            "position": 0.7
+          },
+          "VOO": {
+            "capacity_twd": 2000000,
+            "eligible": true,
+            "position": 0.1
+          }
+        },
+        "decision": "D-222",
+        "remaining_adjustment_twd": 650000.0,
+        "selected_symbol": "VOO",
+        "side": "BUY",
+        "source_consistency_only": true,
+        "status": "PARTIAL_CAPACITY_WAIT",
+        "transaction_authorized": false
+      },
+      "living": {
+        "payload": {
+          "ledger_scope": "LIVING_RESERVE_EXCLUDING_EMERGENCY",
+          "living_demand_twd": 1000000,
+          "living_term_twd": 2000000,
+          "reconciled_deposit_ids": [
+            "term-1",
+            "demand-1"
+          ],
+          "settled_unrestricted_available_twd": 100000,
+          "valuation_date": "2026-08-31"
+        },
+        "sha256": "a5c119dd726c72466534e741ff77ebd8bebc34c27325717e436e3620860ac695",
+        "source_ref": "isolated-synthetic-original"
+      },
+      "mode": "LIVING_RESERVE_REBALANCE",
+      "name": "living_surplus_settled_capacity",
+      "total": 30000000
+    },
+    {
+      "candidates": [
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "474b71945b8379af43bf6b4d9920b818f3c57c4ec1068debf5867c7ba9467967",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "f7dd936b022225258dec9972560da153d7743de388e1b6141eff703693d26e7c",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 50,
+              "stock_code": "VOO",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "d6688cc08d7b99a5fbde2ec9dc43fcf6537ced99f7f627183f473ebb9b2e4b6f",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "405caa79026e8d8d4bf02b5a81c1e93cdcf052255ac097426e5ea884896e0d95",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "24c2f700ca844f8c07554af2df9be2995b44d36053a0bd64175298f068078f69",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 20,
+              "stock_code": "0050",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "4cc971e163bd8897c1075e60cd449c5c8fc1d81ce41aad5a7b45b2a22904c789",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "246abd11d5871829100a3fba3deadfdf6ce3dfdf505a465603113ac025946e2f",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "7d08e1b5f09d513c6a86bf21c4695d8116517c15a19fb9f212b0cdaf36b90ef2",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 80,
+              "stock_code": "00881",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "4027798cc91f974485a1acd3f72eb9cef3488c94891f5e696852ea6d8d53fc7c",
+            "source_ref": "isolated-synthetic-original"
+          }
+        }
+      ],
+      "date": "2026-08-31",
+      "expected": {
+        "adjustment_mode": "LIVING_RESERVE_REBALANCE",
+        "allocation_twd": {
+          "0050": 750000.0
+        },
+        "api_capacity_acceptance": false,
+        "candidates": {
+          "0050": {
+            "capacity_twd": 2000000,
+            "eligible": true,
+            "position": 0.1
+          },
+          "00881": {
+            "capacity_twd": 2000000,
+            "eligible": true,
+            "position": 0.7
+          },
+          "VOO": {
+            "capacity_twd": 2000000,
+            "eligible": true,
+            "position": 0.4
+          }
+        },
+        "decision": "D-222",
+        "remaining_adjustment_twd": 0.0,
+        "selected_symbol": "0050",
+        "side": "BUY",
+        "source_consistency_only": true,
+        "status": "ALLOCATION_REVIEW",
+        "transaction_authorized": false
+      },
+      "living": {
+        "payload": {
+          "ledger_scope": "LIVING_RESERVE_EXCLUDING_EMERGENCY",
+          "living_demand_twd": 1000000,
+          "living_term_twd": 2000000,
+          "reconciled_deposit_ids": [
+            "term-1",
+            "demand-1"
+          ],
+          "settled_unrestricted_available_twd": 1000000,
+          "valuation_date": "2026-08-31"
+        },
+        "sha256": "f95539c3ce3679ab260e332270a047a4b18ea5b65aa23c74d114394a05131d9b",
+        "source_ref": "isolated-synthetic-original"
+      },
+      "mode": "LIVING_RESERVE_REBALANCE",
+      "name": "living_0050_uses_current_capacity_not_initial_baseline_room",
+      "total": 30000000
+    },
+    {
+      "candidates": [
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "474b71945b8379af43bf6b4d9920b818f3c57c4ec1068debf5867c7ba9467967",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "f7dd936b022225258dec9972560da153d7743de388e1b6141eff703693d26e7c",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 50,
+              "stock_code": "VOO",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "d6688cc08d7b99a5fbde2ec9dc43fcf6537ced99f7f627183f473ebb9b2e4b6f",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "405caa79026e8d8d4bf02b5a81c1e93cdcf052255ac097426e5ea884896e0d95",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "24c2f700ca844f8c07554af2df9be2995b44d36053a0bd64175298f068078f69",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 80,
+              "stock_code": "0050",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "6e1d60c05d3a35a118c6fb2fdb9a4775bc77b8a89c8d604e393ecbd2739c3688",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 2000000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "246abd11d5871829100a3fba3deadfdf6ce3dfdf505a465603113ac025946e2f",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "7d08e1b5f09d513c6a86bf21c4695d8116517c15a19fb9f212b0cdaf36b90ef2",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 20,
+              "stock_code": "00881",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "b25f53a0a558216206475345497346ea12be34f4a7346bd3910443661202f640",
+            "source_ref": "isolated-synthetic-original"
+          }
+        }
+      ],
+      "date": "2026-08-31",
+      "expected": {
+        "adjustment_mode": "LIVING_RESERVE_REBALANCE",
+        "allocation_twd": {
+          "00881": 750000.0
+        },
+        "api_capacity_acceptance": false,
+        "candidates": {
+          "0050": {
+            "capacity_twd": 2000000,
+            "eligible": true,
+            "position": 0.7
+          },
+          "00881": {
+            "capacity_twd": 2000000,
+            "eligible": true,
+            "position": 0.1
+          },
+          "VOO": {
+            "capacity_twd": 2000000,
+            "eligible": true,
+            "position": 0.4
+          }
+        },
+        "decision": "D-222",
+        "remaining_adjustment_twd": 0.0,
+        "selected_symbol": "00881",
+        "side": "BUY",
+        "source_consistency_only": true,
+        "status": "ALLOCATION_REVIEW",
+        "transaction_authorized": false
+      },
+      "living": {
+        "payload": {
+          "ledger_scope": "LIVING_RESERVE_EXCLUDING_EMERGENCY",
+          "living_demand_twd": 1000000,
+          "living_term_twd": 2000000,
+          "reconciled_deposit_ids": [
+            "term-1",
+            "demand-1"
+          ],
+          "settled_unrestricted_available_twd": 1000000,
+          "valuation_date": "2026-08-31"
+        },
+        "sha256": "f95539c3ce3679ab260e332270a047a4b18ea5b65aa23c74d114394a05131d9b",
+        "source_ref": "isolated-synthetic-original"
+      },
+      "mode": "LIVING_RESERVE_REBALANCE",
+      "name": "living_00881_uses_current_capacity_not_initial_baseline_room",
+      "total": 30000000
+    },
+    {
+      "candidates": [
+        {
+          "capacity_twd": 3000000,
+          "gate_receipts": {
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "f7dd936b022225258dec9972560da153d7743de388e1b6141eff703693d26e7c",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "SELL": {
+              "payload": {
+                "scope": "SELL",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "d1f91dc2e1d4e09da23f607f2e40eb73d6f833f5cf1757d65c97ff74310871fc",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 20,
+              "stock_code": "VOO",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "d1098f4abb8a2338c40b6df576e7851979f33041179c9a8b710a25b1cd2b005d",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 3000000,
+          "gate_receipts": {
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "24c2f700ca844f8c07554af2df9be2995b44d36053a0bd64175298f068078f69",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "SELL": {
+              "payload": {
+                "scope": "SELL",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "c1990c076bed437b5faafa636493494b7bc19990444e0b5f31f710a35c1fd9fa",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 50,
+              "stock_code": "0050",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "987db975e450438b4a3f0ed16a4c388fa18d3292082f51b10a44e98f04117a9a",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 3000000,
+          "gate_receipts": {
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "7d08e1b5f09d513c6a86bf21c4695d8116517c15a19fb9f212b0cdaf36b90ef2",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "SELL": {
+              "payload": {
+                "scope": "SELL",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "ecc6cf23d9bcf625f59d6e14c20c35fc8a6e7302b04847b788eb038abed6f7da",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 80,
+              "stock_code": "00881",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "4027798cc91f974485a1acd3f72eb9cef3488c94891f5e696852ea6d8d53fc7c",
+            "source_ref": "isolated-synthetic-original"
+          }
+        }
+      ],
+      "date": "2026-08-31",
+      "expected": {
+        "adjustment_mode": "LIVING_RESERVE_REBALANCE",
+        "allocation_twd": {
+          "00881": 2250000.0
+        },
+        "api_capacity_acceptance": false,
+        "candidates": {
+          "0050": {
+            "capacity_twd": 3000000,
+            "eligible": true,
+            "position": 0.4
+          },
+          "00881": {
+            "capacity_twd": 3000000,
+            "eligible": true,
+            "position": 0.7
+          },
+          "VOO": {
+            "capacity_twd": 3000000,
+            "eligible": true,
+            "position": 0.1
+          }
+        },
+        "decision": "D-222",
+        "remaining_adjustment_twd": 0.0,
+        "selected_symbol": "00881",
+        "side": "SELL",
+        "source_consistency_only": true,
+        "status": "ALLOCATION_REVIEW",
+        "transaction_authorized": false
+      },
+      "living": {
+        "payload": {
+          "ledger_scope": "LIVING_RESERVE_EXCLUDING_EMERGENCY",
+          "living_demand_twd": 0,
+          "living_term_twd": 0,
+          "reconciled_deposit_ids": [
+            "term-1",
+            "demand-1"
+          ],
+          "settled_unrestricted_available_twd": 0,
+          "valuation_date": "2026-08-31"
+        },
+        "sha256": "591a5c5b2ba9043616f6831fd1527ec6383d487c53848138be79301301cb692f",
+        "source_ref": "isolated-synthetic-original"
+      },
+      "mode": "LIVING_RESERVE_REBALANCE",
+      "name": "living_sell_capacity_can_exceed_initial_baseline_value",
+      "total": 30000000
+    },
+    {
+      "candidates": [
+        {
+          "capacity_twd": 50000,
+          "gate_receipts": {
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "f7dd936b022225258dec9972560da153d7743de388e1b6141eff703693d26e7c",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "SELL": {
+              "payload": {
+                "scope": "SELL",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "d1f91dc2e1d4e09da23f607f2e40eb73d6f833f5cf1757d65c97ff74310871fc",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 20,
+              "stock_code": "VOO",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "d1098f4abb8a2338c40b6df576e7851979f33041179c9a8b710a25b1cd2b005d",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 50000,
+          "gate_receipts": {
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "24c2f700ca844f8c07554af2df9be2995b44d36053a0bd64175298f068078f69",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "SELL": {
+              "payload": {
+                "scope": "SELL",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "c1990c076bed437b5faafa636493494b7bc19990444e0b5f31f710a35c1fd9fa",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 50,
+              "stock_code": "0050",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "987db975e450438b4a3f0ed16a4c388fa18d3292082f51b10a44e98f04117a9a",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 300000,
+          "gate_receipts": {
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "7d08e1b5f09d513c6a86bf21c4695d8116517c15a19fb9f212b0cdaf36b90ef2",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "SELL": {
+              "payload": {
+                "scope": "SELL",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "ecc6cf23d9bcf625f59d6e14c20c35fc8a6e7302b04847b788eb038abed6f7da",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 80,
+              "stock_code": "00881",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "4027798cc91f974485a1acd3f72eb9cef3488c94891f5e696852ea6d8d53fc7c",
+            "source_ref": "isolated-synthetic-original"
+          }
+        }
+      ],
+      "date": "2026-08-31",
+      "expected": {
+        "adjustment_mode": "LIVING_RESERVE_REBALANCE",
+        "allocation_twd": {
+          "00881": 250000.0
+        },
+        "api_capacity_acceptance": false,
+        "candidates": {
+          "0050": {
+            "capacity_twd": 50000,
+            "eligible": true,
+            "position": 0.4
+          },
+          "00881": {
+            "capacity_twd": 300000,
+            "eligible": true,
+            "position": 0.7
+          },
+          "VOO": {
+            "capacity_twd": 50000,
+            "eligible": true,
+            "position": 0.1
+          }
+        },
+        "decision": "D-222",
+        "remaining_adjustment_twd": 0.0,
+        "selected_symbol": "00881",
+        "side": "SELL",
+        "source_consistency_only": true,
+        "status": "ALLOCATION_REVIEW",
+        "transaction_authorized": false
+      },
+      "living": {
+        "payload": {
+          "ledger_scope": "LIVING_RESERVE_EXCLUDING_EMERGENCY",
+          "living_demand_twd": 1000000,
+          "living_term_twd": 1000000,
+          "reconciled_deposit_ids": [
+            "term-1",
+            "demand-1"
+          ],
+          "settled_unrestricted_available_twd": 0,
+          "valuation_date": "2026-08-31"
+        },
+        "sha256": "de0c3225c920a0523f645139245f81c018d91260052c1d4f89af2dc45d131078",
+        "source_ref": "isolated-synthetic-original"
+      },
+      "mode": "LIVING_RESERVE_REBALANCE",
+      "name": "low_assets_living_sell_4000000",
+      "total": 4000000
+    },
+    {
+      "candidates": [
+        {
+          "capacity_twd": 50000,
+          "gate_receipts": {
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "f7dd936b022225258dec9972560da153d7743de388e1b6141eff703693d26e7c",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "SELL": {
+              "payload": {
+                "scope": "SELL",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "d1f91dc2e1d4e09da23f607f2e40eb73d6f833f5cf1757d65c97ff74310871fc",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 20,
+              "stock_code": "VOO",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "d1098f4abb8a2338c40b6df576e7851979f33041179c9a8b710a25b1cd2b005d",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 50000,
+          "gate_receipts": {
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "24c2f700ca844f8c07554af2df9be2995b44d36053a0bd64175298f068078f69",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "SELL": {
+              "payload": {
+                "scope": "SELL",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "c1990c076bed437b5faafa636493494b7bc19990444e0b5f31f710a35c1fd9fa",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 50,
+              "stock_code": "0050",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "987db975e450438b4a3f0ed16a4c388fa18d3292082f51b10a44e98f04117a9a",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 300000,
+          "gate_receipts": {
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "7d08e1b5f09d513c6a86bf21c4695d8116517c15a19fb9f212b0cdaf36b90ef2",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "SELL": {
+              "payload": {
+                "scope": "SELL",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "ecc6cf23d9bcf625f59d6e14c20c35fc8a6e7302b04847b788eb038abed6f7da",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 80,
+              "stock_code": "00881",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "4027798cc91f974485a1acd3f72eb9cef3488c94891f5e696852ea6d8d53fc7c",
+            "source_ref": "isolated-synthetic-original"
+          }
+        }
+      ],
+      "date": "2026-08-31",
+      "expected": {
+        "adjustment_mode": "LIVING_RESERVE_REBALANCE",
+        "allocation_twd": {
+          "00881": 250000.0
+        },
+        "api_capacity_acceptance": false,
+        "candidates": {
+          "0050": {
+            "capacity_twd": 50000,
+            "eligible": true,
+            "position": 0.4
+          },
+          "00881": {
+            "capacity_twd": 300000,
+            "eligible": true,
+            "position": 0.7
+          },
+          "VOO": {
+            "capacity_twd": 50000,
+            "eligible": true,
+            "position": 0.1
+          }
+        },
+        "decision": "D-222",
+        "remaining_adjustment_twd": 0.0,
+        "selected_symbol": "00881",
+        "side": "SELL",
+        "source_consistency_only": true,
+        "status": "ALLOCATION_REVIEW",
+        "transaction_authorized": false
+      },
+      "living": {
+        "payload": {
+          "ledger_scope": "LIVING_RESERVE_EXCLUDING_EMERGENCY",
+          "living_demand_twd": 1000000,
+          "living_term_twd": 1000000,
+          "reconciled_deposit_ids": [
+            "term-1",
+            "demand-1"
+          ],
+          "settled_unrestricted_available_twd": 0,
+          "valuation_date": "2026-08-31"
+        },
+        "sha256": "de0c3225c920a0523f645139245f81c018d91260052c1d4f89af2dc45d131078",
+        "source_ref": "isolated-synthetic-original"
+      },
+      "mode": "LIVING_RESERVE_REBALANCE",
+      "name": "low_assets_living_sell_6000000",
+      "total": 6000000
+    },
+    {
+      "candidates": [
+        {
+          "capacity_twd": 50000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "474b71945b8379af43bf6b4d9920b818f3c57c4ec1068debf5867c7ba9467967",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "f7dd936b022225258dec9972560da153d7743de388e1b6141eff703693d26e7c",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 20,
+              "stock_code": "VOO",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "d1098f4abb8a2338c40b6df576e7851979f33041179c9a8b710a25b1cd2b005d",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 50000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "405caa79026e8d8d4bf02b5a81c1e93cdcf052255ac097426e5ea884896e0d95",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "24c2f700ca844f8c07554af2df9be2995b44d36053a0bd64175298f068078f69",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 50,
+              "stock_code": "0050",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "987db975e450438b4a3f0ed16a4c388fa18d3292082f51b10a44e98f04117a9a",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 50000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "246abd11d5871829100a3fba3deadfdf6ce3dfdf505a465603113ac025946e2f",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "7d08e1b5f09d513c6a86bf21c4695d8116517c15a19fb9f212b0cdaf36b90ef2",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 80,
+              "stock_code": "00881",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "4027798cc91f974485a1acd3f72eb9cef3488c94891f5e696852ea6d8d53fc7c",
+            "source_ref": "isolated-synthetic-original"
+          }
+        }
+      ],
+      "date": "2026-08-31",
+      "expected": {
+        "adjustment_mode": "LIVING_RESERVE_REBALANCE",
+        "allocation_twd": {
+          "VOO": 50000.0
+        },
+        "api_capacity_acceptance": false,
+        "candidates": {
+          "0050": {
+            "capacity_twd": 50000,
+            "eligible": true,
+            "position": 0.4
+          },
+          "00881": {
+            "capacity_twd": 50000,
+            "eligible": true,
+            "position": 0.7
+          },
+          "VOO": {
+            "capacity_twd": 50000,
+            "eligible": true,
+            "position": 0.1
+          }
+        },
+        "decision": "D-222",
+        "remaining_adjustment_twd": 0.0,
+        "selected_symbol": "VOO",
+        "side": "BUY",
+        "source_consistency_only": true,
+        "status": "ALLOCATION_REVIEW",
+        "transaction_authorized": false
+      },
+      "living": {
+        "payload": {
+          "ledger_scope": "LIVING_RESERVE_EXCLUDING_EMERGENCY",
+          "living_demand_twd": 750000,
+          "living_term_twd": 1550000,
+          "reconciled_deposit_ids": [
+            "term-1",
+            "demand-1"
+          ],
+          "settled_unrestricted_available_twd": 50000,
+          "valuation_date": "2026-08-31"
+        },
+        "sha256": "3e80ff895c5e0eb89797cbf384c9075c681a0291dbc2214e036f9fd095515ae3",
+        "source_ref": "isolated-synthetic-original"
+      },
+      "mode": "LIVING_RESERVE_REBALANCE",
+      "name": "low_assets_living_buy_4000000",
+      "total": 4000000
+    },
+    {
+      "candidates": [
+        {
+          "capacity_twd": 50000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "474b71945b8379af43bf6b4d9920b818f3c57c4ec1068debf5867c7ba9467967",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "VOO",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "f7dd936b022225258dec9972560da153d7743de388e1b6141eff703693d26e7c",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 20,
+              "stock_code": "VOO",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "d1098f4abb8a2338c40b6df576e7851979f33041179c9a8b710a25b1cd2b005d",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 50000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "405caa79026e8d8d4bf02b5a81c1e93cdcf052255ac097426e5ea884896e0d95",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "0050",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "24c2f700ca844f8c07554af2df9be2995b44d36053a0bd64175298f068078f69",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 50,
+              "stock_code": "0050",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "987db975e450438b4a3f0ed16a4c388fa18d3292082f51b10a44e98f04117a9a",
+            "source_ref": "isolated-synthetic-original"
+          }
+        },
+        {
+          "capacity_twd": 50000,
+          "gate_receipts": {
+            "BUY": {
+              "payload": {
+                "scope": "BUY",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "246abd11d5871829100a3fba3deadfdf6ce3dfdf505a465603113ac025946e2f",
+              "source_ref": "isolated-synthetic-original"
+            },
+            "FX": {
+              "payload": {
+                "scope": "FX",
+                "source_evidence": [
+                  {
+                    "payload": {
+                      "synthetic_original": true
+                    },
+                    "sha256": "629537d78c5d7bc2d43a044c5cc338336e4c55ffcee9c2a6e59cef5c5edba1bc",
+                    "source_ref": "isolated-synthetic-original"
+                  }
+                ],
+                "status": "VERIFIED_PASS",
+                "stock_code": "00881",
+                "trading_date": "2026-08-31"
+              },
+              "sha256": "7d08e1b5f09d513c6a86bf21c4695d8116517c15a19fb9f212b0cdaf36b90ef2",
+              "source_ref": "isolated-synthetic-original"
+            }
+          },
+          "source": {
+            "payload": {
+              "adjustment_basis": "DISTRIBUTION_ADJUSTED_52_WEEK",
+              "high52": 110,
+              "low52": 10,
+              "price": 80,
+              "stock_code": "00881",
+              "trading_date": "2026-08-31"
+            },
+            "sha256": "4027798cc91f974485a1acd3f72eb9cef3488c94891f5e696852ea6d8d53fc7c",
+            "source_ref": "isolated-synthetic-original"
+          }
+        }
+      ],
+      "date": "2026-08-31",
+      "expected": {
+        "adjustment_mode": "LIVING_RESERVE_REBALANCE",
+        "allocation_twd": {
+          "VOO": 50000.0
+        },
+        "api_capacity_acceptance": false,
+        "candidates": {
+          "0050": {
+            "capacity_twd": 50000,
+            "eligible": true,
+            "position": 0.4
+          },
+          "00881": {
+            "capacity_twd": 50000,
+            "eligible": true,
+            "position": 0.7
+          },
+          "VOO": {
+            "capacity_twd": 50000,
+            "eligible": true,
+            "position": 0.1
+          }
+        },
+        "decision": "D-222",
+        "remaining_adjustment_twd": 0.0,
+        "selected_symbol": "VOO",
+        "side": "BUY",
+        "source_consistency_only": true,
+        "status": "ALLOCATION_REVIEW",
+        "transaction_authorized": false
+      },
+      "living": {
+        "payload": {
+          "ledger_scope": "LIVING_RESERVE_EXCLUDING_EMERGENCY",
+          "living_demand_twd": 750000,
+          "living_term_twd": 1550000,
+          "reconciled_deposit_ids": [
+            "term-1",
+            "demand-1"
+          ],
+          "settled_unrestricted_available_twd": 50000,
+          "valuation_date": "2026-08-31"
+        },
+        "sha256": "3e80ff895c5e0eb89797cbf384c9075c681a0291dbc2214e036f9fd095515ae3",
+        "source_ref": "isolated-synthetic-original"
+      },
+      "mode": "LIVING_RESERVE_REBALANCE",
+      "name": "low_assets_living_buy_6000000",
+      "total": 6000000
+    }
+  ],
+  "model": {
+    "detailed_target_allocation_2027": {
+      "0050": 0.12,
+      "0056": 0.0325,
+      "00679B": 0.0,
+      "00697B": 0.02,
+      "00713": 0.0433333333,
+      "00719B": 0.1997,
+      "00751B": 0.0,
+      "00850": 0.0,
+      "00865B": 0.025,
+      "00878": 0.0325,
+      "00881": 0.0653,
+      "00919": 0.025,
+      "009826": 0.0216666667,
+      "SGOV": 0.02,
+      "TWD_term_deposits": 0.164,
+      "VOO": 0.2,
+      "VT": 0.025,
+      "demand_deposits_and_cash": 0.006
+    },
+    "execution_policy": {
+      "reserve_allocation_d222": {
+        "annual_inflation_rate": 0.0225,
+        "baseline_not_executable": true,
+        "decision": "D-222",
+        "emergency_etf_excluded_from_strategic_bond_floor": true,
+        "emergency_etf_symbol": "00865B",
+        "emergency_etf_twd_2026_real": 800000,
+        "emergency_term_deposit_twd_2026_real": 800000,
+        "enabled": true,
+        "excess_requires_explicit_allocation": true,
+        "excess_symbols": [
+          "VOO",
+          "0050",
+          "00881"
+        ],
+        "inflation_base_date": "2026-08-31",
+        "living_demand_deposit_twd_2026_real": 750000,
+        "living_term_deposit_twd_2026_real": 1500000,
+        "market_selector": {
+          "buy_selection": "LOWEST_POSITION",
+          "fx_policy": "execution_policy.usd_asset_fx_preference_d215",
+          "no_capacity_reflow": true,
+          "position_basis": "ADJUSTED_52_WEEK_RANGE",
+          "requires_all_three_verified": true,
+          "sell_selection": "HIGHEST_POSITION",
+          "symbols": [
+            "VOO",
+            "0050",
+            "00881"
+          ],
+          "tie_action": "AMBIGUOUS_TIE"
+        },
+        "ordinary_buy_post_purchase_floors_unchanged": true,
+        "ordinary_tw_core_caps": {
+          "0050": 0.13,
+          "00881": 0.0753
+        },
+        "reference_cash_weight": 0.17,
+        "reserve_amounts_are_part_of_total_assets": true,
+        "shortfall_requires_explicit_allocation": true,
+        "shortfall_symbols": [
+          "VOO",
+          "0050",
+          "00881"
+        ],
+        "target_calculator": "scripts/reserve_allocation.py",
+        "target_date_required": true,
+        "unallocated_shortfall_action": "MARKET_ALLOCATION_REQUIRED; no guessed split, fixed target fallback or executable allocation recommendation"
+      }
+    }
+  },
+  "schema": "D222_ORIGINAL_SRPP_SELECTOR_GOLDEN_V1"
+}

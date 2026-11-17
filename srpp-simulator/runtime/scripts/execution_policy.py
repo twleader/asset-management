@@ -651,11 +651,11 @@ def global_build_009826(quote, *, trading_date, held_value_twd, total_assets_twd
     """D-143: the deterministic 009826 build-lot ceiling for one report round.
 
     The build is a strategic accumulation with no price trigger: while 009826 is
-    below its 5% target and the window is open, the ceiling is the pace room
-    (1 lot per day, 3 per trading week, the monthly TWD cap), not an optional
+    below its current 2.16666667% target and the window is open, the ceiling is the pace room
+    (3 lots per day, 6 per trading week, the monthly TWD cap), not an optional
     maximum the model may shrink or round away. Only confirmed buy fills consume
     pace; unfilled proposals consume nothing, so the 09:05 and 12:00 rounds of
-    one day propose the same single lot rather than two.
+    one day share confirmed-fill pace rather than counting proposals as fills.
 
     This is a ceiling, never an order. The caller still applies the D-188 gate,
     calendar, price freshness, best-five depth, exact radar detail and direction,
@@ -734,7 +734,9 @@ def global_build_009826(quote, *, trading_date, held_value_twd, total_assets_twd
             if room["weight"] < 1 - 1e-9:
                 blocks.append("TARGET_WEIGHT_REACHED")
     lots = 0 if blocks else max(min(int(np.floor(v + 1e-9)) for v in room.values()), 0)
-    return {"decision": "D-143", "stock_code": code, "trading_date": trading_date, "places_orders": False,
+    if lots and _finite_positive(total_assets_twd):
+        post_buy_weight=(held_value_twd+lots*lot*reference)/total_assets_twd
+    return {"decision": "D-222", "stock_code": code, "trading_date": trading_date, "places_orders": False,
             "status": "BUILD_LOT_CEILING" if lots else "BUILD_ZERO", "lots": lots, "shares": lots * lot,
             "reasons": blocks or ["WITHIN_PACE_AND_TARGET"],
             "evidence": {"reference_price": reference, "reference_basis": basis,

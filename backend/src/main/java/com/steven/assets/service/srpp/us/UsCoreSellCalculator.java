@@ -61,7 +61,13 @@ public final class UsCoreSellCalculator {
         Set<String> seen = new HashSet<>(); boolean complete = true, any = input.path("items").isEmpty();
         for (JsonNode item : input.path("items")) {
             String code = item.path("stock_code").asText(); require(!code.isBlank() && seen.add(code), "DUPLICATE_CORE_SELL_CANDIDATE");
-            ObjectNode row = evaluate(item, input, policy, before.get(code)); results.add(row);
+            ObjectNode row = evaluate(item, input, policy, before.get(code));
+            // Keep watch evolution, but an unselected dynamic VOO target cannot grant a core sell pass.
+            if ("VOO".equals(code) && com.steven.assets.srpp.SrppReserveAllocation.enabled(model)) {
+                row.put("status", "SELL_TIMING_UNVERIFIED").put("timing_pass", false)
+                    .put("reason", "D222_MARKET_SELECTION_REQUIRED");
+            }
+            results.add(row);
             if (row.path("watch_refreshed").asBoolean() && row.path("next_state").isObject()) after.set(code, row.get("next_state"));
             if ("SELL_TIMING_UNVERIFIED".equals(row.path("status").asText())) { complete = false; addUnique(reasons, row.path("reason").asText()); any |= row.path("watch_refreshed").asBoolean(); } else any = true;
         }

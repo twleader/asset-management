@@ -84,7 +84,40 @@ def expected_formal_document(model: object) -> str:
             market = "美股" if code.isascii() and all(c.isupper() or c == "." for c in code) else "台股"
             key = f"STOCK:{market}:{code}"
         targets[key] = canonical_decimal(weight)
-    return canonical_document({"schema": "SRPP_POLICY_DOCUMENT_V1", "targets": targets})
+    document = {"schema": "SRPP_POLICY_DOCUMENT_V1", "targets": targets}
+    reserve = model.get("execution_policy", {}).get("reserve_allocation_d222", {})
+    if reserve.get("enabled") is True:
+        fields = ("decision", "enabled", "inflation_base_date", "annual_inflation_rate",
+                  "living_term_deposit_twd_2026_real", "living_demand_deposit_twd_2026_real",
+                  "emergency_term_deposit_twd_2026_real", "emergency_etf_twd_2026_real",
+                  "emergency_etf_symbol", "reference_cash_weight", "excess_symbols", "excess_requires_explicit_allocation",
+                  "shortfall_symbols", "shortfall_requires_explicit_allocation", "market_selector")
+        numbers = {"annual_inflation_rate", "living_term_deposit_twd_2026_real",
+                   "living_demand_deposit_twd_2026_real", "emergency_term_deposit_twd_2026_real",
+                   "emergency_etf_twd_2026_real", "reference_cash_weight"}
+        def amount(value):
+            if isinstance(value, bool) or not isinstance(value, (int, Decimal)):
+                raise ReleaseFailure("D222_RESERVE_POLICY_INVALID")
+            return format(Decimal(value), "f").rstrip("0").rstrip(".") if Decimal(value) % 1 else str(int(value))
+        try:
+            projected = {key: amount(reserve[key]) if key in numbers else reserve[key] for key in fields}
+        except KeyError as error:
+            raise ReleaseFailure("D222_RESERVE_POLICY_INVALID") from error
+        import datetime
+        try:
+            valid = projected["decision"] == "D-222" and projected["enabled"] is True and projected["shortfall_requires_explicit_allocation"] is True and projected["excess_requires_explicit_allocation"] is True
+            valid = valid and projected["emergency_etf_symbol"] == "00865B" and projected["shortfall_symbols"] == ["VOO", "0050", "00881"] and projected["excess_symbols"] == ["VOO", "0050", "00881"]
+            valid = valid and datetime.date.fromisoformat(projected["inflation_base_date"]).isoformat() == projected["inflation_base_date"]
+            for key in numbers:
+                number = Decimal(projected[key])
+                valid = valid and number >= 0 and (key == "annual_inflation_rate" or number > 0) and (key not in ("annual_inflation_rate", "reference_cash_weight") or number < 1)
+            valid = valid and isinstance(projected["market_selector"], dict) and projected["market_selector"].get("requires_all_three_verified") is True and projected["market_selector"].get("no_capacity_reflow") is True and projected["market_selector"] == {"symbols": ["VOO", "0050", "00881"], "position_basis": "ADJUSTED_52_WEEK_RANGE", "buy_selection": "LOWEST_POSITION", "sell_selection": "HIGHEST_POSITION", "requires_all_three_verified": True, "tie_action": "AMBIGUOUS_TIE", "no_capacity_reflow": True, "fx_policy": "execution_policy.usd_asset_fx_preference_d215"}
+            if not valid:
+                raise ReleaseFailure("D222_RESERVE_POLICY_INVALID")
+        except (TypeError, ValueError) as error:
+            raise ReleaseFailure("D222_RESERVE_POLICY_INVALID") from error
+        document.update(schema="SRPP_POLICY_DOCUMENT_V2", targetSemantics="BASELINE_NOT_EXECUTABLE", reserveAllocation=projected)
+    return canonical_document(document)
 
 
 def run_read_only(command: list[str], cwd: Path, label: str) -> str:

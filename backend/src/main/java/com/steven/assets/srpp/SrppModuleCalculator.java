@@ -271,6 +271,10 @@ public final class SrppModuleCalculator {
 
     private static ObjectNode allocationModule(AssetSnapshotDto.SnapshotDetailResponse snapshot,
                                                StockPriceService.LiveAssetsResponse live, SupportedPolicy policy) {
+        if (SrppReserveAllocation.SCHEMA.equals(policy.policyDocument().path("schema").asText())) {
+            return module("UNAVAILABLE", List.of("D222_DYNAMIC_TARGETS_REQUIRE_FULL_REPORT"), ASSETS_POLICY,
+                    SrppFormulaCatalog.CALC_ALLOCATION, null);
+        }
         BigDecimal denominator = live.liveTotalAssets();
         if (denominator == null || denominator.signum() <= 0) {
             ObjectNode module = F.objectNode();
