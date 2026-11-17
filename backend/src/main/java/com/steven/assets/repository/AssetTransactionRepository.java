@@ -19,6 +19,9 @@ import java.util.List;
  */
 @Repository
 public interface AssetTransactionRepository extends JpaRepository<AssetTransaction, Long> {
+    @Query("select t from AssetTransaction t where t.ownerUserId=:owner and t.tradeDate=:day and t.assetCode=:code and t.transactionType=:side and t.market='台股' and t.channel=:channel")
+    List<AssetTransaction> findReportCandidates(@Param("owner") Long owner, @Param("day") java.time.LocalDate day, @Param("code") String code, @Param("side") String side, @Param("channel") String channel);
+
 
     /**
      * 列表與匯出用，依交易日期新到舊；owner 由 {@code @Filter} 自動縮。

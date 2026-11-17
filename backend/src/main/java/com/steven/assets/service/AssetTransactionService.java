@@ -35,10 +35,14 @@ public class AssetTransactionService {
     private final AssetTransactionRepository txRepo;
     private final TenantGuard tenantGuard;
     private final TransactionAssetClassService classification;
+    private final com.steven.assets.service.tradereport.TradeReportLedgerGuard reportGuard;
 
     @Transactional
     public AssetTransactionDto.AssetTransactionResponse createAssetTransaction(
             AssetTransactionDto.CreateAssetTransactionRequest req) {
+        Long owner = tenantGuard.requireCurrentUserId();
+        reportGuard.lock(owner);
+        reportGuard.rejectEmailCollision(owner, req.tradeDate(), req.assetCode(), req.transactionType(), req.market(), req.channel(), null);
         AssetTransaction tx = AssetTransaction.builder()
                 .ownerUserId(tenantGuard.requireCurrentUserId())
                 .transactionType(req.transactionType())
@@ -64,10 +68,12 @@ public class AssetTransactionService {
     @Transactional
     public AssetTransactionDto.AssetTransactionResponse updateAssetTransaction(
             Long id, AssetTransactionDto.CreateAssetTransactionRequest req) {
+        reportGuard.lock(tenantGuard.requireCurrentUserId());
         AssetTransaction tx = txRepo.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("AssetTransaction not found: " + id));
         tenantGuard.assertOwned(tx.getOwnerUserId());
 
+        reportGuard.rejectEmailCollision(tx.getOwnerUserId(), req.tradeDate(), req.assetCode(), req.transactionType(), req.market(), req.channel(), id);
         tx.setTransactionType(req.transactionType());
         tx.setAssetType(req.assetType());
         tx.setAssetName(req.assetName());
@@ -91,6 +97,7 @@ public class AssetTransactionService {
 
     @Transactional
     public void deleteAssetTransaction(Long id) {
+        reportGuard.lock(tenantGuard.requireCurrentUserId());
         AssetTransaction tx = txRepo.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("AssetTransaction not found: " + id));
         tenantGuard.assertOwned(tx.getOwnerUserId());

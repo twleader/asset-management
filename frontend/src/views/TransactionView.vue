@@ -27,6 +27,7 @@
           <span class="section-title">{{ selectedYear ? selectedYear + ' 年交易紀錄明細' : '全部交易紀錄明細' }}</span>
           <div style="display:flex;gap:8px">
             <el-button size="small" :icon="Download" :loading="exporting" @click="handleExport">匯出 Excel</el-button>
+            <el-button size="small" plain type="primary" @click="tradeReportImportVisible = true">匯入成交回報</el-button>
             <el-button type="primary" size="small" :icon="Plus" @click="openCreateDialog">新增</el-button>
           </div>
         </div>
@@ -300,6 +301,7 @@
     </el-dialog>
 
     <StockAnalysisDialog v-model="analysisVisible" :stock="analysisStock" />
+    <TradeReportImportDialog v-model="tradeReportImportVisible" @applied="handleTradeReportImportApplied" />
 
     <!-- 新增/編輯 dialog -->
     <el-dialog v-model="dialogVisible" :title="editingId ? '編輯交易紀錄' : '新增交易紀錄'" width="760px"
@@ -462,6 +464,7 @@ import { filterByYearAndMarket, buildStockOptions, filterByStock, filterByTransa
 import { useAuthStore } from '@/stores/authStore'
 import { todayLocal } from '@/utils/localDate'
 import StockAnalysisDialog from '@/components/StockAnalysisDialog.vue'
+import TradeReportImportDialog from '@/components/TradeReportImportDialog.vue'
 import { createClassificationDraft } from '@/utils/transactionClassificationDraft'
 
 const TX_TYPES = ['買', '賣']
@@ -478,6 +481,7 @@ const marketFilter = ref('')   // 市場 tab：''＝全部，否則 台股/美�
 const stockFilter = ref([])    // 股票下拉篩選（可複選）：元素為 `${assetCode}__${market}` key，空陣列＝全部
 const transactionTypeFilter = ref('') // 交易類型單選：空字串＝全部
 const dialogVisible = ref(false)
+const tradeReportImportVisible = ref(false)
 const saving = ref(false)
 const exporting = ref(false)
 const editingId = ref(null)
@@ -644,6 +648,15 @@ async function load() {
   categories.value = data.categories ?? []
   marketOptions.value = (data.markets ?? []).map(m => ({ code: m.code, label: m.displayName || m.code }))
   brokerOptions.value = (data.brokers ?? []).map(b => b.displayName)
+}
+
+// Task 601：apply 成功只刷新一次現有帳本清單；匯入 dialog 不碰新增／編輯表單草稿。
+async function handleTradeReportImportApplied() {
+  try {
+    await load()
+  } catch {
+    // Axios 的既有錯誤攔截器會提示清單讀取失敗；apply 本身已成功。
+  }
 }
 
 async function loadSchedules() {

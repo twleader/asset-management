@@ -23,6 +23,8 @@ public class TransactionBffRoutes {
         return builder.routes()
                 .route("transaction-route", r -> r
                         .path("/api/asset-transactions/**")
+                        .and().predicate(exchange -> !exchange.getRequest().getURI().getPath()
+                                .startsWith(TradeReportImportBoundary.RAW_PREFIX))
                         .uri(businessServicesUrl))
                 .build();
     }

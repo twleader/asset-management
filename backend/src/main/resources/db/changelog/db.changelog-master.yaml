@@ -537,3 +537,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/v1.167.0-srpp-subscription-ai.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/v1.168.0-broker-trade-report-import.sql
+      relativeToChangelogFile: false

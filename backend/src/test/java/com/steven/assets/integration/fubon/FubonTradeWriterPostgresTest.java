@@ -76,7 +76,7 @@ import static org.mockito.Mockito.when;
 @DataJpaTest(showSql = false, properties = {"spring.jpa.hibernate.ddl-auto=create-drop", "spring.liquibase.enabled=false",
         "app.admin-email=trade-test@example.invalid", "fubon.sync-owner-email=trade-test@example.invalid"})
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import({JpaFubonSyncFreshness.class, FubonTradeWriter.class, BrokerFilledTradeCostProjector.class,
+@Import({com.steven.assets.service.tradereport.TradeReportLedgerGuard.class, JpaFubonSyncFreshness.class, FubonTradeWriter.class, BrokerFilledTradeCostProjector.class,
         AssetSnapshotMutationLock.class, SnapshotAggregateCalculator.class, UserAdminService.class, CurrentUserContext.class,
         TenantFilterAspect.class, FubonTradeWriterPostgresTest.Config.class})
 @Testcontainers

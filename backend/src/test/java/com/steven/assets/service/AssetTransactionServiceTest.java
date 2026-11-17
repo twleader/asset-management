@@ -36,6 +36,7 @@ class AssetTransactionServiceTest {
     @Mock private AssetTransactionRepository txRepo;
     @Mock private TenantGuard tenantGuard;
     @Mock private TransactionAssetClassService classification;
+    @Mock private com.steven.assets.service.tradereport.TradeReportLedgerGuard reportGuard;
 
     @BeforeEach
     void classificationProjection() {
