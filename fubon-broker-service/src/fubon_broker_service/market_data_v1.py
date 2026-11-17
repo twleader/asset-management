@@ -137,8 +137,12 @@ class MarketDataV1Service:
             allowed = {"date", "type", "exchange", "market", "symbol", "timeframe", "data"}
             if not set(source).issubset(allowed) or "data" not in source:
                 raise ValueError("SCHEMA_INVALID")
-            if "timeframe" in source and source["timeframe"] != 1:
-                raise ValueError("SCHEMA_INVALID")
+            if "timeframe" in source:
+                timeframe = source["timeframe"]
+                # SDK responses use both exact representations; wire output stays integer 1.
+                if not ((type(timeframe) is int and timeframe == 1)
+                        or (type(timeframe) is str and timeframe == "1")):
+                    raise ValueError("SCHEMA_INVALID")
             identity = _root_identity(source, symbol, query_date, include_name=False)
             rows = source.get("data")
             if not isinstance(rows, list) or len(rows) > 271:

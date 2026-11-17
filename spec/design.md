@@ -14115,3 +14115,12 @@ external-materials新增窄 VanguardDividendSource，閉合VOO/VT mapping。只�
 ### Task599 SRPP projection request contract
 
 只修輸入/驗證邊界：BFF SrppProjectionQuery 及 PublicSrppProjectionService 的 query/response symbol regex 同步；維持既有 OpenAPI response $ref。`SrppProjectionRequest.symbols` 與 `SrppSymbolRuleFactsSymbol.symbol` 使用 `^(?:[0-9]{4,5}[A-Z]?|[0-9]{6})$`，維持 single-key CSV、去重、最多60碼及既有 frozen evidence service。order parser 不放寬。SRPP `verify_srpp_projection_api.py` 新增純 preflight 模式 `--prepare-decisions <JSON>`，與 response inputs 互斥；先核對 published Swagger、calculationRunId、既有完整 report.verify，再以 check_decisions 檢查 `{legId,verdict,amount,reason}` 陣列與 eligible leg 順序/唯一性，序列化 ADOPT=2欄、WAIT/VETO=3欄、REDUCE=4欄。CLI 成功只輸出已驗 base identity 與 `decisions`、`asOf`，失敗 exit2 且不輸出任何待傳請求；不自行挑 reason、不連線。呼叫端使用同輪 owner/common identity 及 preflight 參數送既有 GET，仍要原始 response 驗證。修補 check_decisions 對 REDUCE amount=None 的漏檢以與 server 相符。文件明確要求兩軌先執行 preflight，記錄理由仍由 LLM 完成。鏡像/metadata 必須先在乾淨 managed SRPP worktree 依 renderer→sync→checks 完成，之後 caller/validator 變更再由正式工具重產 runtime/manifest 與 authority，所有來源差異列入驗收。沒有新 DB schema、route、外部 I/O 或 broker write。
+
+
+## Task600：009826 資料不足的來源修復與可讀診斷
+
+當日富邦分鐘 root timeframe 在 Python 邊界只接受 type(value) is int 且 value==1，或 type(value) is str 且 value=="1"；canonical response 固定整數1。missing欄位沿舊相容，任何其他值拒絕，所有 row/parser/完成時間規則原樣。這只修source representation，背景producer仍唯一writer；不新增呼叫、排程或API。
+
+TradingRadarRuleEngine.complete的條件不變，純診斷helper列出同一StockInput的真缺項；TradingRadarService full detail 由 acceptedPrice.indicatorSeriesRows.size()提供完成日K實際根數（不含live），在三軌風險既有通用句後追加；不改StockInput/DTO形狀或另查資料庫。若 technical basis 不可用，不能將已有原始列誤稱已可計算技術指標，根數文案須明示是本次完成日K輸入。配息揭露讀Evidence.dividendEvent同一resolution的status/knownAt/missingReason，保留原共同揭露與horizon路由；不額外讀來源，不推測無配息。RadarIntradayCandlePolicy.disclosure只在UNAVAILABLE加入原因分類與代碼，WAIT/CONFIRMED與來源證據原樣。所有診斷只進risks/audit，不進支持reasons，不改三軌分數或動作。
+
+不新增schema、route、query、cache、DB欄位、外部I/O或policy bundle。RULE_VERSION與Swagger不變。驗收由Python合成SDK正反例、backend純診斷及production wiring測試證明，再由重建後既有背景同步和9090單檔純讀回應驗證；行情若依市場時間自然改變不能作action等價反例，等價以固定fixture為準。

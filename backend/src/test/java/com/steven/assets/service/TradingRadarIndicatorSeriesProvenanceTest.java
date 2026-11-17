@@ -237,6 +237,76 @@ class TradingRadarIndicatorSeriesProvenanceTest {
                 "盤中 accepted price 走 live，as-of 為當日");
     }
 
+    @Test
+    void shortHistoryExplainsActualCompletedCountAndMissingAnnualInputsWithoutCountingLive() {
+        stubBaseline();
+        LocalDate completed = TODAY.minusDays(1);
+        when(priceHistoryRepo.findRecentN(CODE, TW, 500))
+                .thenReturn(twStockRows(completed, 71, Set.of(completed)));
+        when(priceQueryService.getLive(CODE, TW)).thenReturn(Optional.of(live(TODAY, "101")));
+        var decision = decisionAt(INTRADAY);
+        assertEquals("NO_TRADE", decision.action());
+        assertEquals("NO_TRADE", decision.shortAction());
+        assertEquals("NO_TRADE", decision.swingAction());
+        assertEquals(null, decision.score());
+        assertFalse(decision.dataComplete());
+        assertNotNull(decision.monthlyMa());
+        assertNotNull(decision.quarterlyMa());
+        String detail = decision.risks().stream().filter(r -> r.startsWith("本次完成日 K 輸入："))
+                .findFirst().orElseThrow();
+        assertEquals("本次完成日 K 輸入：目前 71／241 根（不含盤中 K）；必要資料缺少：MA240、MA240 兩日確認。", detail);
+        assertTrue(decision.shortRisks().contains(detail));
+        assertTrue(decision.swingRisks().contains(detail));
+        assertTrue(decision.risks().contains(INSUFFICIENT_DATA_RISK));
+        assertFalse(decision.reasons().contains(detail));
+        assertFalse(decision.shortReasons().contains(detail));
+        assertFalse(decision.swingReasons().contains(detail));
+    }
+
+    @Test
+    void twoHundredFortyCompletedBarsOnlyLackAnnualConfirmation() {
+        stubBaseline();
+        when(priceHistoryRepo.findRecentN(CODE, TW, 500))
+                .thenReturn(twStockRows(TODAY, 240, Set.of(TODAY)));
+        var decision = decisionAt(AFTER_CLOSE);
+        assertNotNull(decision.annualMa());
+        assertEquals("NO_TRADE", decision.action());
+        assertTrue(decision.risks().contains(
+                "本次完成日 K 輸入：目前 240／241 根（不含盤中 K）；必要資料缺少：MA240 兩日確認。"));
+    }
+
+    @Test
+    void gapDisclosureDoesNotTreatPresentHistoryAsUsableTechnicalBasisOrRequireEquityMarketForBonds() {
+        var engine = new TradingRadarRuleEngine();
+        var unavailableBasis = new TradingRadarRuleEngine.StockInput(
+                false, BigDecimal.TEN, BigDecimal.ONE, BigDecimal.ONE,
+                null, null, null, TradingRadarRuleEngine.Confirmation.UNAVAILABLE,
+                TradingRadarRuleEngine.Confirmation.UNAVAILABLE, TradingRadarRuleEngine.Confirmation.UNAVAILABLE,
+                TradingRadarRuleEngine.InstrumentType.EQUITY, TradingRadarRuleEngine.MarketRegime.RISK_ON,
+                false, null, null, null, null, null, null, null);
+        assertEquals(List.of("MA20", "MA60", "MA240", "K", "D", "MA20 兩日確認", "MA60 兩日確認", "MA240 兩日確認"),
+                engine.requiredInputGaps(unavailableBasis));
+        var missingEverything = new TradingRadarRuleEngine.StockInput(
+                false, null, null, null, null, null, null, null, null, null,
+                null, null, false, null, null, null, null, null, null, null);
+        assertEquals(List.of("價格", "漲跌幅", "MA20", "MA60", "MA240", "K", "D", "MA20 兩日確認",
+                        "MA60 兩日確認", "MA240 兩日確認", "商品類型", "大盤狀態"),
+                engine.requiredInputGaps(missingEverything));
+        for (var type : List.of(TradingRadarRuleEngine.InstrumentType.EQUITY,
+                TradingRadarRuleEngine.InstrumentType.BOND)) {
+            var input = new TradingRadarRuleEngine.StockInput(
+                    false, BigDecimal.TEN, BigDecimal.ONE, BigDecimal.ONE,
+                    new TradingRadarRuleEngine.Indicators(BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE,
+                            BigDecimal.ONE, BigDecimal.ONE), null, null,
+                    TradingRadarRuleEngine.Confirmation.ABOVE, TradingRadarRuleEngine.Confirmation.ABOVE,
+                    TradingRadarRuleEngine.Confirmation.ABOVE, type,
+                    TradingRadarRuleEngine.MarketRegime.DATA_INCOMPLETE, false,
+                    null, null, null, null, null, null, null);
+            assertEquals(type == TradingRadarRuleEngine.InstrumentType.BOND ? List.of() : List.of("大盤狀態"),
+                    engine.requiredInputGaps(input));
+        }
+    }
+
     // ─────────────────────────────── helpers ───────────────────────────────
 
     private TradingRadarDto.StockDecision decisionAt(Instant decisionInstant) {

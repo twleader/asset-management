@@ -3802,6 +3802,27 @@ public class TradingRadarRuleEngine {
                 && available(input.ma240Confirmation());
     }
 
+    /** Pure disclosure of the existing completeness contract; never used to select an action. */
+    List<String> requiredInputGaps(StockInput input) {
+        if (input == null) return List.of("個股判斷輸入");
+        List<String> missing = new ArrayList<>();
+        if (input.price() == null) missing.add("價格");
+        if (input.changePercent() == null) missing.add("漲跌幅");
+        Indicators ind = input.indicators();
+        if (ind == null || ind.ma20() == null) missing.add("MA20");
+        if (ind == null || ind.ma60() == null) missing.add("MA60");
+        if (ind == null || ind.ma240() == null) missing.add("MA240");
+        if (ind == null || ind.k() == null) missing.add("K");
+        if (ind == null || ind.d() == null) missing.add("D");
+        if (!available(input.ma20Confirmation())) missing.add("MA20 兩日確認");
+        if (!available(input.ma60Confirmation())) missing.add("MA60 兩日確認");
+        if (!available(input.ma240Confirmation())) missing.add("MA240 兩日確認");
+        if (input.instrumentType() == null) missing.add("商品類型");
+        if (input.marketRegime() == null || equityMarketApplies(input)
+                && input.marketRegime() == MarketRegime.DATA_INCOMPLETE) missing.add("大盤狀態");
+        return List.copyOf(missing);
+    }
+
     private boolean complete(StockInput input) {
         return input != null
                 && input.price() != null

@@ -8,6 +8,34 @@ from fubon_broker_service.market_data_v1 import MarketDataV1Error, MarketDataV1S
 from test_task408_market_data import FixedGateway
 
 
+def test_sdk_string_timeframe_matches_integer_normalized_wire_and_absent_compatibility():
+    gateway = FixedGateway()
+    service = MarketDataV1Service(gateway, now=lambda: datetime(2026, 8, 28, 5, 40, tzinfo=UTC))
+    integer_result = service.candles("2330")
+    gateway.candle_source["timeframe"] = "1"
+    assert service.candles("2330") == integer_result
+    del gateway.candle_source["timeframe"]
+    assert service.candles("2330") == integer_result
+    assert type(integer_result["timeframe"]) is int
+    assert integer_result["timeframe"] == 1
+
+
+@pytest.mark.parametrize("timeframe", [True, False, 1.0, None, 0, 5, "01", " 1", "1 ", "5", "", [], {}])
+def test_sdk_timeframe_rejects_coercions_and_other_periods(timeframe):
+    gateway = FixedGateway()
+    gateway.candle_source["timeframe"] = timeframe
+    with pytest.raises(MarketDataV1Error, match="SCHEMA_INVALID"):
+        MarketDataV1Service(gateway, now=lambda: datetime(2026, 8, 28, 5, 40, tzinfo=UTC)).candles("2330")
+
+
+@pytest.mark.parametrize("change", [{"symbol": "009826"}, {"type": "oddlot"}, {"unexpected": "field"}])
+def test_sdk_string_timeframe_preserves_root_identity_and_closed_schema_checks(change):
+    gateway = FixedGateway()
+    gateway.candle_source.update({"timeframe": "1", **change})
+    with pytest.raises(MarketDataV1Error, match="SCHEMA_INVALID"):
+        MarketDataV1Service(gateway, now=lambda: datetime(2026, 8, 28, 5, 40, tzinfo=UTC)).candles("2330")
+
+
 def test_all_271_minutes_and_closing_auction_are_valid_raw_candles_without_completion_claim():
     gateway = FixedGateway()
     started = datetime(2026, 8, 28, 5, 40, tzinfo=UTC)

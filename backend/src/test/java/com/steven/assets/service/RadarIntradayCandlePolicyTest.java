@@ -123,6 +123,20 @@ class RadarIntradayCandlePolicyTest {
             assertThat(RadarIntradayCandlePolicy.apply(actions(action), missing, false).shortAction()).isEqualTo(action);
         assertThat(RadarIntradayCandlePolicy.apply(actions(WATCH), evaluate(capture(rising())), false).shortAction()).isEqualTo(WATCH);
     }
+    @Test void unavailableDisclosureNamesExistingReasonAndFallsBackForUnknownCodes() {
+        for (String reason : List.of("CAPTURE_MISSING", "CAPTURE_UNAVAILABLE", "CAPTURE_STALE",
+                "MISSING_CONSECUTIVE_COMPLETED_BARS", "COMPLETION_EVIDENCE_INVALID", "FUTURE_REASON")) {
+            var confirmation = new RadarIntradayCandlePolicy.Confirmation("UNAVAILABLE", reason,
+                    DAY, null, null, null, null, null);
+            String disclosure = RadarIntradayCandlePolicy.disclosure(confirmation);
+            assertThat(disclosure).contains("盤中完成 K 線資料不足", "原因：", reason, "來源日 " + DAY);
+            assertThat(disclosure).doesNotContain("已確認：");
+        }
+        var missing = new RadarIntradayCandlePolicy.Confirmation("UNAVAILABLE", "CAPTURE_UNAVAILABLE",
+                DAY, null, null, null, null, null);
+        assertThat(RadarIntradayCandlePolicy.disclosure(missing)).contains("分鐘 K 來源擷取失敗");
+    }
+
     @Test void redBarHigherCloseAndNonContractingVolumeAreEachRequired() {
         var bearish = rising(); var latestFiveLast = bearish.get(9);
         bearish.set(9, new RadarIntradayCandlePort.Candle(latestFiveLast.candleAt(), latestFiveLast.open(),

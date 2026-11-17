@@ -182,6 +182,14 @@ public final class TradingRadarEvidenceGate {
                 mediumDiagnostics.add(incompleteDividend);
                 shortDiagnostics.add(incompleteDividend);
                 if (swingAction != null) swingDiagnostics.add(incompleteDividend);
+                var dividend = evidence.dividendEvent();
+                String detail = "配息事件資料狀態：" + dividend.status()
+                        + (dividend.knownAt() == null ? "" : "；證據已知時間：" + dividend.knownAt())
+                        + (dividend.missingReason() == null || dividend.missingReason().isBlank()
+                            ? "" : "；原因：" + dividend.missingReason()) + "。";
+                mediumDiagnostics.add(detail);
+                shortDiagnostics.add(detail);
+                if (swingAction != null) swingDiagnostics.add(detail);
             }
             double threshold = confidenceThreshold == null ? .70
                     : Math.max(0.0, Math.min(1.0, confidenceThreshold.doubleValue()));

@@ -1,0 +1,32 @@
+{
+  "TradingRadarIndicatorSeriesProvenanceTest": {
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "RadarIntradayCandlePolicyTest": {
+    "tests": 9,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "TradingRadarEvidenceConfidenceResolverTest": {
+    "tests": 24,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "TradingRadarEvidenceGateTest": {
+    "tests": 6,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "python": {
+    "tests": 57,
+    "failures": 0,
+    "errors": 0,
+    "source": "investigate agent: isolated Python3.13, test_task487_intraday_candles.py + test_task408_market_data.py"
+  }
+}

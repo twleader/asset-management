@@ -1,0 +1,56 @@
+{
+  "Codex-1200-120127": {
+    "source": "/Users/steven/Project/SRPP/data/output/daily_runs/2026-11-17/Codex-1200-120127/report_facts.json",
+    "calculatorLots": 1,
+    "strategicStatus": "NOT_HIGH_BUY_ALLOWED",
+    "decision": "VETO",
+    "recommendedLots": 0,
+    "gates": {
+      "exact_radar": {
+        "status": "UNVERIFIED",
+        "evidence_ref": "radar_009826.json",
+        "reason_codes": [
+          "EXACT_RADAR_REQUIRED_TECHNICALS_INCOMPLETE"
+        ]
+      },
+      "radar_direction": {
+        "status": "BLOCKED",
+        "evidence_ref": "radar_009826.json",
+        "reason_codes": [
+          "RADAR_NO_TRADE"
+        ]
+      },
+      "quote_freshness": {
+        "status": "UNVERIFIED",
+        "evidence_ref": "quote_final_check.json",
+        "reason_codes": [
+          "LIMIT_FRESHNESS_UNVERIFIED"
+        ]
+      }
+    }
+  },
+  "Claude-1200-120810": {
+    "source": "/Users/steven/Project/SRPP/data/output/daily_runs/2026-11-17/Claude-1200-120810/report_facts.json",
+    "calculatorLots": 1,
+    "strategicStatus": "NOT_HIGH_BUY_ALLOWED",
+    "decision": "ADOPT",
+    "recommendedLots": 1,
+    "gates": {
+      "exact_radar": {
+        "status": "PASS",
+        "evidence_ref": "radar-detail-009826:TW_RULES_V28",
+        "reason_codes": []
+      },
+      "radar_direction": {
+        "status": "PASS",
+        "evidence_ref": "NO_TRADE/NO_TRADE-neutral",
+        "reason_codes": []
+      },
+      "quote_freshness": {
+        "status": "PASS",
+        "evidence_ref": "D175-default-5/10min:2026-11-17T12:24:39.502737000",
+        "reason_codes": []
+      }
+    }
+  }
+}

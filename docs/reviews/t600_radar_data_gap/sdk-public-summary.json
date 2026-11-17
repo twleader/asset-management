@@ -1,0 +1,18 @@
+{
+  "capturedDate": "2026-11-17",
+  "symbol": "009826",
+  "root": {
+    "date": "2026-11-17",
+    "type": "EQUITY",
+    "exchange": "TWSE",
+    "market": "TSE",
+    "symbol": "009826",
+    "timeframe": "1"
+  },
+  "rows": 211,
+  "allRowsValidatedByCurrentCandleParser": true,
+  "badRowCount": 0,
+  "firstCandleAt": "2026-11-17T09:00:00.000+08:00",
+  "lastCandleAt": "2026-11-17T12:41:00.000+08:00",
+  "rootCause": "SDK returns timeframe string 1; adapter compares against integer 1 and rejects"
+}

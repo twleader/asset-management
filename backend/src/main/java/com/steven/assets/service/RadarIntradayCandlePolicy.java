@@ -141,6 +141,24 @@ public final class RadarIntradayCandlePolicy {
                     case "ONE_MINUTE_WEAKENING" -> "最新完成 1 分 K 轉弱，暫緩短線買進。";
                     default -> "盤中價量尚未確認，暫緩短線買進。";
                 } : "盤中完成 K 線資料不足、過期或無法驗證，暫緩短線買進。";
+        if ("UNAVAILABLE".equals(confirmation.status())) {
+            String reason = confirmation.reason();
+            String detail = reason == null ? "原因尚未提供" : switch (reason) {
+                case "MARKET_CALENDAR_UNAVAILABLE" -> "交易日曆無法確認";
+                case "CAPTURE_MISSING" -> "尚無當日分鐘 K 擷取紀錄";
+                case "CAPTURE_UNAVAILABLE" -> "分鐘 K 來源擷取失敗";
+                case "CAPTURE_CONFLICT" -> "分鐘 K 來源紀錄衝突";
+                case "CAPTURE_IDENTITY_MISMATCH" -> "分鐘 K 來源身分或日期不符";
+                case "CAPTURE_STALE" -> "分鐘 K 擷取或最新完成時間已過期";
+                case "COMPLETION_EVIDENCE_INVALID" -> "分鐘 K 完成時間證據無效";
+                case "INSUFFICIENT_COMPLETED_BARS" -> "尚不足兩組完整 5 分 K";
+                case "MISSING_CONSECUTIVE_COMPLETED_BARS" -> "最近完整區間缺少連續分鐘 K";
+                case "MINUTE_FACT_INVALID" -> "分鐘 K 價量或時間資料無效";
+                case "LATEST_COMPLETED_MISMATCH" -> "最新完成分鐘與擷取紀錄不一致";
+                default -> "分鐘 K 資料尚無法驗證";
+            };
+            message += "原因：" + detail + (reason == null ? "" : "（" + reason + "）") + "。";
+        }
         if (confirmation.sourceDate() != null) message += "來源日 " + confirmation.sourceDate() + "。";
         if (confirmation.lastCompletedAt() != null)
             message += "最新完成時間 " + confirmation.lastCompletedAt().atZone(TAIPEI) + "。";
