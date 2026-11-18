@@ -14190,3 +14190,10 @@ D222不足不回退normal_equity_target固定56.53%；牛市日頻核心保留�
 Java完整報告可沿現有凍結market extra之daily highPrice/lowPrice、dividends與calendar純算調整區間facts；不新增I/O或對外wire。現有producer未提供D215完整FX偏好與方向capacity receipt時，選擇仍未知，facts/receipts明示UNAVAILABLE。不可把price已verified等同FX偏好通過；本機selector只為方案檢視，不繞過正式API阻擋或將source_consistency_only當正式容量接受。
 
 D222 selector並分INITIAL_ALLOCATION與LIVING_RESERVE_REBALANCE兩模式。INITIAL才比較17%與385萬目標；LIVING須獨立生活子帳living_reserve wrapper，其payload恰提供valuation_date、ledger_scope=LIVING_RESERVE_EXCLUDING_EMERGENCY、非空唯一reconciled_deposit_ids、非負numeric living_term_twd/living_demand_twd/settled_unrestricted_available_twd。hash與原文同前且日期同輪；缺時D222_LIVING_SUBLEDGER_UNAVAILABLE，不以銀行總存款推定。LIVING delta=兩生活子帳現值合計-indexed225萬元；正差買進額另受已交割可動available限制，負差選最高者賣出補生活。這是現況資金流、不改長期target；只有INITIAL完整分配可產target_projection。兩者仍source consistency only、無API容量或交易接受；正式producer目前無獨立生活子帳，須具名揭露。此語義澄清未再spec複審，由獨立arch查證。
+
+
+### Task 604：D-222 報告計算事實傳輸對齊
+
+Business 已產生的 ALLOCATION_GAP protectedReserveTarget/referenceCashDelta/equityTarget 由 BFF 固定 enum 接受；新增三個名稱的 unit/subject 邊界驗證，不重算金融結果。前兩者 TWD，equityTarget RATIO（已知值0..1），三者 subject null；protectedReserveTarget 已知值不得負，referenceCashDelta 可負。OpenAPI 同步三個 enum 與欄位語義，原 renderer 重產 Swagger 並交 SRPP 既有 identity 發布鏈；無新路由、schemaVersion 或資料庫變更。以合成封存包測試正負 delta、未知值、錯單位/subject、未知name及完整原始失敗包的本機維護重現；實際部署須從公開9090讀到200與完整驗證，不以health取代。
+
+固定傳輸名稱亦包含既有條件式 reserveSelectionLow52/reserveSelectionHigh52/reserveSelectionPosition52：subject限VOO、0050、00881，前兩者正數且VOO單位USD、台股TWD，位置RATIO在0..1；單一標的區間成功即可存在，不要求其餘標的或selector成功。marketAdjustmentReviewAmount subject同三標的、TWD非負；marketAdjustmentUnallocated subject null、TWD非負。未知值維持value=null、quality="UNAVAILABLE"且reason為非空字串；不允許quality=null。上述僅凍結事實傳輸，不表示selector取得容量接受或可交易，原missing/receipt/模組狀態原樣保留，不新增跨fact重算。

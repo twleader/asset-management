@@ -11133,7 +11133,7 @@ GET只讀背景已發布不可變包，零DB/Redis/觀察帳寫入、producer觸
 
 ### `SrppReportFactAllocationGap`
 
-正式 target 權重、現值、分母、缺口、受保護現金與債券動態帶，每個 name 是該正式 scope 的欄位身份。
+正式target權重、現值、分母、缺口、受保護現金與債券動態帶。D-222單一標的區間成功即可傳輸其三個range facts，不要求其餘候選或selector成功；marketAdjustment僅來源一致性檢視，不代表API容量接受或可交易，原missing/receipt/模組狀態保持不變。
 
 完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
 
@@ -11152,7 +11152,7 @@ GET只讀背景已發布不可變包，零DB/Redis/觀察帳寫入、producer觸
   "properties": {
     "name": {
       "type": "string",
-      "description": "正式 target 權重、現值、分母、缺口、受保護現金與債券動態帶；以下名稱按上述用途順序給出原始及衍生計算量；允許值：targetWeight, currentValue, currentWeight, targetValue, gapValue, normalizedGap, protectedCashWeight, bondTarget, bondFloor, bondCap, emergencyTarget, emergencyGap。",
+      "description": "正式 target 權重、現值、分母、缺口、受保護現金與債券動態帶；以下名稱按上述用途順序給出原始及衍生計算量；允許值：targetWeight, currentValue, currentWeight, targetValue, gapValue, normalizedGap, protectedCashWeight, bondTarget, bondFloor, bondCap, emergencyTarget, emergencyGap；D-222新增protectedReserveTarget、referenceCashDelta、equityTarget、reserveSelectionLow52、reserveSelectionHigh52、reserveSelectionPosition52、marketAdjustmentReviewAmount、marketAdjustmentUnallocated。",
       "enum": [
         "targetWeight",
         "currentValue",
@@ -11165,7 +11165,15 @@ GET只讀背景已發布不可變包，零DB/Redis/觀察帳寫入、producer觸
         "bondFloor",
         "bondCap",
         "emergencyTarget",
-        "emergencyGap"
+        "emergencyGap",
+        "protectedReserveTarget",
+        "referenceCashDelta",
+        "equityTarget",
+        "reserveSelectionLow52",
+        "reserveSelectionHigh52",
+        "reserveSelectionPosition52",
+        "marketAdjustmentReviewAmount",
+        "marketAdjustmentUnallocated"
       ]
     },
     "subject": {
@@ -11173,14 +11181,14 @@ GET只讀背景已發布不可變包，零DB/Redis/觀察帳寫入、producer觸
         "string",
         "null"
       ],
-      "description": "逐 holding/bank/target/candidate ID，總額為 null；不由顯示名稱猜分類；未知或不適用為 null。"
+      "description": "逐 holding/bank/target/candidate ID，總額為 null；D-222 protectedReserveTarget、referenceCashDelta、equityTarget、marketAdjustmentUnallocated必須null；reserveSelectionLow52/High52/Position52及marketAdjustmentReviewAmount限VOO、0050、00881。"
     },
     "value": {
       "type": [
         "string",
         "null"
       ],
-      "description": "正規化 Decimal 字串；無尾零、不含科學記號，不接受 -0；已知0為 \"0\"，來源未知為 null；未知或不適用為 null。",
+      "description": "正規化Decimal字串；無尾零、不含科學記號、不接受-0。D-222 referenceCashDelta可正負；protectedReserveTarget與marketAdjustmentReviewAmount/Unallocated已知值非負，reserveSelectionLow52/High52已知值正數，equityTarget與reserveSelectionPosition52在0..1。未知維持value=null、quality=UNAVAILABLE與非空reason，不允許quality=null。",
       "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
     },
     "unit": {
@@ -11204,7 +11212,7 @@ GET只讀背景已發布不可變包，零DB/Redis/觀察帳寫入、producer觸
           "description": "正式來源驗證的 ISO 4217 三碼大寫原幣別，包括 TWD/USD/EUR/JPY；不自動換匯。"
         }
       ],
-      "description": "數值單位：固定非金額單位或正式 ISO 三碼原幣別；銀行餘額／交割／應收均保留實際 currency，Twd 欄固定 TWD。"
+      "description": "數值單位：D-222 protectedReserveTarget、referenceCashDelta、marketAdjustmentReviewAmount/Unallocated固定TWD；equityTarget與reserveSelectionPosition52固定RATIO；reserveSelectionLow52/High52在VOO為USD、0050/00881為TWD。其他欄保留正式來源單位，不自動換匯。"
     },
     "quality": {
       "type": "string",
@@ -11223,16 +11231,16 @@ GET只讀背景已發布不可變包，零DB/Redis/觀察帳寫入、producer觸
       "description": "品質缺口具名原因；UNAVAILABLE 必須非空；已核實值可 null；未知或不適用為 null。"
     }
   },
-  "description": "正式 target 權重、現值、分母、缺口、受保護現金與債券動態帶，每個 name 是該正式 scope 的欄位身份。"
+  "description": "正式target權重、現值、分母、缺口、受保護現金與債券動態帶。D-222單一標的區間成功即可傳輸其三個range facts，不要求其餘候選或selector成功；marketAdjustment僅來源一致性檢視，不代表API容量接受或可交易，原missing/receipt/模組狀態保持不變。"
 }
 ```
 
 | 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
 | --- | --- | --- | --- | --- | --- |
-| `name` | 是 | `string` | 否 | enum: `targetWeight`, `currentValue`, `currentWeight`, `targetValue`, `gapValue`, `normalizedGap`, `protectedCashWeight`, `bondTarget`, `bondFloor`, `bondCap`, `emergencyTarget`, `emergencyGap` | 正式 target 權重、現值、分母、缺口、受保護現金與債券動態帶；以下名稱按上述用途順序給出原始及衍生計算量；允許值：targetWeight, currentValue, currentWeight, targetValue, gapValue, normalizedGap, protectedCashWeight, bondTarget, bondFloor, bondCap, emergencyTarget, emergencyGap。 |
-| `subject` | 是 | `string | null` | 是 |  | 逐 holding/bank/target/candidate ID，總額為 null；不由顯示名稱猜分類；未知或不適用為 null。 |
-| `value` | 是 | `string | null` | 是 | pattern: ^-?(0\|[1-9][0-9]*)(\.[0-9]*[1-9])?$ | 正規化 Decimal 字串；無尾零、不含科學記號，不接受 -0；已知0為 "0"，來源未知為 null；未知或不適用為 null。 |
-| `unit` | 是 | `string | string` | 否 |  | 數值單位：固定非金額單位或正式 ISO 三碼原幣別；銀行餘額／交割／應收均保留實際 currency，Twd 欄固定 TWD。 |
+| `name` | 是 | `string` | 否 | enum: `targetWeight`, `currentValue`, `currentWeight`, `targetValue`, `gapValue`, `normalizedGap`, `protectedCashWeight`, `bondTarget`, `bondFloor`, `bondCap`, `emergencyTarget`, `emergencyGap`, `protectedReserveTarget`, `referenceCashDelta`, `equityTarget`, `reserveSelectionLow52`, `reserveSelectionHigh52`, `reserveSelectionPosition52`, `marketAdjustmentReviewAmount`, `marketAdjustmentUnallocated` | 正式 target 權重、現值、分母、缺口、受保護現金與債券動態帶；以下名稱按上述用途順序給出原始及衍生計算量；允許值：targetWeight, currentValue, currentWeight, targetValue, gapValue, normalizedGap, protectedCashWeight, bondTarget, bondFloor, bondCap, emergencyTarget, emergencyGap；D-222新增protectedReserveTarget、referenceCashDelta、equityTarget、reserveSelectionLow52、reserveSelectionHigh52、reserveSelectionPosition52、marketAdjustmentReviewAmount、marketAdjustmentUnallocated。 |
+| `subject` | 是 | `string | null` | 是 |  | 逐 holding/bank/target/candidate ID，總額為 null；D-222 protectedReserveTarget、referenceCashDelta、equityTarget、marketAdjustmentUnallocated必須null；reserveSelectionLow52/High52/Position52及marketAdjustmentReviewAmount限VOO、0050、00881。 |
+| `value` | 是 | `string | null` | 是 | pattern: ^-?(0\|[1-9][0-9]*)(\.[0-9]*[1-9])?$ | 正規化Decimal字串；無尾零、不含科學記號、不接受-0。D-222 referenceCashDelta可正負；protectedReserveTarget與marketAdjustmentReviewAmount/Unallocated已知值非負，reserveSelectionLow52/High52已知值正數，equityTarget與reserveSelectionPosition52在0..1。未知維持value=null、quality=UNAVAILABLE與非空reason，不允許quality=null。 |
+| `unit` | 是 | `string | string` | 否 |  | 數值單位：D-222 protectedReserveTarget、referenceCashDelta、marketAdjustmentReviewAmount/Unallocated固定TWD；equityTarget與reserveSelectionPosition52固定RATIO；reserveSelectionLow52/High52在VOO為USD、0050/00881為TWD。其他欄保留正式來源單位，不自動換匯。 |
 | `quality` | 是 | `string` | 否 | enum: `EXACT`, `UNAVAILABLE`, `LOWER_BOUND` | EXACT 僅表示對此凍結來源的算術精確；快照年度收益仍是估計、DATED_PAYROLL config 仍是 projection，並非實際收款或未來官方稅率證明。UNAVAILABLE來源未核准且value=null；LOWER_BOUND保守下界。 |
 | `reason` | 是 | `string | null` | 是 |  | 品質缺口具名原因；UNAVAILABLE 必須非空；已核實值可 null；未知或不適用為 null。 |
 

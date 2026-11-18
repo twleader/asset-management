@@ -18,7 +18,7 @@ final class SrppReportResponseValidator {
     private static final Set<String> UNITS = Set.of("PERCENT","RATIO","LOTS","SHARES","BOOLEAN","YEARS","COUNT");
     private static final java.util.Map<String, Set<String>> FACT_NAMES=java.util.Map.ofEntries(
             java.util.Map.entry("ASSET_RECONCILIATION", Set.of("snapshotDeposit","liveDeposit","snapshotFund","liveFund","snapshotStock","liveStock","snapshotTotal","liveTotal","holdingShares","holdingStaticValue","holdingLiveValue","depositAmount","depositOriginalAmount","depositInterest","fundValue","fundIncome","bankCurrencyBalanceOriginal","bankCurrencyBalanceTwd","bankCurrencyPayableOriginal","bankCurrencyReceivableOriginal")),
-            java.util.Map.entry("ALLOCATION_GAP", Set.of("targetWeight","currentValue","currentWeight","targetValue","gapValue","normalizedGap","protectedCashWeight","bondTarget","bondFloor","bondCap","emergencyTarget","emergencyGap")),
+            java.util.Map.entry("ALLOCATION_GAP", Set.of("targetWeight","currentValue","currentWeight","targetValue","gapValue","normalizedGap","protectedCashWeight","bondTarget","bondFloor","bondCap","emergencyTarget","emergencyGap","protectedReserveTarget","referenceCashDelta","equityTarget","reserveSelectionLow52","reserveSelectionHigh52","reserveSelectionPosition52","marketAdjustmentReviewAmount","marketAdjustmentUnallocated")),
             java.util.Map.entry("FUNDING_CAPACITY", Set.of("settledBalance","payable","excludedReceivable","termBalance","inflationFactor","termFloor","totalFloor","reservedFunds","reservedFees","deployableCapacity")),
             java.util.Map.entry("CASH_INCOME", Set.of("stockGross","fundGross","depositGross","totalGross","nonSpendableInterest","spendableGross","taiwanIncomeTax","usWithholding","additionalBasicTax","supplementaryNhi","afterTaxCash","annualSettlement","spendableSgovGross","domesticDividend","domesticInterest","savingsInterest","otherDomesticIncome","overseasIncome","creditableForeignTax","nhiChargeableIncome","taxCalculation","annualTaxPrepayments")),
             java.util.Map.entry("PAYROLL_CASHFLOW", Set.of("grossSalary","withholding","voluntaryPension","takeHome","investableContribution","annualSettlement","paymentCount","payrollDetail","calendarYearPayroll","pensionReceipt")),
@@ -128,6 +128,7 @@ final class SrppReportResponseValidator {
             for(JsonNode fact:data.get("facts")){
                 fact(fact);
                 if(!FACT_NAMES.get(id).contains(text(fact,"name")) || !factIdentities.add(text(fact,"name")+"\u0000"+fact.get("subject").toString()))fail();
+                if("ALLOCATION_GAP".equals(id)) d222AllocationFact(fact);
                 if("DIVIDEND_TOPUP".equals(id)&&text(fact,"name").startsWith("d218")){
                     String name=text(fact,"name"),unit=switch(name){case "d218ObservedNoNewLowSessions"->"COUNT";case "d218Stabilized"->"BOOLEAN";case "d218CumulativeFraction"->"RATIO";default->"TWD";};
                     if(!unit.equals(text(fact,"unit")))fail();
@@ -157,6 +158,30 @@ final class SrppReportResponseValidator {
                 ||integer(coverage,"notEvaluatedCount")!=counts[3])fail();
         sha(root,"contentSha256");ObjectNode projection=((ObjectNode)root).deepCopy();projection.remove("contentSha256");
         if(!text(root,"contentSha256").equals(SrppJcs.sha256Hex(SrppJcs.canonicalize(projection))))fail();
+    }
+    /** Validate D-222 wire domains only; frozen financial results are never recomputed here. */
+    private static void d222AllocationFact(JsonNode fact) {
+        String name=text(fact,"name");
+        if(!Set.of("protectedReserveTarget","referenceCashDelta","equityTarget","reserveSelectionLow52",
+                "reserveSelectionHigh52","reserveSelectionPosition52","marketAdjustmentReviewAmount","marketAdjustmentUnallocated").contains(name))return;
+        boolean symbolScoped=switch(name) {
+            case "reserveSelectionLow52","reserveSelectionHigh52","reserveSelectionPosition52","marketAdjustmentReviewAmount" -> true;
+            case "protectedReserveTarget","referenceCashDelta","equityTarget","marketAdjustmentUnallocated" -> false;
+            default -> false;
+        };
+        String subject=null;
+        if(symbolScoped) {
+            subject=text(fact,"subject");
+            if(!Set.of("VOO","0050","00881").contains(subject))fail();
+        } else if(!fact.get("subject").isNull())fail();
+        boolean range=name.equals("reserveSelectionLow52")||name.equals("reserveSelectionHigh52");
+        boolean ratio=name.equals("equityTarget")||name.equals("reserveSelectionPosition52");
+        String unit=ratio?"RATIO":range&&"VOO".equals(subject)?"USD":"TWD";
+        if(!unit.equals(text(fact,"unit")))fail();
+        if(fact.get("value").isNull())return; // fact() already enforces UNAVAILABLE plus a named reason.
+        BigDecimal value=new BigDecimal(fact.get("value").textValue());
+        if(name.equals("referenceCashDelta"))return;
+        if(value.signum()<0 || range&&value.signum()==0 || ratio&&value.compareTo(BigDecimal.ONE)>0)fail();
     }
     private static void leg(String moduleId,JsonNode leg,Set<String> sources,Set<String> verifiedSources,JsonNode model){
         fields(leg,"symbol","market","broker","subaccount","strategy","status","action","lots","units","limitPrice","amount","currency","fees","netProfitSpace","rankingReason","blockingReasons","receipts");

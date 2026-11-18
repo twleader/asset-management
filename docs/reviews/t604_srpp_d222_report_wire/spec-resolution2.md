@@ -1,0 +1,1 @@
+Codex實際修正第二輪全部finding：三處錯誤quality=null敘述統一改value=null、quality=UNAVAILABLE、非空reason，明示quality=null拒絕案例；任務對應改Requirement210。未更動現行wire質量契約。

@@ -173,4 +173,26 @@ class SrppReportResponseValidatorTest {
  private static void validateProducer(ObjectNode root){var identity=root.get("identity");var query=new SrppReportQuery(null,identity.get("consumer").asText(),identity.get("tradingDate").asText(),identity.get("reportSlot").asText(),identity.get("policyBundleSha256").asText(),identity.get("swaggerSha256").asText(),root.get("calculationRunId").asText());SrppReportResponseValidator.validate(query,identity.get("ownerUserId").asLong(),MediaType.APPLICATION_JSON,signed(root));}
  private static ObjectNode fact(String name,String subject,String value,String unit){var n=com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();n.put("name",name).put("subject",subject).put("value",value).put("unit",unit).put("quality","EXACT").putNull("reason");return n;}
  private static JsonNode leg(String status,int lots){String json="{\"symbol\":\"00865B\",\"market\":\"台股\",\"broker\":null,\"subaccount\":null,\"strategy\":\"D130\",\"status\":\""+status+"\",\"action\":\"BUY\",\"lots\":"+lots+",\"units\":null,\"limitPrice\":\"40\",\"amount\":\"40000\",\"currency\":\"TWD\",\"fees\":\"20\",\"netProfitSpace\":null,\"rankingReason\":null,\"blockingReasons\":[\"PENDING_UNVERIFIED\"],\"receipts\":[]}";return SrppDailyContextResponseValidator.parseStrict(json.getBytes(StandardCharsets.UTF_8));}
+
+ private static ObjectNode d222Fact(String name,String subject,String unit,String value){
+  var f=com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();f.put("name",name);if(subject==null)f.putNull("subject");else f.put("subject",subject);f.put("unit",unit);if(value==null){f.putNull("value");f.put("quality","UNAVAILABLE");f.put("reason","FIELD_SOURCE_UNVERIFIED");}else{f.put("value",value);f.put("quality","EXACT");f.putNull("reason");}return f;
+ }
+ private static ObjectNode withD222Facts(ObjectNode... facts){
+  var n=fixture();var module=(ObjectNode)n.get("modules").get(1);module.put("status","PARTIAL");module.withArray("missing").add("D222_FX_DIRECTION_AND_CAPACITY_RECEIPTS_UNAVAILABLE");var list=(com.fasterxml.jackson.databind.node.ArrayNode)module.get("data").get("facts");for(var f:facts)list.add(f);((ObjectNode)n.get("coverage")).put("partialCount",1).put("notEvaluatedCount",11);return n;
+ }
+ @Test void d222ReserveFactsAcceptPositiveNegativeAndUnknownDelta(){
+  for(String delta:new String[]{"100","-100",null})validate(withD222Facts(d222Fact("protectedReserveTarget",null,"TWD","3850000"),d222Fact("referenceCashDelta",null,"TWD",delta),d222Fact("equityTarget",null,"RATIO","0.715")));
+ }
+ @Test void d222PartialSingleSymbolRangeDoesNotRequireOtherCandidatesOrSelectorAcceptance(){
+  for(String symbol:new String[]{"VOO","0050","00881"})validate(withD222Facts(d222Fact("reserveSelectionLow52",symbol,symbol.equals("VOO")?"USD":"TWD","10"),d222Fact("reserveSelectionHigh52",symbol,symbol.equals("VOO")?"USD":"TWD","20"),d222Fact("reserveSelectionPosition52",symbol,"RATIO","0.5")));
+  validate(withD222Facts(d222Fact("marketAdjustmentReviewAmount","VOO","TWD","100"),d222Fact("marketAdjustmentUnallocated",null,"TWD","0")));
+ }
+ @Test void d222FactsRejectWrongSubjectsUnitsAndDomains(){
+  for(ObjectNode fact:java.util.List.of(d222Fact("protectedReserveTarget","VOO","TWD","1"),d222Fact("protectedReserveTarget",null,"TWD","-1"),d222Fact("referenceCashDelta",null,"RATIO","1"),d222Fact("equityTarget",null,"RATIO","1.01"),d222Fact("equityTarget",null,"RATIO","-0.01"),d222Fact("reserveSelectionLow52","VOO","TWD","1"),d222Fact("reserveSelectionHigh52","0050","USD","1"),d222Fact("reserveSelectionPosition52","2330","RATIO","0.5"),d222Fact("reserveSelectionLow52","VOO","USD","0"),d222Fact("reserveSelectionPosition52","VOO","RATIO","1.01"),d222Fact("marketAdjustmentReviewAmount","VOO","TWD","-1"),d222Fact("marketAdjustmentUnallocated","VOO","TWD","1"),d222Fact("unknownD222Fact",null,"TWD","1")))assertThatThrownBy(()->validate(withD222Facts(fact))).isInstanceOf(RuntimeException.class);
+ }
+
+ @Test void d222UnknownFactValuePreservesUnavailableQualityContract(){
+  validate(withD222Facts(d222Fact("marketAdjustmentUnallocated",null,"TWD",null)));
+  var f=d222Fact("equityTarget",null,"RATIO",null);f.putNull("quality");assertThatThrownBy(()->validate(withD222Facts(f))).isInstanceOf(RuntimeException.class);
+ }
 }
