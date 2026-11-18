@@ -1,0 +1,26 @@
+{
+  "decision": "D-223",
+  "enabled": true,
+  "plan_id": "D223_00881_CASH_2881_EXIT_20261118",
+  "effective_date": "2026-11-18",
+  "market": "台股",
+  "buy_symbol": "00881",
+  "buy_price_exclusive_upper_twd": "38",
+  "total_buy_budget_twd": "400000",
+  "budget_includes_buy_fees": true,
+  "budget_includes_pending_orders": true,
+  "budget_includes_immutable_reservations": true,
+  "sell_symbol": "2881",
+  "sell_price_exclusive_lower_twd": "152",
+  "retained_symbols": [
+    "2885"
+  ],
+  "buy_requires_prior_sell": false,
+  "sell_requires_prior_buy": false,
+  "batch_policy": "EXISTING_QUOTA_AND_CAPACITY_NO_NEW_FIXED_SPLIT",
+  "missing_attribution_action": "WAIT",
+  "reset_budget_automatically": false,
+  "original_gates_required": true,
+  "independent_existing_exits_unchanged": true,
+  "trade_authorization": false
+}

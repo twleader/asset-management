@@ -1,14 +1,15 @@
 {
-  "baseBundleSha256": "47ffc4cae823f790c5e8811a0ee3b8b9df44b4b89eb6f690adeca4978151140c",
+  "baseBundleSha256": "6e0b8799125abb27fc6a2a2631752210db9ea99d43908706ab4a7fb0e82dab3b",
   "files": {
-    "assumptions/model_inputs.json": "e72dd66f4b0b11792d439de1dbbf31406571a1ff18991cf61acf7b654cb05578",
-    "assumptions/policy_manifest.json": "f53968e5c7d3c2a95f0d8bfad78c237f65daef56a1ec752192bd1a969aec7684",
+    "assumptions/model_inputs.json": "87d37b7fd1c84643435542c435b811cee38b0d7ad3d0ed7e9418af4ce2868703",
+    "assumptions/policy_manifest.json": "862c3986f64f0c144316626cd53fbc9d80f0f885d7fa5d7a61116ae12b42c142",
     "assumptions/pre_retirement_payroll.json": "c146cb1f0fb9c19778075a376bb7e08a7f501e4e5839da594c19e5c3948637e5",
     "assumptions/settings_catalog.json": "730db3b0743b0b71df5e20274951c91eab1ca3325b964b67c939b9aada3bb3e3",
     "scripts/bear_ladder.py": "fd32d2655df96bcff2a006db136c711bd7830c004403abf2565e8e65bc40eb81",
     "scripts/budget_accounting.py": "070e40f2168025398b227c84cfd94baab5cd36d09a1a24fabb25a0bf86dd2268",
     "scripts/execution_policy.py": "66a86a9716acaf564fe76c23ac7f1e64964fd84a14f2eee4e748830257cfc4d1",
     "scripts/monthly_engine.py": "dd244be1d44fba015ab8f92167e1a00562181d3d4c5138503505c89e8add4b0b",
+    "scripts/named_cash_rotation.py": "d8e2e6fe9b43cbfc603c7abbbb6646b33e0c9ccfea002559c199d470952e2932",
     "scripts/pre_retirement_cashflow.py": "b0de2efe12db72587e48c430d0e463987615ce361da435a82528a66547e6df13",
     "scripts/reserve_allocation.py": "7084abd7bc3e9c3eca6f0de2815fdacc0ef579cdae84ce74b0219e82cefafb5c",
     "scripts/resident_income_tax.py": "0ce3c40e5ebd5d8506293748ab353dd7dd552f700fff81083d55c49f88c202b7",

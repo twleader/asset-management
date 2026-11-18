@@ -1,7 +1,7 @@
 {
   "source": "Original SRPP frozen same-input pure functions, no network IO",
   "originalCalculatorHashes": {
-    "current_cash_income.py": "3ea88f1e33d97987dbb54469fad888b2157c5394c67c03e8477a62e67e570e39",
+    "current_cash_income.py": "84bde1a1876e597a49e66a9dfb894b473e99aac2cd37259b87c596d74b21d5fb",
     "pre_retirement_cashflow.py": "b0de2efe12db72587e48c430d0e463987615ce361da435a82528a66547e6df13",
     "budget_accounting.py": "070e40f2168025398b227c84cfd94baab5cd36d09a1a24fabb25a0bf86dd2268"
   },

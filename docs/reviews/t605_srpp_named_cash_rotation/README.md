@@ -1,0 +1,15 @@
+# D-223 現金買進與獨立退出方案
+
+使用者指定00881原始成交／買進限價嚴格低於38元，以合格可用現金分批買進，單一方案累計預算400000元（含費用、有效掛單及不可變預留）；2881原始成交／可成交賣價嚴格高於152元且既有核心賣出條件全過才評估；買賣獨立，2885普通核心本次保留。所有獨立既有必要風險、短線策略與原金融gate保持；沒有新增每批金額或頻率。
+
+完整政策保留於model/manifest權威原bytes。V2正式配置文件不擴張；00881方案以既有report receipt reason/missing顯示，無wire/API/DB/producer變更。現有資產producer沒有完整D223跨日預算歸屬帳本，已用與剩餘保持UNKNOWN；能力缺口為NOT_EVALUATED/NONE及null數值，不假造BLOCKED零容量封死既有D201具名本機後備。真價格不符合仍為BLOCKED。原已驗證BLOCKED不得解封。
+
+最終bundle：`6e0b8799125abb27fc6a2a2631752210db9ea99d43908706ab4a7fb0e82dab3b`。中間7418與f58身分撤銷、未登錄。FormulaV3：`9708418ae3c4de7f8b51af7e42c7650add3ca18f24ff3c2dcf99e24478f4b94d`；歷史V1/V2不變。25檔simulator runtime由原exporter產生，沒有手抄來源。
+
+驗證：八類Java99tests全通過；Python authority gate正反4tests通過；authority與公式來源檢查通過；五組golden共186cases的金融輸出逐項與前版相同，新D223另有7項邊界／整合測試。首輪新test誤用不存在golden案例及同步時點產物不一致均已修正後重跑；Python gate初次未指定release worktree讀到舊main，已明確指定來源重跑，不改測試放寬。作者與修正者均為Codex，獨立spec/arch使用專案CLI。
+
+發布原始證據：`/Users/steven/.codex/release-receipts/srpp-d223-20261118/asset/`。本段記錄準備及離線驗收，Git落地、registry與正式容器驗收另由release operator收據證明；不以這份文件宣稱正式日報已採用或已執行交易。
+
+獨立arch首輪PASS但保留一項真功能觀察：SRPP guard將BUY-only binding錯用於獨立SELL，造成原有獨立短線退出無法豁免。已由SRPP修正成既有verified_short_exit_codes或同源API SELL完整leg_check與精確consumer/date/slot/policy/module/帳戶/數量/限價綁定，混合與多SELL不 blanket豁免，自填strategy不採信。此修正14項新測試通過後另作差異複審；不得以架構PASS掩蓋此功能修正。
+
+最終獨立spec首輪與arch兩輪皆PASS，0 findings；第二輪明確查證SELL功能修正與最後6e0權威bytes。資產端99 backend＋25 BFF共124 Java tests、4 Python authority正反測試通過。arch gate已記錄0229f3cd2a45。API缺完整budget ledger仍保留UNKNOWN；不宣稱完整正容量採用。
