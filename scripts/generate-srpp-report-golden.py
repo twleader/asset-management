@@ -260,12 +260,19 @@ for fx,spent,prior,week,month,last,price in ((32,100000,0,0,0,100,100),(34,cap//
  c=ep.GlobalEquityCadence(cfg,1);c.begin(dt.date(2026,9,22),fx,week=39,day=22);c.spent['VOO'][0]=spent;c.previous_shortfall['VOO'][0]=prior;c.voo_week_batches[0]=week;c.voo_month_batches[0]=month;c.last_voo_fill_price[0]=last
  state={'verified':True,'halved':False,'VOO':{'spent':spent,'previousShortfall':prior,'weekBatches':week,'monthBatches':month,'lastFillPrice':last}}
  cases.append({'kind':'pace','code':'VOO','fx':fx,'price':price,'state':state,'expected':{'remaining':float(c.room('VOO')[0]),'discretionaryBudget':float(c.voo_budget(price)[0])}})
-# BullLadder is an offline pure formula reference, never a live regime source.
-dynamic=model['execution_policy']['dynamic_allocation_policy_d141'];ladder=BullLadder(dynamic,1)
-ladder.update(np.array([.20]),np.array([True]),np.array([10000000]),np.array([6000000]),corrected=np.array([False]))
-ladder.update(np.array([.15]),np.array([True]),np.array([10000000]),np.array([6000000]),corrected=np.array([False]))
-_,amount=ladder.proposal(1,np.array([True]))
-cases.append({'kind':'regime','live':{'verified':True,'mode':'BULL','anchor':100,'highWater':120,'price':115,'lockedBudget':1000000,'nextBatch':0,'cooldownVerified':True},'total':10000000,'cash':3000000,'bonds':1000000,'equity':6000000,'inflation':1,'expected':{'ladderAmount':float(amount[0]),'gainAboveAnchor':float(ladder.high_water_gain[0]),'pullback':float(ladder.pullback[0])}})
+# The historical locked budget survives policy changes. Its current daily
+# proposal remains limited to excess above the D216 strategic stock target.
+dynamic = model['execution_policy']['dynamic_allocation_policy_d141']
+total, equity = 10_000_000, 6_000_000
+ladder = BullLadder(dynamic, 1)
+ladder.update(np.array([.20]), np.array([True]), np.array([total]), np.array([equity]), corrected=np.array([False]))
+ladder.update(np.array([.15]), np.array([True]), np.array([total]), np.array([equity]), corrected=np.array([False]))
+_, amount = ladder.proposal(1, np.array([True]))
+proposal = float(amount[0])
+if 'daily_core_retention_d216' in dynamic:
+    daily_stock_excess = max(0, equity - total * dynamic['normal_equity_target'])
+    proposal = min(proposal, daily_stock_excess)
+cases.append({'kind':'regime','live':{'verified':True,'mode':'BULL','anchor':100,'highWater':120,'price':115,'lockedBudget':1000000,'nextBatch':0,'cooldownVerified':True},'total':total,'cash':3000000,'bonds':1000000,'equity':equity,'inflation':1,'expected':{'ladderAmount':proposal,'gainAboveAnchor':float(ladder.high_water_gain[0]),'pullback':float(ladder.pullback[0])}})
 payroll_config=json.loads((SRPP/'assumptions/pre_retirement_payroll.json').read_text());payroll_result=payroll.calculate(payroll_config)
 for row in payroll_result['ledger'][:2]:
  cases.append({'kind':'payroll','row':row,'expected':{'grossSalary':row['gross_pay'],'withholding':row['income_tax_withholding'],'voluntaryPension':row['voluntary_labor_pension'],'takeHome':row['net_cash_after_payroll'],'investableContribution':row['investable_surplus']}})

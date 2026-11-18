@@ -201,13 +201,13 @@
         "target_projection": {
           "bank_deposit_target": 0.10166666666666666,
           "decision": "D-222",
-          "economic_bond_target": 0.29136666666666666,
-          "equity_target": 0.6069666666666667,
+          "economic_bond_target": 0.26166666666666666,
+          "equity_target": 0.6366666666666666,
           "global_equity_monitoring_band": [
-            0.25833333336666664,
-            0.3183333333666667
+            0.27636666666666665,
+            0.3363666666666667
           ],
-          "global_equity_target": 0.28833333336666667,
+          "global_equity_target": 0.3063666666666667,
           "inflation_factor": 1.0,
           "protected_target_twd": 3850000.0,
           "reference_cash_delta_twd": 1250000.0,
@@ -219,24 +219,24 @@
             "living_term_deposit_twd_2026_real": 1500000.0
           },
           "status": "TARGETS_READY",
-          "strategic_bond_target": 0.2647,
+          "strategic_bond_target": 0.235,
           "target_weights": {
-            "0050": 0.12,
-            "0056": 0.0325,
+            "0050": 0.13,
+            "0056": 0.03,
             "00679B": 0.0,
             "00697B": 0.02,
-            "00713": 0.0433333333,
-            "00719B": 0.1997,
+            "00713": 0.045,
+            "00719B": 0.17,
             "00751B": 0.0,
             "00850": 0.0,
             "00865B": 0.025,
-            "00878": 0.0325,
+            "00878": 0.03,
             "00881": 0.0653,
-            "00919": 0.025,
-            "009826": 0.0216666667,
+            "00919": 0.03,
+            "009826": 0.02,
             "SGOV": 0.02,
             "TWD_term_deposits": 0.07666666666666666,
-            "VOO": 0.24166666666666667,
+            "VOO": 0.2613666666666667,
             "VT": 0.025,
             "demand_deposits_and_cash": 0.025,
             "emergency_00865B": 0.02666666666666667
@@ -245,8 +245,8 @@
           "transaction_authorized": false,
           "valuation_date": "2026-08-31",
           "voo_monitoring_band": [
-            0.21166666666666667,
-            0.27166666666666667
+            0.2313666666666667,
+            0.29136666666666666
           ]
         },
         "transaction_authorized": false
@@ -457,13 +457,13 @@
         "target_projection": {
           "bank_deposit_target": 0.1525,
           "decision": "D-222",
-          "economic_bond_target": 0.30469999999999997,
-          "equity_target": 0.5428000000000001,
+          "economic_bond_target": 0.27499999999999997,
+          "equity_target": 0.5725,
           "global_equity_monitoring_band": [
-            0.2166666667,
-            0.2766666667
+            0.2347,
+            0.29469999999999996
           ],
-          "global_equity_target": 0.2466666667,
+          "global_equity_target": 0.2647,
           "inflation_factor": 1.0,
           "protected_target_twd": 3850000.0,
           "reference_cash_delta_twd": -449999.99999999953,
@@ -475,24 +475,24 @@
             "living_term_deposit_twd_2026_real": 1500000.0
           },
           "status": "TARGETS_READY",
-          "strategic_bond_target": 0.2647,
+          "strategic_bond_target": 0.235,
           "target_weights": {
-            "0050": 0.12,
-            "0056": 0.0325,
+            "0050": 0.13,
+            "0056": 0.03,
             "00679B": 0.0,
             "00697B": 0.02,
-            "00713": 0.0433333333,
-            "00719B": 0.1997,
+            "00713": 0.045,
+            "00719B": 0.17,
             "00751B": 0.0,
             "00850": 0.0,
             "00865B": 0.025,
-            "00878": 0.0325,
+            "00878": 0.03,
             "00881": 0.04280000000000002,
-            "00919": 0.025,
-            "009826": 0.0216666667,
+            "00919": 0.03,
+            "009826": 0.02,
             "SGOV": 0.02,
             "TWD_term_deposits": 0.115,
-            "VOO": 0.2,
+            "VOO": 0.2197,
             "VT": 0.025,
             "demand_deposits_and_cash": 0.0375,
             "emergency_00865B": 0.04
@@ -501,8 +501,8 @@
           "transaction_authorized": false,
           "valuation_date": "2026-08-31",
           "voo_monitoring_band": [
-            0.17,
-            0.23
+            0.1897,
+            0.2497
           ]
         },
         "transaction_authorized": false
@@ -1411,7 +1411,7 @@
       "expected": {
         "adjustment_mode": "INITIAL_ALLOCATION",
         "allocation_twd": {
-          "0050": 300000.0000000003
+          "0050": 0
         },
         "api_capacity_acceptance": false,
         "candidates": {
@@ -1432,7 +1432,7 @@
           }
         },
         "decision": "D-222",
-        "remaining_adjustment_twd": 949999.9999999998,
+        "remaining_adjustment_twd": 1250000.0,
         "selected_symbol": "0050",
         "side": "BUY",
         "source_consistency_only": true,
@@ -3768,22 +3768,22 @@
   ],
   "model": {
     "detailed_target_allocation_2027": {
-      "0050": 0.12,
-      "0056": 0.0325,
+      "0050": 0.13,
+      "0056": 0.03,
       "00679B": 0.0,
       "00697B": 0.02,
-      "00713": 0.0433333333,
-      "00719B": 0.1997,
+      "00713": 0.045,
+      "00719B": 0.17,
       "00751B": 0.0,
       "00850": 0.0,
       "00865B": 0.025,
-      "00878": 0.0325,
+      "00878": 0.03,
       "00881": 0.0653,
-      "00919": 0.025,
-      "009826": 0.0216666667,
+      "00919": 0.03,
+      "009826": 0.02,
       "SGOV": 0.02,
       "TWD_term_deposits": 0.164,
-      "VOO": 0.2,
+      "VOO": 0.2197,
       "VT": 0.025,
       "demand_deposits_and_cash": 0.006
     },
@@ -3791,6 +3791,8 @@
       "reserve_allocation_d222": {
         "annual_inflation_rate": 0.0225,
         "baseline_not_executable": true,
+        "bear_emergency_etf_cap_twd": 400000,
+        "bear_living_term_2026_real": 750000,
         "decision": "D-222",
         "emergency_etf_excluded_from_strategic_bond_floor": true,
         "emergency_etf_symbol": "00865B",
@@ -3837,6 +3839,12 @@
         "target_date_required": true,
         "unallocated_shortfall_action": "MARKET_ALLOCATION_REQUIRED; no guessed split, fixed target fallback or executable allocation recommendation"
       }
+    },
+    "recommended_total_allocation": {
+      "bond_etfs": 0.235,
+      "cash_like_including_term_deposits_and_reserve": 0.17,
+      "equity": 0.595,
+      "model_mapping_note": "D-222: these numeric weights are a reference baseline only, not final executable targets. Replace the former fixed 17% with indexed living term 1.5M + demand 0.75M + emergency term 0.8M + separately labelled emergency 00865B 0.8M. Both excess and shortfall against reference 17% require an explicit same-round market-based VOO/0050/00881 allocation; never assume a split. Use reserve_allocation.project_targets; never assume a split. Emergency ETF counted once outside strategic 00865B."
     }
   },
   "schema": "D222_ORIGINAL_SRPP_SELECTOR_GOLDEN_V1"

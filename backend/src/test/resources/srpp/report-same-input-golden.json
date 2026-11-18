@@ -39175,7 +39175,7 @@
       "equity": 6000000,
       "expected": {
         "gainAboveAnchor": "0.2",
-        "ladderAmount": "80000",
+        "ladderAmount": "50000",
         "pullback": "0.041666666666666685"
       },
       "inflation": 1,
@@ -39270,7 +39270,7 @@
     }
   ],
   "originalCalculatorHashes": {
-    "bear_ladder.py": "fd32d2655df96bcff2a006db136c711bd7830c004403abf2565e8e65bc40eb81",
+    "bear_ladder.py": "c299f52e4cb8162548b4cc1e768b891e7140ebc3f21c7dfb18656c2b1efa3f84",
     "core_sell_guard.py": "57f7ed48c6061db900f03e40349e157ce947d8ba0e6af1b145c957602d2128d7",
     "execution_policy.py": "66a86a9716acaf564fe76c23ac7f1e64964fd84a14f2eee4e748830257cfc4d1",
     "pre_retirement_cashflow.py": "b0de2efe12db72587e48c430d0e463987615ce361da435a82528a66547e6df13",
@@ -39278,6 +39278,6 @@
     "strategic_buy_gate.py": "e2312e870d97ceccbe547a334e721bbfecc1624f818998b2efbb704577954b69",
     "us_tactical_order_check.py": "931aedbef8b7970a7996af1af80dfd70448a4c24e64c16fd5b3b495a801fb86d"
   },
-  "policyBundleSha256": "6e0b8799125abb27fc6a2a2631752210db9ea99d43908706ab4a7fb0e82dab3b",
+  "policyBundleSha256": "e8aea3ba040ab5f286a437e6077f8cf914ed9e63f946e7d94195c0556ba4428a",
   "schema": "SRPP_REPORT_SAME_INPUT_GOLDEN_V1"
 }

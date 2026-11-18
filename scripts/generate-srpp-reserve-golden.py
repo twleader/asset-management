@@ -34,7 +34,8 @@ def generate(srpp_root):
     spec.loader.exec_module(worker)
     source = json.loads((srpp_root / "assumptions/model_inputs.json").read_text())
     model = {"execution_policy": {"reserve_allocation_d222": source["execution_policy"]["reserve_allocation_d222"]},
-             "detailed_target_allocation_2027": source["detailed_target_allocation_2027"]}
+             "detailed_target_allocation_2027": source["detailed_target_allocation_2027"],
+             "recommended_total_allocation": source["recommended_total_allocation"]}
     buys = [candidate("VOO", 20, "BUY"), candidate("0050", 50, "BUY"), candidate("00881", 80, "BUY")]
     sells = [candidate("VOO", 20, "SELL"), candidate("0050", 50, "SELL"), candidate("00881", 80, "SELL")]
     cases = []

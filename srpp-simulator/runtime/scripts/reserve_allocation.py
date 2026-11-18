@@ -27,7 +27,8 @@ def project_targets(model, total_assets_twd, valuation_date, reductions_twd=None
     if reserve>total:raise ValueError('D222_INSUFFICIENT_ASSETS')
     delta=total*float(p['reference_cash_weight'])-reserve
     weights=dict(model['detailed_target_allocation_2027'])
-    equity_target=.5653+delta/total
+    equity_target=model["recommended_total_allocation"]["equity"]+delta/total
+    strategic_bond_target=model["recommended_total_allocation"]["bond_etfs"]
     # A pending market allocation is meaningful only if an authorized target
     # can exist. Fixed bonds and unchanged stocks cannot fund the three sleeves.
     if equity_target<0:raise ValueError('D222_INSUFFICIENT_ASSETS')
@@ -39,8 +40,8 @@ def project_targets(model, total_assets_twd, valuation_date, reductions_twd=None
     weights['emergency_00865B']=amounts['emergency_etf_twd_2026_real']/total
     result={'decision':'D-222','valuation_date':valuation_date,'inflation_factor':factor,'total_assets_twd':total,
         'protected_target_twd':reserve,'reference_cash_delta_twd':delta,'reserve_amounts_twd':amounts,
-        'equity_target':equity_target,'strategic_bond_target':.2647,
-        'economic_bond_target':.2647+weights['emergency_00865B'],
+        'equity_target':equity_target,'strategic_bond_target':strategic_bond_target,
+        'economic_bond_target':strategic_bond_target+weights['emergency_00865B'],
         'bank_deposit_target':weights['TWD_term_deposits']+weights['demand_deposits_and_cash'],
         'reference_targets_are_executable':False,'transaction_authorized':False}
     shortfall=delta< -1e-7;excess=delta>1e-7
@@ -67,11 +68,11 @@ def project_targets(model, total_assets_twd, valuation_date, reductions_twd=None
             if weights[code]>cap+1e-10:raise ValueError('D222_ORDINARY_CORE_CAP_EXCEEDED')
     if reserve>total or any(v<0 for v in weights.values()):raise ValueError('D222_INSUFFICIENT_ASSETS')
     if abs(sum(weights.values())-1)>1e-8:raise ValueError('D222_TARGETS_DO_NOT_CONSERVE_ASSETS')
-    voo_delta=weights['VOO']-.20
+    global_target=sum(weights[c] for c in ('VOO','VT','009826'))
     result.update(status='TARGETS_READY',target_weights=weights,
-        global_equity_target=weights['VOO']+weights['VT']+weights['009826'],
+        global_equity_target=global_target,
         voo_monitoring_band=[max(0,weights['VOO']-.03),weights['VOO']+.03],
-        global_equity_monitoring_band=[max(0,.2466666667+voo_delta-.03),.2466666667+voo_delta+.03])
+        global_equity_monitoring_band=[max(0,global_target-.03),global_target+.03])
     return result
 
 
@@ -90,17 +91,47 @@ def emergency_use_allowed(reason,*,end_of_life=False,other_funds_exhausted=False
     return reason in ('ACCIDENT','SERIOUS_ILLNESS') or (reason=='END_OF_LIFE' and end_of_life is True and other_funds_exhausted is True)
 
 
-def bear_funding_capacity(*,total_assets_twd,non_emergency_bonds_twd,non_emergency_term_deposits_twd,model,valuation_date):
-    # The supplied sub-ledgers must already exclude both emergency sleeves.
-    if any(isinstance(v,bool) for v in (total_assets_twd,non_emergency_bonds_twd,non_emergency_term_deposits_twd)):raise ValueError('D222_FUNDING_UNVERIFIED')
-    vals=[float(v) for v in (total_assets_twd,non_emergency_bonds_twd,non_emergency_term_deposits_twd)]
-    if any(not math.isfinite(v) or v<0 for v in vals) or vals[0]<=0:raise ValueError('D222_FUNDING_UNVERIFIED')
-    p=model['execution_policy']['reserve_allocation_d222'];date=dt.date.fromisoformat(valuation_date)
-    if date<dt.date.fromisoformat(p['inflation_base_date']):raise ValueError('D222_DATE_BEFORE_REAL_BASE')
-    factor=(1+float(p['annual_inflation_rate']))**((date-dt.date.fromisoformat(p['inflation_base_date'])).days/365.25)
-    return {'bond_sale_capacity_twd':max(vals[1]-float(model['execution_policy']['dynamic_allocation_policy_d141']['total_bond_floor'])*vals[0],0),
-            'living_term_capacity_twd':min(vals[2],float(p['living_term_deposit_twd_2026_real'])*factor),
-            'emergency_capacity_twd':0,'living_demand_capacity_twd':0,'transaction_authorized':False}
+def bear_funding_capacity(*, total_assets_twd, non_emergency_bonds_twd,
+                          non_emergency_term_deposits_twd, model, valuation_date,
+                          emergency_etf_twd=None, emergency_etf_used_twd=None,
+                          living_term_twd=None, living_term_used_twd=None):
+    """Capacity ceilings from verified sleeves; used values include active commitments.
+
+    Dedicated balances and used amounts must come from complete, reconciled
+    sources for the active bear window. Missing evidence adds no capacity.
+    """
+    def verified(value):
+        return type(value) in (int, float) and math.isfinite(value) and value >= 0
+
+    if (not all(verified(v) for v in (total_assets_twd, non_emergency_bonds_twd,
+                                    non_emergency_term_deposits_twd))
+            or total_assets_twd <= 0):
+        raise ValueError('D222_FUNDING_UNVERIFIED')
+    p = model['execution_policy']['reserve_allocation_d222']
+    factor = indexed_reserve_amounts(model, valuation_date)['inflation_factor']
+    floor = model['execution_policy']['dynamic_allocation_policy_d141']['total_bond_floor']
+    living_limit = p.get('bear_living_term_2026_real', p['living_term_deposit_twd_2026_real']) * factor
+    living_verified = verified(living_term_twd) and verified(living_term_used_twd)
+    if 'bear_living_term_2026_real' not in p:
+        living_capacity = min(non_emergency_term_deposits_twd, living_limit)
+    elif living_verified:
+        protected_term = p['living_term_deposit_twd_2026_real'] * factor - living_limit
+        living_capacity = min(max(0, living_term_twd - protected_term),
+                              max(0, living_limit - living_term_used_twd),
+                              non_emergency_term_deposits_twd)
+    else:
+        living_capacity = 0
+    emergency_capacity = 0
+    emergency_verified = verified(emergency_etf_twd) and verified(emergency_etf_used_twd)
+    if non_emergency_bonds_twd >= floor * total_assets_twd and emergency_verified:
+        emergency_capacity = min(emergency_etf_twd,
+                                 max(0, p.get('bear_emergency_etf_cap_twd', 0) - emergency_etf_used_twd))
+    return {'bond_sale_capacity_twd': max(0, non_emergency_bonds_twd - floor * total_assets_twd),
+            'living_term_capacity_twd': living_capacity,
+            'emergency_capacity_twd': emergency_capacity, 'living_demand_capacity_twd': 0,
+            'living_term_evidence': 'VERIFIED' if living_verified else 'UNAVAILABLE',
+            'emergency_etf_evidence': 'VERIFIED' if emergency_verified else 'UNAVAILABLE',
+            'transaction_authorized': False}
 
 
 def apply_projection(model,total_assets_twd,valuation_date,reductions_twd=None,additions_twd=None):
@@ -238,7 +269,9 @@ if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('request',type=Path)
     args=parser.parse_args();value=json.loads(args.request.read_text())
     model=json.loads((Path(__file__).resolve().parents[1]/'assumptions/model_inputs.json').read_text())
-    if value.get('mode')=='MARKET_SELECTOR':
+    if value.get('mode')=='BEAR_FUNDING':
+        result=bear_funding_capacity(model=model, **{k:v for k,v in value.items() if k != 'mode'})
+    elif value.get('mode')=='MARKET_SELECTOR':
         result=select_market_adjustment(model,value['total_assets_twd'],value['valuation_date'],value.get('candidates'),value.get('adjustment_mode','INITIAL_ALLOCATION'),value.get('living_reserve'))
     else:result=project_targets(model,value['total_assets_twd'],value['valuation_date'],value.get('reductions_twd'),value.get('additions_twd'))
     print(json.dumps(result,ensure_ascii=False,indent=2))

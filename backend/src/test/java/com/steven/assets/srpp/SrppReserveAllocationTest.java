@@ -22,7 +22,14 @@ class SrppReserveAllocationTest {
         for(String key:List.of("annual_inflation_rate","living_term_deposit_twd_2026_real","living_demand_deposit_twd_2026_real","emergency_term_deposit_twd_2026_real","emergency_etf_twd_2026_real","reference_cash_weight"))reserve.put(key,n(reserve.path(key).asText()));
         reserve.putObject("ordinary_tw_core_caps").put("0050",n("0.13")).put("00881",n("0.0753"));
         ((ObjectNode)model.path("execution_policy")).set("reserve_allocation_d222",reserve);
-        ((ObjectNode)model.path("detailed_target_allocation_2027")).put("00919",n("0.025")).put("009826",n("0.0216666667"));return model;
+        ObjectNode targets=(ObjectNode)model.path("detailed_target_allocation_2027");
+        // This fixture exercises the historical D222 allocation under any embedded release.
+        targets.put("00919",n("0.025")).put("009826",n("0.0216666667"))
+                .put("0056",n("0.0325")).put("00878",n("0.0325")).put("00713",n("0.0433333333"))
+                .put("VOO",n("0.20")).put("0050",n("0.12")).put("00719B",n("0.1997"));
+        ((ObjectNode)model.path("execution_policy").path("stock_purchase_funding_policy_d150"))
+                .put("bear_max_living_reserve_deployment_twd",1500000);
+        return model;
     }
     @Test void sharedCanonicalV2ExampleAndV1History() throws Exception {
         ObjectNode model=model();ObjectNode targets=model.putObject("detailed_target_allocation_2027");targets.put("TWD_term_deposits",n("0.164")).put("demand_deposits_and_cash",n("0.006")).put("VOO",n("0.83"));

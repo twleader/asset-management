@@ -14206,3 +14206,9 @@ Business 已產生的 ALLOCATION_GAP protectedReserveTarget/referenceCashDelta/e
 本輪維持所有既有雷達、風險、配置容量、價格時效、費稅、冷卻及交易限制，不指定新的每批金額或頻率。任一已驗證BLOCKED不得解封。未具完整跨日budget ledger／有效掛單／現金專款／動態目標證據時，相關API用途維持具名UNAVAILABLE，不能把未知當零或正容量。所有輸出皆為報告建議、不下單。完整模型與manifest及runtime以正式SRPP原bytes同步；V2政策文件仍只表配置及準備金，不冒稱其targets為可執行最終配置。
 
 本方案即使缺帳本而不能計算可執行數量，報告仍須具名揭露價格是否觸發、總預算400000元、已用與剩餘預算未知及等待原因。資產API不擴張wire，使用既有receipt reason／missing表達必要證據缺口，SRPP consumer由同輪來源顯示完整方案。00881其他一般BUY入口不能繞過本plan預算與價格限制；既有獨立非本方案策略須有明確歸屬，不用空白scope假裝豁免。
+
+### D-224 退休配置與熊市資金（Task 606，既有 Requirement 210 補充）
+
+維持 D-222 V2 正式文件、動態配置選檔及未就緒語義。熊市額度由已驗證的專用分帳與消耗帳本證據計算，未有完整來源前報告不可用舊聚合存款計算可動用生活額度或熊市梯次；使用原有 UNAVAILABLE／PARTIAL 契約指明證據缺口。原非緊急債券 ETF 市值來源仍須獨立核對緊急部位，5% 底線依當前總資產套用。
+
+當精確規則包的 `execution_policy.dynamic_allocation_policy_d141.aggregate_equity_hard_cap_enabled` 為 false 時，正式報告的高股息補足、熊市梯次及逾期現金部署略過全股票上限。原數字只供歷史計算與一般監測。旗標缺少保留舊版行為，旗標型別錯誤不得放寬，非上限容量仍需各自來源。
