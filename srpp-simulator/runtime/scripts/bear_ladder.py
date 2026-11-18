@@ -33,7 +33,8 @@ class BearLadder:
         self.cooldown = 5
         self.bond_share = float(policy["bear_bond_sale_max_share"])
         self.bond_floor = float(policy["total_bond_floor"])
-        self.equity_cap = float(policy["bear_equity_cap"])
+        self.equity_cap = (float(policy["bear_equity_cap"])
+                           if policy.get("aggregate_equity_hard_cap_enabled", True) else None)
 
     def update(self, drawdown, qualified_window, total, eligible_bonds, *,
                available_cash, total_bonds, equity):
@@ -49,8 +50,9 @@ class BearLadder:
         self.last_amount[recovered] = 0
         bond_limit = np.minimum(np.maximum(eligible_bonds, 0) * self.bond_share,
                                 np.maximum(total_bonds - self.bond_floor * total, 0))
-        planned = np.minimum(np.maximum(available_cash, 0) + bond_limit,
-                             np.maximum(self.equity_cap * total - equity, 0))
+        planned = np.maximum(available_cash, 0) + bond_limit
+        if self.equity_cap is not None:
+            planned = np.minimum(planned, np.maximum(self.equity_cap * total - equity, 0))
         fresh = ~self.active & qualified_window & (drawdown <= -self.thresholds[0]) & (planned > .01)
         self.active |= fresh
         self.initial_bonds[fresh] = eligible_bonds[fresh]

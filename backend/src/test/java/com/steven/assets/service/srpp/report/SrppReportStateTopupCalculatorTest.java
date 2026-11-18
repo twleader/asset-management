@@ -60,6 +60,7 @@ class SrppReportStateTopupCalculatorTest {
 
     private static ObjectNode d216Dynamic() throws Exception {
         ObjectNode policy = model().path("execution_policy").path("dynamic_allocation_policy_d141").deepCopy();
+        policy.put("normal_equity_target", new BigDecimal("0.5653"));
         policy.putObject("daily_core_retention_d216").put("decision", "D-216").put("enabled", true)
                 .put("aggregate_target_source", "normal_equity_target")
                 .put("per_symbol_target_source", "detailed_target_allocation_2027");
@@ -158,7 +159,8 @@ class SrppReportStateTopupCalculatorTest {
         event.putArray("fills");return event;
     }
     @Test void d219CurrentModelStartsAtFifteenAndKeepsBoundaryQualificationAndCapacity()throws Exception {
-        JsonNode policy=model().path("execution_policy").path("dynamic_allocation_policy_d141");
+        ObjectNode policy=model().path("execution_policy").path("dynamic_allocation_policy_d141").deepCopy();
+        policy.remove("aggregate_equity_hard_cap_enabled");
         String[] thresholds={".15",".20",".25",".30",".35"};
         for(int i=0;i<5;i++)assertThat(n(policy.path("bear_ladder_d141").get(i).get("drawdown"))).isEqualByComparingTo(thresholds[i]);
         JsonNode below=SrppReportStateCalculator.ladderAdvance(policy,"BEAR",d219BearState(),d219BearEvent("-.1499",10),5);
@@ -175,8 +177,43 @@ class SrppReportStateTopupCalculatorTest {
             assertThat(result.path("eligible").asBoolean()).as(block).isFalse();assertThat(n(result.get("ladderAmount"))).as(block).isZero();
         }
     }
+    @Test void d224TopupIgnoresAggregateStockHeadroomButStillRequiresGroupAndCashRoom() {
+        ObjectNode input = sizingInput().put("equity", "14000000");
+        assertThat(SrppReportTopupSizing.calculate(input).path("lots").asInt()).isZero();
+        input.remove(List.of("equity", "equityCap", "reservedEquityValue"));
+        assertThat(SrppReportTopupSizing.calculate(input, false).path("lots").asInt()).isEqualTo(3);
+        assertThat(SrppReportTopupSizing.calculate(input.deepCopy().put("group", "5600000"), false)
+                .path("lots").asInt()).isZero();
+        assertThat(SrppReportTopupSizing.calculate(input.deepCopy().put("settledTwd", "1600000"), false)
+                .path("lots").asInt()).isZero();
+    }
+
+    @Test void d224BearBudgetCanArmAboveHistoricalStockCapButStillKeepsBondFloor() throws Exception {
+        ObjectNode policy = model().path("execution_policy").path("dynamic_allocation_policy_d141").deepCopy();
+        policy.put("aggregate_equity_hard_cap_enabled", false).put("total_bond_floor", new BigDecimal("0.05"));
+        ObjectNode event = d219BearEvent("-.15", 10).put("equity", "7100000")
+                .put("eligibleBonds", "600000").put("totalBonds", "600000").put("availableCash", "0");
+        JsonNode funded = SrppReportStateCalculator.ladderAdvance(policy, "BEAR", d219BearState(), event, 5);
+        assertThat(n(funded.path("stateAfter").get("windowBudget"))).isEqualByComparingTo("100000");
+        event.put("totalBonds", "500000").put("eligibleBonds", "500000");
+        JsonNode noSpend = SrppReportStateCalculator.ladderAdvance(policy, "BEAR", d219BearState(), event, 5);
+        assertThat(n(noSpend.get("ladderAmount"))).isZero();
+    }
+
+    @Test void d224OverdueReserveRunsWithoutAggregateRoomAndMaintainsGroupRoom() {
+        BigDecimal exhausted = SrppReportStateCalculator.reserveDeployment(BigDecimal.TEN, BigDecimal.TEN,
+                BigDecimal.TEN, new BigDecimal("4"), BigDecimal.ZERO, BigDecimal.TEN,
+                BigDecimal.ONE, BigDecimal.ZERO, false, true);
+        BigDecimal permitted = SrppReportStateCalculator.reserveDeployment(BigDecimal.TEN, BigDecimal.TEN,
+                BigDecimal.TEN, new BigDecimal("4"), BigDecimal.TEN,
+                BigDecimal.ONE, BigDecimal.ZERO, false, true);
+        assertThat(exhausted).isZero();
+        assertThat(permitted).isEqualByComparingTo("4");
+    }
+
     @Test void d219FiveConfirmedBatchesKeepOneBudgetCooldownAndNoGapRelease()throws Exception {
-        JsonNode policy=model().path("execution_policy").path("dynamic_allocation_policy_d141");
+        ObjectNode policy=model().path("execution_policy").path("dynamic_allocation_policy_d141").deepCopy();
+        policy.remove("aggregate_equity_hard_cap_enabled");
         ObjectNode state=d219BearState();String[] drawdowns={"-.15","-.20","-.25","-.30","-.35"};
         String[] expected={"160000","240000","400000","500000","700000"},bondSales={"0","0","0","300000","700000"};
         BigDecimal paid=BigDecimal.ZERO;

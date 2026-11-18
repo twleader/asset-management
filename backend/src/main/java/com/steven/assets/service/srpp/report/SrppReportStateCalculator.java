@@ -46,7 +46,7 @@ public final class SrppReportStateCalculator {
                 throw gap("D216_CORE_RETENTION_POLICY_UNVERIFIED");
             target = number(policy, "normal_equity_target");
             if (target.compareTo(number(policy, "normal_equity_floor")) < 0
-                    || target.compareTo(number(policy, "normal_equity_cap")) > 0)
+                    || aggregateEquityHardCapEnabled(policy) && target.compareTo(number(policy, "normal_equity_cap")) > 0)
                 throw gap("D216_CORE_RETENTION_POLICY_UNVERIFIED");
         }
         if (target.signum() < 0 || target.compareTo(ONE) > 0)
@@ -54,10 +54,21 @@ public final class SrppReportStateCalculator {
         return equity.subtract(total.multiply(target)).max(ZERO);
     }
 
+    /** Legacy bundles retain their stock ceiling; only an explicit false suppresses it. */
+    static boolean aggregateEquityHardCapEnabled(JsonNode dynamicPolicy) {
+        JsonNode enabled = dynamicPolicy.get("aggregate_equity_hard_cap_enabled");
+        if (enabled == null) return true;
+        if (!enabled.isBoolean()) throw gap("AGGREGATE_EQUITY_CAP_POLICY_UNVERIFIED");
+        return enabled.booleanValue();
+    }
+
     /** The caller supplies actual completed-session indices and verified window evidence, never a monthly proxy. */
     public static ObjectNode ladderAdvance(JsonNode policy,String mode,JsonNode before,JsonNode event,int cooldown){
         if(!Set.of("BULL","BEAR").contains(mode)||cooldown<1)throw gap("LADDER_SCOPE_INVALID");ObjectNode state=object(before,"LADDER_STATE_UNVERIFIED");JsonNode rungs=policy.path(mode.equals("BULL")?"bull_ladder_d156":"bear_ladder_d141");validateRungs(rungs,mode);if(!state.path("verified").asBoolean()||!event.path("verified").asBoolean()||!event.path("qualified").isBoolean()||!state.path("active").isBoolean())throw gap("LADDER_STATE_UNVERIFIED");int count=rungs.size();validateStateArrays(state,count);int session=integer(event,"session"),last=integerAllowNegative(state,"lastFill");BigDecimal total=number(event,"total"),equity=number(event,"equity");if(total.signum()<=0||equity.signum()<0)throw gap("LADDER_VALUATION_UNVERIFIED");boolean qualified=event.path("qualified").asBoolean();
-        if(mode.equals("BEAR")){BigDecimal dd=number(event,"drawdown");if(dd.compareTo(new BigDecimal("-0.10"))>0){BigDecimal initial=number(state,"initialBonds");reset(state,count);put(state,"initialBonds",initial);}BigDecimal eligible=number(event,"eligibleBonds"),bonds=number(event,"totalBonds"),cash=number(event,"availableCash"),bondLimit=eligible.max(ZERO).multiply(number(policy,"bear_bond_sale_max_share")).min(bonds.subtract(total.multiply(number(policy,"total_bond_floor"))).max(ZERO));BigDecimal planned=cash.max(ZERO).add(bondLimit).min(total.multiply(number(policy,"bear_equity_cap")).subtract(equity).max(ZERO));if(!state.path("active").asBoolean()&&qualified&&dd.compareTo(number(rungs.get(0),"drawdown").negate())<=0&&planned.compareTo(new BigDecimal("0.01"))>0){arm(state,rungs,planned);put(state,"initialBonds",eligible);put(state,"bondsSold",ZERO);}put(state,"drawdown",dd);
+        if(mode.equals("BEAR")){BigDecimal dd=number(event,"drawdown");if(dd.compareTo(new BigDecimal("-0.10"))>0){BigDecimal initial=number(state,"initialBonds");reset(state,count);put(state,"initialBonds",initial);}BigDecimal eligible=number(event,"eligibleBonds"),bonds=number(event,"totalBonds"),cash=number(event,"availableCash"),bondLimit=eligible.max(ZERO).multiply(number(policy,"bear_bond_sale_max_share")).min(bonds.subtract(total.multiply(number(policy,"total_bond_floor"))).max(ZERO));BigDecimal planned=cash.max(ZERO).add(bondLimit);
+            if(aggregateEquityHardCapEnabled(policy))
+                planned=planned.min(total.multiply(number(policy,"bear_equity_cap")).subtract(equity).max(ZERO));
+            if(!state.path("active").asBoolean()&&qualified&&dd.compareTo(number(rungs.get(0),"drawdown").negate())<=0&&planned.compareTo(new BigDecimal("0.01"))>0){arm(state,rungs,planned);put(state,"initialBonds",eligible);put(state,"bondsSold",ZERO);}put(state,"drawdown",dd);
         }else{BigDecimal gain=number(event,"gain"),planned=bullSaleCapacity(policy,total,equity);if(!state.path("active").asBoolean()&&qualified&&gain.compareTo(number(rungs.get(0),"gain_above_anchor"))>=0&&planned.compareTo(new BigDecimal("0.01"))>0){arm(state,rungs,planned);put(state,"highWaterGain",gain);}if(state.path("active").asBoolean())put(state,"highWaterGain",number(state,"highWaterGain").max(gain));put(state,"gain",gain);BigDecimal high=number(state,"highWaterGain");put(state,"pullback",state.path("active").asBoolean()&&high.compareTo(ONE.negate())>0?high.subtract(gain).divide(ONE.add(high),MC):ZERO);state.put("pendingClose",state.path("active").asBoolean()&&event.path("corrected").asBoolean());}
         JsonNode fills=event.path("fills");if(!fills.isArray())throw gap("LADDER_CONFIRMED_FILLS_UNVERIFIED");for(JsonNode fill:fills){if(integer(fill,"session")>session)throw gap("LADDER_FILL_FROM_FUTURE");record(state,fill,mode,count);}
         int completed=completed(state),rung=Math.min(completed,count-1);JsonNode rule=rungs.get(rung);boolean allowed=state.path("active").asBoolean()&&qualified&&completed<count&&session-integerAllowNegative(state,"lastFill")>=cooldown;
@@ -76,7 +87,25 @@ public final class SrppReportStateCalculator {
         if(!fills.isEmpty()){ArrayNode retained=J.arrayNode();for(JsonNode lot:lots)if(number(lot,"amount").compareTo(EPS)>0)retained.add(lot);lots=retained;}for(JsonNode lot:lots)if(integer(lot,"age")>integer(config,"stock_rotation_reserve_max_idle_sessions"))overdue=overdue.add(number(lot,"amount"));state.set("lots",lots);if(!days.isEmpty())state.put("lastProcessedDate",days.keySet().stream().max(String::compareTo).orElseThrow());ObjectNode out=J.objectNode();put(out,"settledReserve",total);put(out,"overdueReserve",overdue);out.set("stateAfter",state);return out;}
 
     /** Original TransitionLedger overdue reserve principal: batch timing is bypassed, amount caps and exact buy gates remain. */
-    public static BigDecimal reserveDeployment(BigDecimal overdue,BigDecimal physical,BigDecimal individualRoom,BigDecimal groupRoom,BigDecimal equityRoom,BigDecimal monthlyRoom,BigDecimal priceLevel,BigDecimal commission,boolean bearPaused,boolean exactBuyGates){for(BigDecimal value:List.of(overdue,physical,individualRoom,groupRoom,equityRoom,monthlyRoom,commission))if(value.signum()<0)throw gap("RESERVE_DEPLOYMENT_SOURCE_INVALID");if(priceLevel.signum()<=0)throw gap("RESERVE_PRICE_LEVEL_UNVERIFIED");if(bearPaused||!exactBuyGates)return ZERO;return overdue.min(physical).divide(ONE.add(commission),MC).min(individualRoom).min(groupRoom).min(equityRoom).min(monthlyRoom.divide(priceLevel,MC));}
+    public static BigDecimal reserveDeployment(BigDecimal overdue,BigDecimal physical,BigDecimal individualRoom,
+            BigDecimal groupRoom,BigDecimal equityRoom,BigDecimal monthlyRoom,BigDecimal priceLevel,
+            BigDecimal commission,boolean bearPaused,boolean exactBuyGates) {
+        if (equityRoom.signum() < 0) throw gap("RESERVE_DEPLOYMENT_SOURCE_INVALID");
+        return reserveDeployment(overdue, physical, individualRoom, groupRoom, monthlyRoom, priceLevel, commission,
+                bearPaused, exactBuyGates).min(equityRoom);
+    }
+
+    public static BigDecimal reserveDeployment(BigDecimal overdue,BigDecimal physical,BigDecimal individualRoom,
+            BigDecimal groupRoom,BigDecimal monthlyRoom,BigDecimal priceLevel,BigDecimal commission,
+            boolean bearPaused,boolean exactBuyGates) {
+        for (BigDecimal value : List.of(overdue, physical, individualRoom, groupRoom, monthlyRoom, commission)) {
+            if (value.signum() < 0) throw gap("RESERVE_DEPLOYMENT_SOURCE_INVALID");
+        }
+        if (priceLevel.signum() <= 0) throw gap("RESERVE_PRICE_LEVEL_UNVERIFIED");
+        if (bearPaused || !exactBuyGates) return ZERO;
+        return overdue.min(physical).divide(ONE.add(commission), MC).min(individualRoom).min(groupRoom)
+                .min(monthlyRoom.divide(priceLevel, MC));
+    }
     private static ObjectNode object(JsonNode n,String reason){if(!(n instanceof ObjectNode))throw gap(reason);return n.deepCopy();}
     private static BigDecimal number(JsonNode parent,String key){return number(parent.get(key));}
     private static BigDecimal number(JsonNode n){if(n==null||n.isNull()||!n.isNumber()&&!n.isTextual())throw gap("STATE_NUMERIC_SOURCE_UNVERIFIED");try{return new BigDecimal(n.asText());}catch(NumberFormatException invalid){throw gap("STATE_NUMERIC_SOURCE_UNVERIFIED");}}

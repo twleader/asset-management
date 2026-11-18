@@ -108,19 +108,54 @@ class SrppReportModuleCalculatorTest {
         FrozenFixture base=fixture();ObjectNode state=MAPPER.createObjectNode().put("verified",true).put("consumer","Codex").put("ownerUserId",base.frozen.input().path("ownerUserId").asLong());state.putArray("items").addObject().put("stock_code","0050").put("market","台股").putObject("state");
         JsonNode result=SrppReportModuleCalculator.calculateCore(base.frozen,model(),state,"Codex");assertThat(result.path("missing").toString()).contains("D222_MARKET_SELECTION_REQUIRED:0050");assertThat(result.path("data").path("facts").toString()).doesNotContain("\"timingPass\",\"subject\":\"0050\",\"value\":\"1\"");
     }
-    @Test void d222ProductionBearFloorCannotUseOrdinaryBondFundsToBackfillEtfMinimum() throws Exception {
-        for(String etf:List.of("1000000","500000")){
-            FrozenFixture base=fixture();Input old=base.frozen.facts();ObjectNode input=base.frozen.input().deepCopy(),sources=(ObjectNode)input.path("sources"),assets=(ObjectNode)sources.path("assets");
-            ArrayNode stocks=((ObjectNode)assets.path("liveAssets")).putArray("stocks");stocks.addObject().put("stockCode","0050").put("market","台股").put("liveValue","11150000");stocks.addObject().put("stockCode","00719B").put("market","台股").put("liveValue",etf);stocks.addObject().put("stockCode","00865B").put("market","台股").put("liveValue","800000");
-            ((ObjectNode)assets.path("snapshot")).putArray("funds").addObject().put("fundName","SYNTHETIC_ORDINARY_BOND_FUND").put("currentValue","4000000");
-            ObjectNode classes=(ObjectNode)sources.path("classifications");classes.putObject("resolvedStockClasses").put("0050:台股","STOCK").put("00719B:台股","BOND").put("00865B:台股","BOND");classes.putObject("resolvedFundClasses").put("SYNTHETIC_ORDINARY_BOND_FUND","BOND");
-            Input facts=new Input(old.date(),old.slot(),old.capturedAt(),old.sessions(),new BigDecimal("20000000"),new BigDecimal("3050000"),new BigDecimal("2300000"),new BigDecimal(etf).add(new BigDecimal("800000")),old.fx(),old.fxEvidence(),old.bearWindow(),old.symbols(),old.budget(),new Evidence("PASS","SYNTHETIC_RECONCILED_EMERGENCY"),new BigDecimal("800000"));
-            var frozen=new DecisionInputCapturePort.Frozen(facts,input,base.frozen.sourceVector(),1,base.frozen.assetGeneratedAt());ObjectNode extra=MAPPER.createObjectNode();extra.putObject("regime").put("verified",true).put("ownerUserId",input.path("ownerUserId").asLong()).put("tradingDate",old.date().toString()).put("policyBundleSha256",base.policy.bundleHash()).put("coverage","COMPLETE").put("mode","BEAR").put("rotationCompleted",true);
-            JsonNode projected=com.steven.assets.srpp.SrppReserveAllocation.projectedModel(model(),facts.totalAssets(),facts.date());JsonNode result=SrppReportModuleCalculator.regime(frozen,base.policy,projected,extra);
-            assertThat(n(fact(result,"bondFloor",null).path("value"))).isEqualByComparingTo("600000");assertThat(n(fact(result,"bearBondCapacity",null).path("value"))).isEqualByComparingTo(etf.equals("1000000")?"400000":"0");
+    @Test void productionBearFloorExcludesEmergencyAndFundsAcrossD222AndD224() throws Exception {
+        for(boolean d224:List.of(false,true)){
+            for(String etf:List.of("1500000","500000")){
+                FrozenFixture base=fixture();Input old=base.frozen.facts();ObjectNode input=base.frozen.input().deepCopy(),sources=(ObjectNode)input.path("sources"),assets=(ObjectNode)sources.path("assets");
+                ArrayNode stocks=((ObjectNode)assets.path("liveAssets")).putArray("stocks");stocks.addObject().put("stockCode","0050").put("market","台股").put("liveValue","11150000");stocks.addObject().put("stockCode","00719B").put("market","台股").put("liveValue",etf);stocks.addObject().put("stockCode","00865B").put("market","台股").put("liveValue","800000");
+                ((ObjectNode)assets.path("snapshot")).putArray("funds").addObject().put("fundName","SYNTHETIC_ORDINARY_BOND_FUND").put("currentValue","4000000");
+                ObjectNode classes=(ObjectNode)sources.path("classifications");classes.putObject("resolvedStockClasses").put("0050:台股","STOCK").put("00719B:台股","BOND").put("00865B:台股","BOND");classes.putObject("resolvedFundClasses").put("SYNTHETIC_ORDINARY_BOND_FUND","BOND");
+                Input facts=new Input(old.date(),old.slot(),old.capturedAt(),old.sessions(),new BigDecimal("20000000"),new BigDecimal("3050000"),new BigDecimal("2300000"),new BigDecimal(etf).add(new BigDecimal("800000")),old.fx(),old.fxEvidence(),old.bearWindow(),old.symbols(),old.budget(),new Evidence("PASS","SYNTHETIC_RECONCILED_EMERGENCY"),new BigDecimal("800000"));
+                var frozen=new DecisionInputCapturePort.Frozen(facts,input,base.frozen.sourceVector(),1,base.frozen.assetGeneratedAt());ObjectNode extra=MAPPER.createObjectNode();extra.putObject("regime").put("verified",true).put("ownerUserId",input.path("ownerUserId").asLong()).put("tradingDate",old.date().toString()).put("policyBundleSha256",base.policy.bundleHash()).put("coverage","COMPLETE").put("mode","BEAR").put("rotationCompleted",true);
+                ObjectNode rule=(ObjectNode)model().deepCopy();
+                ObjectNode execution=(ObjectNode)rule.path("execution_policy");
+                ObjectNode reserve=(ObjectNode)execution.path("reserve_allocation_d222");
+                reserve.remove(List.of("bear_emergency_etf_cap_twd","bear_living_term_2026_real"));
+                ((ObjectNode)execution.path("dynamic_allocation_policy_d141"))
+                        .put("total_bond_floor", new BigDecimal(d224 ? "0.05" : "0.03"));
+                if(d224)reserve.put("bear_emergency_etf_cap_twd",400000).put("bear_living_term_2026_real",750000);
+                JsonNode projected=com.steven.assets.srpp.SrppReserveAllocation.projectedModel(rule,facts.totalAssets(),facts.date());
+                JsonNode result=SrppReportModuleCalculator.regime(frozen,base.policy,projected,extra);
+                assertThat(fact(result,"bondFloor",null).path("value").asText()).isEqualTo(d224?"1000000":"600000");
+                assertThat(fact(result,"bearBondCapacity",null).path("value").asText())
+                        .isEqualTo(etf.equals("1500000")?(d224?"500000":"900000"):"0");
+                if(d224){
+                    assertThat(fact(result,"deployableLiving",null).path("value").isNull()).isTrue();
+                    assertThat(fact(result,"ladderAmount","BEAR").path("value").isNull()).isTrue();
+                    assertThat(result.path("missing").toString()).contains("D224_BEAR_RESERVE_USAGE_AND_COMMITMENTS_UNAVAILABLE");
+                }
+            }
         }
     }
-    @Test void lowerTargetBandAndBrokerSubaccountUnknownRemainLocalized()throws Exception{FrozenFixture fixture=fixture();ArrayNode shared=SrppReportModuleCalculator.calculateShared(fixture.frozen,fixture.policy,model(),fixture.registered,MAPPER.readTree("{}"));JsonNode allocation=shared.get(1);BigDecimal factor=DailyDecisionCalculator.inflation(fixture.policy,fixture.frozen.facts().date()),weight=fixture.policy.totalFloor().multiply(factor).divide(fixture.frozen.facts().totalAssets(),MathContext.DECIMAL128);JsonNode target=fact(allocation,"bondTarget",null);assertThat(n(target.path("value"))).isEqualByComparingTo(new BigDecimal("0.2647").min(BigDecimal.ONE.subtract(weight).subtract(new BigDecimal("0.5653"))).max(BigDecimal.ZERO));}
+    @Test void lowerTargetBandAndBrokerSubaccountUnknownRemainLocalized() throws Exception {
+        FrozenFixture fixture = fixture();
+        JsonNode model = model();
+        ArrayNode shared = SrppReportModuleCalculator.calculateShared(fixture.frozen, fixture.policy, model,
+                fixture.registered, MAPPER.createObjectNode());
+        JsonNode allocation = shared.get(1);
+        BigDecimal total = fixture.frozen.facts().totalAssets();
+        BigDecimal protectedWeight = fixture.policy.totalFloor()
+                .multiply(DailyDecisionCalculator.inflation(fixture.policy, fixture.frozen.facts().date()))
+                .divide(total, MathContext.DECIMAL128);
+        JsonNode dynamic = model.path("execution_policy").path("dynamic_allocation_policy_d141");
+        BigDecimal stockTarget = com.steven.assets.srpp.SrppReserveAllocation.enabled(model)
+                ? com.steven.assets.srpp.SrppReserveAllocation.project(model, total, fixture.frozen.facts().date()).equityTarget()
+                : n(dynamic.path("normal_equity_target"));
+        BigDecimal bondTarget = n(dynamic.path("bond_allocation_band_d143").path("strategic_target"));
+        BigDecimal expected = bondTarget.min(BigDecimal.ONE.subtract(protectedWeight).subtract(stockTarget))
+                .max(BigDecimal.ZERO);
+        assertThat(n(fact(allocation, "bondTarget", null).path("value"))).isEqualByComparingTo(expected);
+    }
     @Test void tamperedStatePolicyAndIncompleteSGOVCannotPass()throws Exception{JsonNode golden=MAPPER.readTree(getClass().getResourceAsStream("/srpp/report-same-input-golden.json"));JsonNode c=java.util.stream.StreamSupport.stream(golden.path("cases").spliterator(),false).filter(v->v.path("kind").asText().equals("core")).findFirst().orElseThrow();ObjectNode state=c.path("state").deepCopy();state.put("policy_sha256","0".repeat(64));assertThatThrownBy(()->SrppReportModuleCalculator.coreTiming(c.path("body"),state,LocalDate.parse(c.path("date").asText()),model().path("execution_policy").path("core_sell_guard_d174"))).hasMessageContaining("WATCH_STATE_UNVERIFIED");}
     @Test void sameSymbolInDifferentMarketNeverInflatesFormalTaiwanTarget()throws Exception{
         FrozenFixture base=fixture();ObjectNode input=base.frozen.input().deepCopy();ObjectNode a=(ObjectNode)input.path("sources").path("assets"),snapshot=(ObjectNode)a.path("snapshot"),live=(ObjectNode)a.path("liveAssets");ObjectNode h=((ArrayNode)snapshot.path("stocks")).addObject();h.put("id",2).put("stockCode","0050").put("market","美股").put("shares","1").put("currentValue","100").put("estimatedDividend","0");ObjectNode v=((ArrayNode)live.path("stocks")).addObject();v.put("holdingId",2).put("stockCode","0050").put("market","美股").put("shares","1").put("liveValue","100");snapshot.put("totalStockValue","15000100").put("totalAssets","20000100");live.put("liveStockValue","15000100").put("liveTotalAssets","20000100");Input old=base.frozen.facts();Input facts=new Input(old.date(),old.slot(),old.capturedAt(),old.sessions(),new BigDecimal("20000100"),old.totalDeposits(),old.termDeposits(),old.bondValue(),old.fx(),old.fxEvidence(),old.bearWindow(),old.symbols(),old.budget(),old.subaccounts(),old.emergencyValue());var frozen=new DecisionInputCapturePort.Frozen(facts,input,base.frozen.sourceVector(),1,base.frozen.assetGeneratedAt());JsonNode allocation=SrppReportModuleCalculator.calculateShared(frozen,base.policy,model(),base.registered,MAPPER.createObjectNode()).get(1);assertThat(fact(allocation,"currentValue","0050").path("value").asText()).isEqualTo("15000000");assertThat(allocation.path("missing").toString()).contains("UNMAPPED_FORMAL_TARGET:美股:0050");
