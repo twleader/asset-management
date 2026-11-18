@@ -1,0 +1,1 @@
+兩項Major均由Codex實際修正，未假稱Claude。1.補充改為Task604子標題不新增Requirement；重新機械檢查。2.五個條件facts完整補充subject/unit/range與單標的區間成功PARTIAL案例；保留原missing與selector無容量接受。

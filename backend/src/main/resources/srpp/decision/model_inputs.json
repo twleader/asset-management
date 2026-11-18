@@ -662,7 +662,7 @@
         "earliest_buy_date": "2026-11-02",
         "earliest_buy_date_requires_tw_true": true,
         "max_lots_per_day": 3,
-        "lot_note": "Whichever binds first: 3 lots per verified Taiwan trading week, 1 lot per day, and the 210,000 TWD monthly cap. Lot count depends on the prevailing price, the TWD cap governs.",
+        "lot_note": "Whichever binds first under D-222: 6 lots per verified Taiwan trading week, 3 lots per day, and the 210,000 TWD monthly cap. Lot count depends on the prevailing price, the TWD cap governs.",
         "build_clarification": "2026-11-02 clarification of D-143; no cadence number changed.",
         "tool": "execution_policy.py --global-build-009826",
         "ceiling_is_default_fill": true,
