@@ -14197,3 +14197,12 @@ D222 selector並分INITIAL_ALLOCATION與LIVING_RESERVE_REBALANCE兩模式。INIT
 Business 已產生的 ALLOCATION_GAP protectedReserveTarget/referenceCashDelta/equityTarget 由 BFF 固定 enum 接受；新增三個名稱的 unit/subject 邊界驗證，不重算金融結果。前兩者 TWD，equityTarget RATIO（已知值0..1），三者 subject null；protectedReserveTarget 已知值不得負，referenceCashDelta 可負。OpenAPI 同步三個 enum 與欄位語義，原 renderer 重產 Swagger 並交 SRPP 既有 identity 發布鏈；無新路由、schemaVersion 或資料庫變更。以合成封存包測試正負 delta、未知值、錯單位/subject、未知name及完整原始失敗包的本機維護重現；實際部署須從公開9090讀到200與完整驗證，不以health取代。
 
 固定傳輸名稱亦包含既有條件式 reserveSelectionLow52/reserveSelectionHigh52/reserveSelectionPosition52：subject限VOO、0050、00881，前兩者正數且VOO單位USD、台股TWD，位置RATIO在0..1；單一標的區間成功即可存在，不要求其餘標的或selector成功。marketAdjustmentReviewAmount subject同三標的、TWD非負；marketAdjustmentUnallocated subject null、TWD非負。未知值維持value=null、quality="UNAVAILABLE"且reason為非空字串；不允許quality=null。上述僅凍結事實傳輸，不表示selector取得容量接受或可交易，原missing/receipt/模組狀態原樣保留，不新增跨fact重算。
+
+
+### D-223 現金買進與金融股賣出獨立方案（Task 605，既有 Requirement 210 補充）
+
+使用者於2026-11-18指定單一具名方案：00881原始台幣合格成交價嚴格低於38元時，以已交割、未專用且扣除生活、緊急、待交割、有效掛單及其他專款後的可用現金分批買進，累計總預算400000元含買進費用與尚有效掛單占用，不因日期、報告、consumer或bundle變更重置，不把建議當成交。2881僅在合格賣價嚴格高於152元且原核心賣出條件全部通過後評估減碼；買進不得等待賣出或把未交割賣款當現金。2885本次保留，不作本方案替代賣方；既有獨立必要風險授權不取消。
+
+本輪維持所有既有雷達、風險、配置容量、價格時效、費稅、冷卻及交易限制，不指定新的每批金額或頻率。任一已驗證BLOCKED不得解封。未具完整跨日budget ledger／有效掛單／現金專款／動態目標證據時，相關API用途維持具名UNAVAILABLE，不能把未知當零或正容量。所有輸出皆為報告建議、不下單。完整模型與manifest及runtime以正式SRPP原bytes同步；V2政策文件仍只表配置及準備金，不冒稱其targets為可執行最終配置。
+
+本方案即使缺帳本而不能計算可執行數量，報告仍須具名揭露價格是否觸發、總預算400000元、已用與剩餘預算未知及等待原因。資產API不擴張wire，使用既有receipt reason／missing表達必要證據缺口，SRPP consumer由同輪來源顯示完整方案。00881其他一般BUY入口不能繞過本plan預算與價格限制；既有獨立非本方案策略須有明確歸屬，不用空白scope假裝豁免。

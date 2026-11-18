@@ -53,6 +53,13 @@ def expected(srpp_root: Path) -> str:
     reserve_hashes = {"asset-management/" + p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest() for p in reserve_java}
     reserve_hashes["SRPP/scripts/reserve_allocation.py"] = hashlib.sha256((srpp_root / "scripts/reserve_allocation.py").read_bytes()).hexdigest()
     legacy["calculations"]["reserveAllocation"] = {"calculationId": "REAL_TWD_RESERVE_ALLOCATION_D222", "sourceSha256": reserve_hashes}
+    named_java = (
+        "backend/src/main/java/com/steven/assets/srpp/SrppNamedCashRotation.java",
+        "backend/src/main/java/com/steven/assets/service/srpp/report/SrppReportModuleCalculator.java",
+    )
+    named_hashes = {"asset-management/" + p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest() for p in named_java}
+    named_hashes["SRPP/scripts/named_cash_rotation.py"] = hashlib.sha256((srpp_root / "scripts/named_cash_rotation.py").read_bytes()).hexdigest()
+    legacy["calculations"]["namedCashRotation"] = {"calculationId": "NAMED_CASH_ROTATION_D223", "sourceSha256": named_hashes}
     return canonical(legacy)
 
 
