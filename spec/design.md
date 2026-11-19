@@ -14212,3 +14212,8 @@ Business 已產生的 ALLOCATION_GAP protectedReserveTarget/referenceCashDelta/e
 維持 D-222 V2 正式文件、動態配置選檔及未就緒語義。熊市額度由已驗證的專用分帳與消耗帳本證據計算，未有完整來源前報告不可用舊聚合存款計算可動用生活額度或熊市梯次；使用原有 UNAVAILABLE／PARTIAL 契約指明證據缺口。原非緊急債券 ETF 市值來源仍須獨立核對緊急部位，5% 底線依當前總資產套用。
 
 當精確規則包的 `execution_policy.dynamic_allocation_policy_d141.aggregate_equity_hard_cap_enabled` 為 false 時，正式報告的高股息補足、熊市梯次及逾期現金部署略過全股票上限。原數字只供歷史計算與一般監測。旗標缺少保留舊版行為，旗標型別錯誤不得放寬，非上限容量仍需各自來源。
+
+
+### Task 607：規則收據與整包身分分離
+
+D-222 收據綁定已安裝模型中啟用的 reserve_allocation_d222、當前日／週上限、完整 bundle hash 與 policy version；manifest 的 D-N 只檢查為 D-222 或以後的有效整包版本，不能當單一計算器版本。資產端不新增 API 或計算邏輯，沿用權威同步工具，將修復後 manifest 的 bytes 鏡像至 business resources；以原 generator 重產 insert-only SQL 和綁 hash golden，並以 export_settings_runtime.py 同步 srpp-simulator/runtime 後 --check。兩個 image 都重建／recreate；worker catalog.baseBundleSha256 必須與 business authority 等值，保留設定中心既有 SIMULATOR_POLICY_MISMATCH 拒絕條件。正式政策文件與 model bytes、全部金融案例 output 和 calculator source hashes 必須相同。既有自然背景 producer 依已部署精確 hash 發包，維護僅純讀驗證新包與固定 calculationRunId 再讀；HTTP 503 與 verifier 失敗不得宣稱正式採用。

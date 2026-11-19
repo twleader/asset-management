@@ -7197,3 +7197,8 @@ D222 selector並分INITIAL_ALLOCATION與LIVING_RESERVE_REBALANCE兩模式。INIT
 配置目標與熊市資金依 SRPP 正式 D-224 同一規則包。熊市賣債後非緊急債券 ETF 至少占總資產 5%。緊急債券 ETF 最多累計動用 40 萬元，生活定存最多累計動用一年實質生活費；緊急定存、另一年生活定存、活存保留。實際可動用餘額須核對來源分帳、累計使用與有效承諾，缺證據列具名未評估。
 
 D-224 移除一般及熊市的全股票獨立硬上限，保留個別與群組配置上限、現金保留、債券底線及相關風險檢查。
+
+
+### Task 607：早報收據相容性修復的權威同步（Requirement 210 補充）
+
+009826 計算收據的 D-222 是該計算規則身分，不要求整份政策 manifest 的最新決策仍為 D-222。SRPP 允許 D-222 及後續整包版本使用 D-222 收據，仍須核對現行 D-222 啟用設定、完整 bundle hash、policy version、日／週張數上限與原交易條件。資產端同步修復後的精確 manifest、正式 registry SQL、綁 hash 的既有測試產物及原工具匯出的 srpp-simulator/runtime；model、正式政策文件、公式及金融案例輸出不變。完成兩專案落地後才登錄；登錄後立即以精確新 hash 留存公開 9090 業務 GET 回應，再重建 business-services 與 srpp-simulator、核對容器原文與 simulator baseBundleSha256 等於新 hash，並驗證既有設定中心純讀無 SIMULATOR_POLICY_MISMATCH，再讀回業務 API。缺包須如實記錄，不啟動 producer、不補跑早報、不寄信、不交易。
