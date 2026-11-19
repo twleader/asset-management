@@ -127,6 +127,13 @@ class SrppOrderPlanServiceTest {
         problem(() -> harness(invalidAction).service().order(order(invalidAction, "ASSET_RECONCILIATION.0~ADOPT")), "UPSTREAM_INVALID");
     }
 
+    @Test void namedRadarSellProjectionPreservesFrozenUnitsWithoutStrategyWhitelistOrNewAuthority(){
+        var initial=packageWith(List.of(new Leg("2881","台股","SELL",null,"1000")));ObjectNode root=(ObjectNode)SrppJcs.parseStrict(initial.content());
+        var old=(com.fasterxml.jackson.databind.node.ArrayNode)root.path("modules").get(0).path("data").path("legs");ObjectNode leg=(ObjectNode)old.remove(0);leg.put("strategy","NAMED_RADAR_ROTATION_D226");((com.fasterxml.jackson.databind.node.ArrayNode)root.path("modules").get(8).path("data").path("legs")).add(leg);
+        root.remove("contentSha256");String hash=SrppJcs.hash(root);root.put("contentSha256",hash);var saved=new SrppReportRepository.Package(initial.id(),initial.sharedId(),initial.scope(),initial.consumer(),initial.stateHash(),initial.inputHash(),SrppJcs.canonicalize(root),hash,initial.publishedAt());
+        JsonNode result=SrppJcs.parseStrict(harness(saved).service().order(order(saved,"STRATEGIC_BUY_GATES.0~ADOPT")));JsonNode out=result.path("legs").get(0);assertThat(out.path("legId").asText()).isEqualTo("STRATEGIC_BUY_GATES.0");assertThat(out.path("baseUnits").asText()).isEqualTo("1000");assertThat(out.path("finalUnits").asText()).isEqualTo("1000");assertThat(out.path("executable").asBoolean()).isFalse();assertThat(result.path("tradeAuthorization").asBoolean()).isFalse();
+    }
+
     private static LinkedMultiValueMap<String, String> order(SrppReportRepository.Package saved, String decisions) {
         var values = new LinkedMultiValueMap<String, String>();
         values.add("consumer", "Codex"); values.add("tradingDate", DATE.toString()); values.add("reportSlot", "09:05");

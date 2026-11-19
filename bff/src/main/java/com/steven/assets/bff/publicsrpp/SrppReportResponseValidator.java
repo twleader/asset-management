@@ -190,10 +190,11 @@ final class SrppReportResponseValidator {
         String status=text(leg,"status"),action=text(leg,"action"),strategy=text(leg,"strategy");
         // These 09:05/12:00 Taiwan report slots never expose individual US legs.
         if(!"台股".equals(text(leg,"market")))fail();
-        boolean shortStrategy=SHORT_STRATEGIES.contains(strategy);
+        boolean planBuy="NAMED_CASH_BUY_D226".equals(strategy),shortStrategy=SHORT_STRATEGIES.contains(strategy),namedSell="NAMED_RADAR_ROTATION_D226".equals(strategy);
         boolean boundStrategy=switch(moduleId){
             case "BOND_D130_D195" -> Set.of("STRATEGIC_FUBON","EMERGENCY_CATHAY").contains(strategy);
             case "DIVIDEND_TOPUP" -> "DIVIDEND_TOPUP".equals(strategy);
+            case "STRATEGIC_BUY_GATES" -> "NAMED_DEEP_DRAWDOWN_D215".equals(strategy)&&Set.of("0050","00881").contains(text(leg,"symbol"))||planBuy&&"00881".equals(text(leg,"symbol"))||namedSell&&"2881".equals(text(leg,"symbol"));
             case "SHORT_TERM_AND_US_TACTICAL" -> shortStrategy;
             default -> false;
         };
@@ -217,7 +218,8 @@ final class SrppReportResponseValidator {
                         && ("INTRADAY".equals(rule) && "NOT_EVALUATED".equals(gate)
                             && text(receipt,"reason").startsWith("HORIZON_NOT_APPLICABLE")
                             || Set.of("TRADABILITY","BEAR_WINDOW").contains(rule) && "UNAVAILABLE".equals(gate));
-                if(!"PASS".equals(gate) && !d130Optional)fail();
+                boolean mediumOptional=("NAMED_DEEP_DRAWDOWN_D215".equals(strategy)||planBuy||namedSell)&&"TRADABILITY".equals(rule)&&"UNAVAILABLE".equals(gate)&&"D144_OFFICIAL_SOURCE_UNAVAILABLE_BEST_LEVEL_LIMIT_ONLY".equals(text(receipt,"reason"));
+                if(!"PASS".equals(gate) && !d130Optional && !mediumOptional)fail();
                 if(!d130Optional)for(JsonNode ref:receipt.get("inputRefs"))if(!verifiedSources.contains(ref.textValue()))fail();
                 if("SHARED_CURRENCY_CAPACITY".equals(rule)){Set<String> sharedRefs=new HashSet<>();receipt.get("inputRefs").forEach(r->sharedRefs.add(r.textValue()));if(!sharedRefs.equals(Set.of("assets","report-reservations","topup-state","policy")))fail();}
             }
@@ -250,6 +252,29 @@ final class SrppReportResponseValidator {
                     if(!actualRefs.equals("SHARED_CURRENCY_CAPACITY".equals(text(receipt,"ruleId"))?Set.of("assets","report-reservations","topup-state","policy"):expectedRefs))fail();
                 }
             }
+            if("NAMED_DEEP_DRAWDOWN_D215".equals(strategy)||planBuy){
+                Set<String> required=new HashSet<>(Set.of("D215_NAMED_PATH","QUOTE","RADAR","STRATEGIC_PRICE","ALLOCATION","FUNDING","PENDING","RESERVATIONS","DEDUPLICATION","DEPTH","EXECUTION_ACCOUNT","THESIS","TRADABILITY","SHARED_CURRENCY_CAPACITY"));
+                if(planBuy){required.remove("D215_NAMED_PATH");required.add("D226_BUY_PATH");required.add("D223_PLAN_BUDGET");}
+                if(!gates.equals(required)||!"BUY".equals(action)||!"國泰證券".equals(text(leg,"broker"))||!(planBuy?"CORE_D226_BUY":"CORE_D215").equals(text(leg,"subaccount")))fail();
+                for(JsonNode receipt:leg.get("receipts")){
+                    String rule=text(receipt,"ruleId"),code=text(leg,"symbol");Set<String> expected;
+                    if("SHARED_CURRENCY_CAPACITY".equals(rule))expected=Set.of("assets","report-reservations","topup-state","policy");
+                    else if("ALLOCATION".equals(rule))expected=Set.of("assets","policy","classifications","fx","market:美股:VOO","market:台股:0050","market:台股:00881");
+                    else if("THESIS".equals(rule))expected=Set.of("policy","market:台股:"+code,"classifications");
+                    else if("TRADABILITY".equals(rule))expected=Set.of("policy","market:台股:"+code,"topup-state");
+                    else if(Set.of("D215_NAMED_PATH","D226_BUY_PATH","QUOTE","RADAR","STRATEGIC_PRICE","DEPTH").contains(rule))expected=Set.of("policy","market:台股:"+code);
+                    else expected=Set.of("assets","policy","topup-state","report-reservations","classifications","market:台股:"+code);
+                    Set<String> actual=new HashSet<>();receipt.get("inputRefs").forEach(r->actual.add(r.asText()));if(!actual.equals(expected))fail();
+                }
+            }
+            if(namedSell){
+                Set<String> required=Set.of("D226_SELL_PATH","QUOTE","RADAR","POSITION","PENDING","RESERVATIONS","DEDUPLICATION","CORE_RETENTION","D152_BATCH","COOLDOWN","DEPTH","EXECUTION_ACCOUNT","COSTS","TRADABILITY");
+                if(!gates.equals(required)||!"SELL".equals(action)||!"CORE_D226".equals(text(leg,"subaccount"))||!lots.isNull()||!positiveUnits||!leg.get("units").textValue().matches("[1-9][0-9]*")||new BigDecimal(leg.get("units").textValue()).compareTo(BigDecimal.valueOf(9007199254740991L))>0)fail();text(leg,"broker");
+                for(JsonNode receipt:leg.get("receipts")){
+                    String rule=text(receipt,"ruleId");Set<String> expected=Set.of("QUOTE","RADAR","DEPTH").contains(rule)?Set.of("policy","market:台股:2881"):"TRADABILITY".equals(rule)?Set.of("policy","market:台股:2881","topup-state"):Set.of("assets","policy","topup-state","report-reservations","classifications","market:台股:2881");
+                    Set<String> actual=new HashSet<>();receipt.get("inputRefs").forEach(r->actual.add(r.asText()));if(!actual.equals(expected))fail();
+                }
+            }
             if(shortStrategy){
                 if(!lots.isNull() || !positiveUnits || !leg.get("units").textValue().matches("[1-9][0-9]*")
                         || new BigDecimal(leg.get("units").textValue()).compareTo(BigDecimal.valueOf(9007199254740991L))>0)fail();
@@ -264,7 +289,7 @@ final class SrppReportResponseValidator {
             }
             BigDecimal quantity=positiveLots ? BigDecimal.valueOf(lots.longValue()).multiply(BigDecimal.valueOf(1000)) : new BigDecimal(leg.get("units").textValue());
             if(new BigDecimal(leg.get("limitPrice").textValue()).multiply(quantity).compareTo(new BigDecimal(leg.get("amount").textValue()))!=0)fail();
-            if(!"TWD".equals(text(leg,"currency")) || (!shortStrategy && (!positiveLots || !leg.get("units").isNull())))fail();
+            if(!"TWD".equals(text(leg,"currency")) || (!shortStrategy && !namedSell && (!positiveLots || !leg.get("units").isNull())))fail();
         } else {
             if(!lots.isNull() && lots.longValue()!=0 || !leg.get("units").isNull() && new BigDecimal(leg.get("units").textValue()).signum()!=0
                     || !leg.get("limitPrice").isNull() || !leg.get("amount").isNull())fail();

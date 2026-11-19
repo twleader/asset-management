@@ -1,0 +1,33 @@
+{
+  "qualification": "SYNTHETIC_OFFLINE_ONLY_NOT_NATURAL_REPORT_ACCEPTANCE",
+  "bundle": "15ca8f63f3adcfe8ce912c684d4d46d5924f98eb6d657cc605522118a0408092",
+  "swagger_sha256": "aaedb6b9e647878bc22eef33969ad41896828476a7d2b75b7f3bb709f5f40135",
+  "formula_sha256": "b68300d50a027a391cce0c00b2e86ab68c59dd7487fa4ca5f4c93a4916195579",
+  "backend_tests": {
+    "tests": 224,
+    "failures": 0,
+    "errors": 0,
+    "existing_skips": 1
+  },
+  "bff_tests": {
+    "tests": 286,
+    "failures": 0,
+    "errors": 0,
+    "existing_skips": 1
+  },
+  "spec_check": {
+    "block": 0,
+    "check": 0
+  },
+  "consumer_full_verifiers": [
+    "medium:PASS",
+    "plan:PASS"
+  ],
+  "explicit_adoption_guards": [
+    "medium:3_ELIGIBLE_OTHER_PLAN_BLOCKED",
+    "plan:2_ELIGIBLE_D215_TWO_BLOCKED"
+  ],
+  "natural_runtime_acceptance": "NOT_YET_EXECUTED",
+  "report_delivery_tested": false,
+  "orders_placed": false
+}

@@ -1,0 +1,11 @@
+{
+  "status": "PASS_SUPERSEDED_BY_SELLER_REQUIREMENT",
+  "bundle": "22b8a90d18809aafd50fd09f45921ee3bfa040fcc5e78201c87e9d239afdd95c",
+  "swagger": "894887cb00b424a01d27b73d4f8a6f306a85eb2f7dc1737a83fd9373143f8fc2",
+  "formula_manifest_sha256": "bdb7bdf1e45a5b3cd3129dad48b779edf57ab78054f6cc61c2acc4e215f1246a",
+  "same_input_golden_cases": 111,
+  "long_short_cases": 15,
+  "authority_gate": "PASS",
+  "scope": "offline preparation only; no registry, no formal Git landing, no container replacement",
+  "superseded_reason": "User additionally replaced 2881 seller 152/old timing conditions with exact EXIT_CANDIDATE or REDUCE_CANDIDATE plus LLM suitable timing judgment."
+}

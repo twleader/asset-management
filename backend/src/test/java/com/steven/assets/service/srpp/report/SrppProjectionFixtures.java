@@ -39,6 +39,10 @@ final class SrppProjectionFixtures {
 
         Frozen original = frozen(7, AT, "09:05", "projection-source-r1");
         ObjectNode input = original.input();
+        // Projection tests need a feasible D222 L0; they do not test an insolvent reserve plan.
+        var old=original.facts();var total=new java.math.BigDecimal("10000000");
+        var facts=new com.steven.assets.service.srpp.decision.DecisionFacts.Input(old.date(),old.slot(),old.capturedAt(),old.sessions(),total,total,old.termDeposits(),old.bondValue(),old.fx(),old.fxEvidence(),old.bearWindow(),old.symbols(),old.budget(),old.subaccounts(),old.emergencyValue());
+        ObjectNode a=input.withObject("/sources/assets");a.withObject("snapshot").put("totalAssets","10000000").put("totalDeposit","10000000");a.withObject("liveAssets").put("liveTotalAssets","10000000").put("totalDeposit","10000000");((ObjectNode)a.path("snapshot").path("deposits").get(0)).put("amount","10000000").put("originalAmount","10000000");input.set("facts",SrppReportModuleCalculator.normalize(MAPPER.valueToTree(facts)));original=new Frozen(facts,input,original.sourceVector(),original.assetSnapshotId(),original.assetGeneratedAt());
         ObjectNode source = input.withObject("sources").putObject("market:台股:0050");
         source.put("market", "台股").put("symbol", "0050");
         ObjectNode quote = source.putObject("quote");

@@ -13608,7 +13608,7 @@ price-only 與走勢圖 `GET /api/market-data/indicators/series` 同為未還原
 
 ### Task 566 現金先買與台美普通股票高檔賣出
 
-D211新增正式來源 `execution_policy.cash_first_rotation_d211`，取消現金出資買腿對同輪賣方READY與配對ID的依賴；既有已交割換股專用準備金FIFO與第21交易日規則仍只管理該專用款，不能綁住其他合規現金。FUNDING_CAPACITY原計算只以已交割幣別資金扣待付／已確認買款與費用／通膨保護底線，排除待收；不依賴CORE_SELL_GUARD結果。ROTATION_AND_REGIME_CAPACITY仍只輸出容量與準備金，不新增無來源買腿或重分配器。買點、個別／群組／全股票上限、額度等仍由原獨立閘門檢核。
+D211新增正式來源 `execution_policy.cash_first_rotation_d211`，取消現金出資買腿對同輪賣方READY與配對ID的依賴；既有已交割換股專用準備金FIFO與第21交易日規則仍只管理該專用款，不能綁住其他合規現金。FUNDING_CAPACITY原計算只以已交割幣別資金扣待付／已確認買款與費用／通膨保護底線，排除待收；不依賴CORE_SELL_GUARD結果。ROTATION_AND_REGIME_CAPACITY仍只輸出容量與準備金，不新增無來源買腿或重分配器。買點、個別／群組／依同輪政策旗標有效的全股票上限、額度等仍由原獨立閘門檢核。
 
 新增純計算共用 `OrdinaryEquitySellGate`，由台股 `SrppReportModuleCalculator.coreTiming` 與美股 `UsCoreSellCalculator.evaluate` 在已驗高水位更新及完成KD取值之後、原D174轉弱／回落判斷之前呼叫。來源 `core_sell_guard_d174.ordinary_equity_high_sell_d211` 精確列D211/enabled、台美市場、六檔既有債券排除（00679B／00697B／00719B／00751B／00865B／SGOV）、四KD>50與兩D≥80門檻及重用原D208/D209政策鍵；不接受caller自行宣稱例外。00919仍由原D208/D209判斷，理由與receipt不改。
 
@@ -14211,9 +14211,46 @@ Business 已產生的 ALLOCATION_GAP protectedReserveTarget/referenceCashDelta/e
 
 維持 D-222 V2 正式文件、動態配置選檔及未就緒語義。熊市額度由已驗證的專用分帳與消耗帳本證據計算，未有完整來源前報告不可用舊聚合存款計算可動用生活額度或熊市梯次；使用原有 UNAVAILABLE／PARTIAL 契約指明證據缺口。原非緊急債券 ETF 市值來源仍須獨立核對緊急部位，5% 底線依當前總資產套用。
 
-當精確規則包的 `execution_policy.dynamic_allocation_policy_d141.aggregate_equity_hard_cap_enabled` 為 false 時，正式報告的高股息補足、熊市梯次及逾期現金部署略過全股票上限。原數字只供歷史計算與一般監測。旗標缺少保留舊版行為，旗標型別錯誤不得放寬，非上限容量仍需各自來源。
+當精確規則包的 `execution_policy.dynamic_allocation_policy_d141.aggregate_equity_hard_cap_enabled` 為 false 時，正式報告的高股息補足、熊市梯次及逾期現金部署略過依同輪政策旗標有效的全股票上限。原數字只供歷史計算與一般監測。旗標缺少保留舊版行為，旗標型別錯誤不得放寬，非上限容量仍需各自來源。
 
 
 ### Task 607：規則收據與整包身分分離
 
 D-222 收據綁定已安裝模型中啟用的 reserve_allocation_d222、當前日／週上限、完整 bundle hash 與 policy version；manifest 的 D-N 只檢查為 D-222 或以後的有效整包版本，不能當單一計算器版本。資產端不新增 API 或計算邏輯，沿用權威同步工具，將修復後 manifest 的 bytes 鏡像至 business resources；以原 generator 重產 insert-only SQL 和綁 hash golden，並以 export_settings_runtime.py 同步 srpp-simulator/runtime 後 --check。兩個 image 都重建／recreate；worker catalog.baseBundleSha256 必須與 business authority 等值，保留設定中心既有 SIMULATOR_POLICY_MISMATCH 拒絕條件。正式政策文件與 model bytes、全部金融案例 output 和 calculator source hashes 必須相同。既有自然背景 producer 依已部署精確 hash 發包，維護僅純讀驗證新包與固定 calculationRunId 再讀；HTTP 503 與 verifier 失敗不得宣稱正式採用。
+
+
+## Requirement 215／Task 608：具名中期低接評估
+
+於既有STRATEGIC_BUY_GATES加入純計算器SrppReportMediumDipCalculator；輸入限同輪Frozen、policy model與已凍結市場/資產/官方狀態。D222市場選擇先以完整三檔原始區間、方向與FX事實產生目標（與execution分離），再以目標、同輪funding、pending/reservations求容量。兩檔固定順序0050、00881，共用現行sharedFunds；與其他路徑的掛單、預留及群組佔用同源扣除。每個gate都輸出PASS/BLOCK/UNAVAILABLE及精確inputRefs。資料缺漏不跳過其他gate。正數leg的strategy為NAMED_DEEP_DRAWDOWN_D215、broker為國泰證券、subaccount為CORE_D215、lots為整張整數、units為null；limitPrice/amount/fees沿既有decimal契約。最終風險與採納仍由consumer同輪收據約束。D226的D223 final gate取消成交價及限價<38條件，改精確ADD_CANDIDATE並保留40萬跨日累計約束；獨立D215由受程式建構且全必需收據PASS的leg識別，不依任意purpose字串解封。
+
+
+D-226 本輪追加授權：D-223 00881 買方取消嚴格低於38元價格條件，改以同輪精確雷達 action=ADD_CANDIDATE 與 LLM 完整條件判斷可承接。40萬元跨日累計含費用、有效掛單與正式預留仍保留，2881賣方仍嚴格高於152且原退出閘成立，2885保留。D215中期與D223換股路徑仍獨立，不以D223的缺帳本影響D215；兩者仍共享全帳資金與容量，不可重複計入。
+
+本輪相容性範圍包含 BFF SrppReportResponseValidator，只接受STRATEGIC_BUY_GATES＋NAMED_DEEP_DRAWDOWN_D215＋台股0050/00881的組合，仍拒絕其他非法組合。新增合法正量、缺證、非法策略BFF測試，部署business-services與bff。全股票獨立硬上限沿既有aggregateEquityHardCapEnabled：明確false不套用，缺旗標維持歷史上限，非法型別拒絕，不重新啟用D224已移除上限；其他有效單檔/群組/現金/債券限制仍生效。
+
+
+## Requirement 216／Task 609：2881雷達賣方
+
+新增純函式SrppNamedRadarSellCalculator.append(M,Frozen,Policy,model)，由既有STRATEGIC_BUY_GATES合成NAMED_RADAR_ROTATION_D226/2881/SELL；取代152與D174擇時但保留原數量/費稅/冷卻/結算去重。先依raw asset snapshot/live exact holdingId與broker對帳，再核對topup-state的正式sellablePositions與executionAccounts.CORE_D226、rotationExit.2881固定baseline snapshot及完整confirmed fills，重播原D152 sell_shares與5完成日冷卻。2881只能以權威零目標退出身分執行，其他正核心不變；缺基準或官方可賣資料不推定零。broker由正式source對照snapshot brokerId；lots=null、units為canonical正整數字串，limit/amount/fees保持既有canonical decimal。
+
+封閉內部source contract為已驗owner/date/bundle且coverage COMPLETE的topup-state：executionAccounts.CORE_D226={verified,ownerUserId,brokerId,broker,subaccount,accountFingerprint,costs:{verified,brokerageRate,minimumFeeTwd,sellTaxRate,source_ref}}；sellablePositions={verified,coverage,rows:[{holdingId,symbol,market,brokerId,accountFingerprint,settledShares,sellableShares,source_ref}]}；rotationExit.2881={verified,planId,baselineSnapshot:{id,snapshotDate,stocks:[原正式stock rows]},fills:{verified,coverage,rows:[{fillId,batchId,symbol,market,brokerId,accountFingerprint,side,shares,tradeDate,confirmed,planId}]},source_ref}。完整snapshot與fills必須重播基準股數-已售=目前股數，不以缺資料推空帳。官方量取min(sellableShares,settledShares-pending-未連結預留)，同linkedOrderId不重扣。D152只以已確認batchId計批次，calendar completedSessions計5日冷卻，其他舊高檔/152不加入。
+
+required收據恰為D226_SELL_PATH/QUOTE/RADAR/POSITION/PENDING/RESERVATIONS/DEDUPLICATION/CORE_RETENTION/D152_BATCH/COOLDOWN/DEPTH/EXECUTION_ACCOUNT/COSTS/TRADABILITY。QUOTE/RADAR/DEPTH refs={policy,market:台股:2881}，TRADABILITY refs={policy,market:台股:2881,topup-state}，其餘refs={assets,policy,topup-state,report-reservations,classifications,market:台股:2881}。除唯一D144缺官方可交易性reason= D144_OFFICIAL_SOURCE_UNAVAILABLE_BEST_LEVEL_LIMIT_ONLY可UNAVAILABLE，其他正數收據皆PASS；此L2只把限價設買一，不減既有批次量，仍驗同市場5檔總深度。原核心/風險/LLM最終採納及交割後資金邊界不變。BFF與OpenAPI更新由整合端同版完成，無新路由。
+
+D226股票費稅authority補明：COSTS的account.costs.sellTaxRate必須精確等於同版model.execution_policy.tactical_profit_policy.stock_sell_tax，且stock_sell_tax_source為非空正式來源；本輪root已核對財政部一般股票賣出稅0.003。ETF的0.001不得冒充股票稅率。實際brokerageRate、minimumFeeTwd仍取已驗同帳costs/source_ref，不自猜折扣或最低費用。
+
+
+第3輪修正冷卻來源：D152重播/批次仍只用基準後、本plan已確認fills；COOLDOWN改用獨立topup-state.rotationCooldown.2881={verified:true,coverage:COMPLETE,scope:OWNER_ALL_BROKERS_SAME_SYMBOL_DIRECTION,symbol:2881,market:台股,side:SELL,coverageStart,coverageEnd,source_ref,rows:[{fillId,symbol,market,side,shares,tradeDate,confirmed:true,brokerId}]}。coverageStart不晚於最近5個已完成台股交易日第一日、coverageEnd恰為本輪交易日；rows涵蓋全owner所有券商該代號同方向已確認成交，不能用planId或基準日截斷。若同窗口內plan fills有記錄，global rows必精確包含同fillId/日期/股數/brokerId，否則UNKNOWN/UNAVAILABLE。缺此完整來源不得從plan fills空陣列推無冷卻。基準日前一交易日已有SELL的案例須阻擋，真正完成5個交易日後才解除。
+
+
+## Requirement 217／Task 610：獨立D226買方預算
+
+純SrppNamedCashBuyBudget.evaluate(policyConfig,planSource,pendingSource,reservationSource,tradingDate)由caller先驗全部外層owner/date/bundle/vector與內容hash；policyConfig為同版named_cash_rotation_d223。planSource={verified:true,coverage:COMPLETE,planId,source_ref,fills:{verified:true,coverage:COMPLETE,startDate:2026-11-18,endDate:交易日,rows:[{fillId,planId,symbol:00881,market:台股,side:BUY,confirmed:true,tradeDate,shares,price,amount,fees,source_ref}]}}；逐筆驗唯一id、日期、正數shares/price/amount、非負fees與amount=shares*price。不得信任spent自報。pendingSource={verified:true,coverage:COMPLETE,orders:[{orderId,symbol,market,side,currency:TWD,planId或strategy,remainingShares,limitPrice,remainingFees}]}；reservationSource={verified:true,status:VERIFIED,coverage:COMPLETE,rows:[{reservationId,symbol,market,action,status:ACTIVE,currency:TWD,planId或strategy,amount,fees,linkedOrderId}]}。同plan精確識別為cfg.plan_id或NAMED_CASH_BUY_D226；已知獨立NAMED_DEEP_DRAWDOWN_D215/SHORT_TERM_D173不扣plan，未知00881 BUY歸屬UNAVAILABLE；相衝突歸屬UNAVAILABLE。精確linkedOrderId必有同symbol/market/side掛單，允許正式reservation strategy補足該掛單plan歸屬，兩側currency皆須textual且精確TWD（不得缺欄位預設），驗證後單筆計max(剩餘pending debit,immutable reservation amount+fees)，保留較大承諾且不雙算；孤立link或跨幣別拒絕，不以partial fill為由抹除較大immutable預留。全域重複id或畸形來源拒絕，缺證不計猜值。
+
+輸出ObjectNode含status、reason、budgetTwd、usedTwd、committedTwd、remainingTwd（canonical decimal字串或未知null）、placesOrders=false、tradeAuthorization=false。PASS僅代表預算計算完整，下游將remaining作maximumDebit上限；仍須全部原買方交易與風險gate。NAMED_CASH_BUY_D226共15gate含D226_BUY_PATH/D223_PLAN_BUDGET與原共同買方gates及SHARED；receipt refs沿完整assets/policy/market:台股:00881/topup-state/report-reservations/classifications，不讓獨立budget helper自行聲稱風險PASS。
+
+內部helper另回accountingEntries=[{id:FILL:<fillId>或PENDING:<orderId>或RESERVATION:<reservationId>,status:FILLED或PENDING或RESERVED,source_ref:原來源或凍結API路徑,plan_id:本plan,stock_code:00881,side:BUY,cash_debit_twd:canonical字串}]。linked只回一筆pending；未知回entries=[]但status非PASS不得當0。整合端僅投影為合法receipt.values數值fact(name=planEntryDebitTwd,subject=entry.id,value=debit,unit=TWD,quality=EXACT,reason=null)，不新增schema外module欄位；consumer直接採API算妥ledger，不本機重算數量/費。
+
+required精確15項為D226_BUY_PATH、QUOTE、RADAR、STRATEGIC_PRICE、ALLOCATION、FUNDING、PENDING、RESERVATIONS、DEDUPLICATION、DEPTH、EXECUTION_ACCOUNT、THESIS、TRADABILITY、D223_PLAN_BUDGET、SHARED_CURRENCY_CAPACITY。D226_BUY_PATH/QUOTE/RADAR/STRATEGIC_PRICE/DEPTH refs={policy,market:台股:00881}；ALLOCATION refs={assets,policy,classifications,fx,market:美股:VOO,market:台股:0050,market:台股:00881}；THESIS refs={policy,market:台股:00881,classifications}；TRADABILITY refs={policy,market:台股:00881,topup-state}；SHARED_CURRENCY_CAPACITY沿現行{assets,policy,topup-state,report-reservations}；其餘refs={assets,policy,topup-state,report-reservations,classifications,market:台股:00881}。STRATEGIC_PRICE不引D215回撤，仍檢現行正式價格/成本。
+
+STRATEGIC_PRICE僅執行原政策適用symbols規則；00881不在D188 price_position_symbols/ex_dividend_symbols時原規則NOT_APPLICABLE之PASS，不新增不買高或20%回撤硬閘。完整envelope fixture須含至少一筆planEntryDebitTwd六欄fact經BFF及consumer採納。

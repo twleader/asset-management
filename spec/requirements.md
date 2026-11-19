@@ -7202,3 +7202,44 @@ D-224 移除一般及熊市的全股票獨立硬上限，保留個別與群組�
 ### Task 607：早報收據相容性修復的權威同步（Requirement 210 補充）
 
 009826 計算收據的 D-222 是該計算規則身分，不要求整份政策 manifest 的最新決策仍為 D-222。SRPP 允許 D-222 及後續整包版本使用 D-222 收據，仍須核對現行 D-222 啟用設定、完整 bundle hash、policy version、日／週張數上限與原交易條件。資產端同步修復後的精確 manifest、正式 registry SQL、綁 hash 的既有測試產物及原工具匯出的 srpp-simulator/runtime；model、正式政策文件、公式及金融案例輸出不變。完成兩專案落地後才登錄；登錄後立即以精確新 hash 留存公開 9090 業務 GET 回應，再重建 business-services 與 srpp-simulator、核對容器原文與 simulator baseBundleSha256 等於新 hash，並驗證既有設定中心純讀無 SIMULATOR_POLICY_MISMATCH，再讀回業務 API。缺包須如實記錄，不啟動 producer、不補跑早報、不寄信、不交易。
+
+
+## Requirement 215：SRPP 台股具名中期低接候選的逐路徑完整評估（Task 608）
+
+作為日報使用者，我要0050及00881的D-215 MEDIUM低接候選在同一份凍結來源內完成選檔配置、現金、掛單預留及交易條件評估，讓符合條件的路徑有可審核的正數建議上限；不能被D-223的38元門檻或另一條路徑的未評狀態掩蓋。
+
+### Acceptance Criteria
+
+1. 既有STRATEGIC_BUY_GATES對0050、00881各輸出一條NAMED_DEEP_DRAWDOWN_D215 leg，逐項收據評估，不因第一項缺證而略過其他條件。缺正式來源記UNAVAILABLE，不推定空帳或零掛單。
+2. D-222三檔完整還原權息52週區間及可核對方向與匯率證據，先選擇配置調整標的，再求交易容量，避免依賴買進授權的循環；選檔不是交易授權。平手、缺證、容量不足不得猜分攤或重流。
+3. D-215仍需具名完整52曆週回撤、當輪同方向雷達、價格與五檔時效、原價格/成本、配置/群組/依同輪政策旗標有效的全股票限制、保護現金、結算帳戶、掛單、預留、防重與thesis檢核；不新增固定批次比例，不修改風險規則。正數僅為報告建議上限，最終採納仍需LLM同輪風險判斷。
+4. D-226取消D-223的成交價及限價<38條件，改為精確雷達ADD_CANDIDATE與LLM採納；保留跨日40萬含費/掛單/預留預算及賣方條件。獨立D-215與短線路徑保留各自規則，完整fixture可得到正量。
+5. API仍只讀已發布不可變package，沒有新路由、外部行情抓取、券商寫入或自動下單；任一硬閘失敗或來源無法核對仍拒絕該腿，不解除原BLOCKED。
+
+
+D-226 本輪追加授權：D-223 00881 買方取消嚴格低於38元價格條件，改以同輪精確雷達 action=ADD_CANDIDATE 與 LLM 完整條件判斷可承接。40萬元跨日累計含費用、有效掛單與正式預留仍保留，2881賣方仍嚴格高於152且原退出閘成立，2885保留。D215中期與D223換股路徑仍獨立，不以D223的缺帳本影響D215；兩者仍共享全帳資金與容量，不可重複計入。
+
+本輪相容性範圍包含 BFF SrppReportResponseValidator，只接受STRATEGIC_BUY_GATES＋NAMED_DEEP_DRAWDOWN_D215＋台股0050/00881的組合，仍拒絕其他非法組合。新增合法正量、缺證、非法策略BFF測試，部署business-services與bff。全股票獨立硬上限沿既有aggregateEquityHardCapEnabled：明確false不套用，缺旗標維持歷史上限，非法型別拒絕，不重新啟用D224已移除上限；其他有效單檔/群組/現金/債券限制仍生效。
+
+
+## Requirement 216：D-226 2881 雷達賣方獨立評估（Task 609）
+
+作為日報使用者，我要2881在同輪精確雷達為EXIT_CANDIDATE或REDUCE_CANDIDATE且LLM認定時機合宜時有可審核賣出建議，不再由152元或舊D174高檔、KD擇時阻擋。本需求取代Task608及D223歷史文件的2881價格/擇時門檻；00881買方與兩條交易腿獨立性不變。
+
+### Acceptance Criteria
+
+1. 於既有STRATEGIC_BUY_GATES輸出僅限台股2881的NAMED_RADAR_ROTATION_D226/SELL leg；lots=null，units為整數字串，broker依正式帳戶對照持倉brokerId，subaccount=CORE_D226。數量僅為上限，consumer仍須本輪risk與LLM時機採納。
+2. 每項必要條件獨立檢核並產生收據：D226_SELL_PATH、QUOTE、RADAR、POSITION、PENDING、RESERVATIONS、DEDUPLICATION、CORE_RETENTION、D152_BATCH、COOLDOWN、DEPTH、EXECUTION_ACCOUNT、COSTS、TRADABILITY。缺源記UNAVAILABLE，不猜空帳、股數或費稅，也不因某項缺漏跳過其他項。
+3. 保留原D152固定計畫基準三批規則：基準最多5000股且已驗起始市值低於100萬才可一次清零；其他至少三批，前兩批固定基準1/3，第三批含殘額；缺起始市值不能套例外。實際已確認成交才消耗批次及同代號同方向5個已完成交易日冷卻。冷卻另驗全owner所有券商的同代號同方向完整近期成交，不以planId或基準日截斷；缺源不得從plan fills=[]推沒有冷卻。基準snapshot、完整成交、正式可賣量、pending與報告預留須對帳。
+4. 2881為權威零目標退出標的，不偽造正核心目標或賣其他核心；若未來不再是零目標，本路徑不得自行解除核心保留。扣除已連結/未連結pending與預留，與官方settled/sellable shares及匹配市場五檔取最小值。零股不得使用整張book冒充，單獨零股需來源明示ODD_LOT與SHARES。
+5. D144官方可交易性來源缺失維持L2，只收緊為買一限價，原批次量及五檔總深度檢核不變；真禁賣仍阻擋。唯一可接受缺源收據reason為D144_OFFICIAL_SOURCE_UNAVAILABLE_BEST_LEVEL_LIMIT_ONLY；不得把其他必要缺源當L2。
+6. 手續費、最低費用、股票賣稅使用已驗同帳costs原始來源，含source_ref，不沿用ETF稅率、不自行猜折扣；淨款不得未交割就加入買方可用資金。沒有新API路由、request-time外部抓取、券商寫入或下單。BFF只接受指定策略/標的/SELL/帳戶與完整收據set及精確refs。
+
+D226股票費稅authority補明：COSTS的account.costs.sellTaxRate必須精確等於同版model.execution_policy.tactical_profit_policy.stock_sell_tax，且stock_sell_tax_source為非空正式來源；本輪root已核對財政部一般股票賣出稅0.003。ETF的0.001不得冒充股票稅率。實際brokerageRate、minimumFeeTwd仍取已驗同帳costs/source_ref，不自猜折扣或最低費用。
+
+
+## Requirement 217：D226 00881獨立買方與跨日預算（Task 610）
+
+D223買方以精確ADD_CANDIDATE及consumer同輪LLM採納獨立評估；不套D215的20%回撤、38元、2881的152元或D174條件。既有STRATEGIC_BUY_GATES新增NAMED_CASH_BUY_D226/00881/BUY，整張lots、subaccount CORE_D226_BUY，沿用全部配置、資金、帳戶、費用、五檔、風險與原交易硬閘，新增D223_PLAN_BUDGET；不新增路由或下單。
+
+跨日400000元含費上限不得重設。正式namedCashRotation完整自2026-11-18至交易日confirmed fills逐筆amount+fees，加上全部有效同plan pending剩餘股數乘限價加剩餘費用、未連結正式預留amount+fees；精確linkedOrderId去重。缺完整owner帳掛單、預留或plan歸屬不猜0。D215與SHORT_TERM_D173已證獨立策略不扣此plan預算，但仍扣全帳資金。兩路徑都評估後D215優先，僅本輪正數候選去重，不把候選當已用額。預算helper只回PASS/UNAVAILABLE/BLOCKED與used/committed/remaining；零已用PASS 400000、額滿PASS 0、超額BLOCKED 0、缺證remaining=null。完整fixture須在回撤不足20%但ADD成立仍有獨立正量，最終risk與LLM仍由consumer採納。
