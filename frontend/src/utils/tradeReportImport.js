@@ -100,6 +100,8 @@ export function createTradeReportImportDraft() {
     sourceMessageId: '',
     attestedAuthenticReport: false,
     attestedOwnerAccount: false,
+    reconcileFees: false,
+    previewReconcileFees: null,
     reading: false,
     previewing: false,
     confirming: false,
@@ -115,6 +117,7 @@ export function createTradeReportImportDraft() {
 /** Clears every fact derived from a previous input set and advances its revision. */
 export function invalidateTradeReportPreview(draft) {
   draft.preview = null
+  draft.previewReconcileFees = null
   draft.previewing = false
   draft.previewError = ''
   draft.applyError = ''
@@ -150,9 +153,34 @@ export function importStatusLabel(status) {
     READY: '可匯入',
     NEW: '待匯入',
     ALREADY_IMPORTED: '已匯入，待確認來源紀錄',
+    FEE_UPDATE_READY: '待補費更新（需明確確認）',
     IMPORTED: '已匯入',
     CONFLICT: '衝突，未寫入'
   })[status] || status || '—'
+}
+
+/** Row-specific wording for an already-imported trade whose fee components are still unknown. */
+export function tradeReportRowStatusLabel(row) {
+  if (row?.status === 'ALREADY_IMPORTED' && row.fee == null && row.transactionTax == null) {
+    return '已匯入，但待補費'
+  }
+  if (row?.status === 'ALREADY_IMPORTED' && (row.fee == null || row.transactionTax == null)) {
+    return '已匯入，仍有費用未知'
+  }
+  return importStatusLabel(row?.status)
+}
+
+/** Counts for the confirmation UI come from the BFF projection, not client-side row inference. */
+export function getTradeReportPreviewCounts(preview) {
+  const projectedNewRowCount = preview?.newRowCount
+  const newRowCount = Number.isSafeInteger(projectedNewRowCount) && projectedNewRowCount >= 0
+    ? projectedNewRowCount
+    : 0
+  const projectedFeeUpdateRowCount = preview?.feeUpdateRowCount
+  const feeUpdateRowCount = Number.isSafeInteger(projectedFeeUpdateRowCount) && projectedFeeUpdateRowCount >= 0
+    ? projectedFeeUpdateRowCount
+    : 0
+  return { newRowCount, feeUpdateRowCount }
 }
 
 /** Text-only projection of backend fee provenance; never infers a fee or affects import eligibility. */

@@ -51,6 +51,12 @@
         <el-checkbox v-model="draft.attestedOwnerAccount" @change="onInputChanged">
           我聲明回報中的成交屬於本人帳戶（系統不驗證券商帳戶持有人）
         </el-checkbox>
+        <el-checkbox v-model="draft.reconcileFees" @change="onReconcileFeesChanged">
+          重新核對待補費
+        </el-checkbox>
+        <div class="trade-import-help trade-import-reconcile-help">
+          僅在勾選並重新預覽後，系統才會依 BFF 回傳的官方唯一證據提出補費；不勾選時不重新核對既有交易費用。新成交即使費用未知，仍可匯入。
+        </div>
       </el-form>
 
       <el-alert
@@ -96,7 +102,9 @@
           class="trade-import-alert"
           type="info"
           :closable="false"
-          title="成交事實已存在。仍須明確確認，才能為這封來源郵件保存收件紀錄。"
+          :title="draft.reconcileFees
+            ? '成交事實已存在。若 BFF 預覽標示有可補項目，確認後才會依官方唯一證據更新；並會保存來源郵件收件紀錄。'
+            : '成交事實已存在。若費用仍未知，請勾選「重新核對待補費」並重新預覽；未勾選時只保存來源郵件收件紀錄，不會更新既有交易費用。'"
         />
 
         <el-table :data="draft.preview.rows || []" size="small" stripe max-height="360">
@@ -134,7 +142,7 @@
           </el-table-column>
           <el-table-column label="匯入狀態" min-width="155">
             <template #default="{ row }">
-              <div>{{ importStatusLabel(row.status) }}</div>
+              <div>{{ tradeReportRowStatusLabel(row) }}</div>
               <small v-if="row.reason" class="trade-import-error">{{ conflictReasonLabel(row.reason) }}</small>
               <small v-if="row.transactionId != null">交易紀錄 ID：{{ row.transactionId }}</small>
             </template>
@@ -173,7 +181,7 @@
         :disabled="!canApply || draft.confirming || draft.applying"
         @click="confirmApply"
       >
-        確認匯入 {{ draft.preview.rows?.length || 0 }} 筆
+        確認新增 {{ previewCounts.newRowCount }} 筆、補費 {{ previewCounts.feeUpdateRowCount }} 筆
       </el-button>
     </template>
   </el-dialog>
@@ -188,10 +196,11 @@ import {
   conflictReasonLabel,
   createTradeReportImportDraft,
   feeProvenanceLabel,
+  getTradeReportPreviewCounts,
   getTradeReportConflictRows,
-  importStatusLabel,
   invalidateTradeReportPreview,
-  readEmlFile
+  readEmlFile,
+  tradeReportRowStatusLabel
 } from '@/utils/tradeReportImport'
 
 const props = defineProps({ modelValue: { type: Boolean, default: false } })
@@ -205,8 +214,13 @@ let lastSuggestedMessageId = ''
 let appliedForCurrentDraft = false
 
 const canPreview = computed(() => canPreviewTradeReport(draft))
-const canApply = computed(() => canApplyTradeReportPreview(draft.preview) && !draft.applying)
+const canApply = computed(() => (
+  draft.previewReconcileFees === draft.reconcileFees
+  && canApplyTradeReportPreview(draft.preview)
+  && !draft.applying
+))
 const conflictRows = computed(() => getTradeReportConflictRows(draft.preview))
+const previewCounts = computed(() => getTradeReportPreviewCounts(draft.preview))
 
 function displayValue(value) {
   return value == null || value === '' ? '—' : String(value)
@@ -224,6 +238,11 @@ function invalidatePreview() {
 }
 
 function onInputChanged() {
+  if (draft.confirming || draft.applying) return
+  invalidatePreview()
+}
+
+function onReconcileFeesChanged() {
   if (draft.confirming || draft.applying) return
   invalidatePreview()
 }
@@ -281,13 +300,15 @@ async function previewImport() {
     sourceMessageId: draft.sourceMessageId.trim(),
     rawMimeBase64: draft.rawMimeBase64,
     attestedOwnerAccount: true,
-    attestedAuthenticReport: true
+    attestedAuthenticReport: true,
+    reconcileFees: Boolean(draft.reconcileFees)
   }
 
   try {
     const result = await bffApi.transaction.previewTradeReportImport(payload, { signal: controller.signal })
     if (sequence !== previewRequestSequence || !props.modelValue) return
     draft.preview = result
+    draft.previewReconcileFees = payload.reconcileFees
     draft.applyError = ''
   } catch (error) {
     if (sequence !== previewRequestSequence || !props.modelValue) return
@@ -302,20 +323,25 @@ async function previewImport() {
 
 function applyConflictResponse(error) {
   const data = error?.response?.data
-  if (data?.status === 'CONFLICT' && Array.isArray(data.rows)) draft.preview = data
+  if (data?.status === 'CONFLICT' && Array.isArray(data.rows)) {
+    draft.preview = data
+    draft.previewReconcileFees = draft.reconcileFees
+  }
   draft.applyError = apiErrorMessage(error, '匯入遭遇衝突，未覆寫既有交易')
 }
 
 async function confirmApply() {
   if (!canApply.value || !props.modelValue || draft.confirming || draft.applying || appliedForCurrentDraft) return
   const preview = draft.preview
+  const reconcileFees = draft.previewReconcileFees
+  const counts = getTradeReportPreviewCounts(preview)
   const revision = draft.revision
   draft.confirming = true
   let confirmed = false
   try {
     await ElMessageBox.confirm(
-      `將把預覽中的 ${preview.rows.length} 筆成交事實寫入目前登入帳戶的交易帳本。費用與稅額若未知會保持未知。兩項來源聲明由你提供，系統不驗證郵件簽章或券商帳戶持有人。要繼續嗎？`,
-      '確認匯入成交回報',
+      `依目前預覽，將新增 ${counts.newRowCount} 筆成交，補費 ${counts.feeUpdateRowCount} 筆。${reconcileFees ? '已啟用「重新核對待補費」，補費只依預覽中的 BFF 官方唯一證據更新。' : '未啟用「重新核對待補費」，不會更新已匯入交易的費用。'}費用與稅額若仍未知會保持未知。兩項來源聲明由你提供，系統不驗證郵件簽章或券商帳戶持有人。要繼續嗎？`,
+      '確認新增成交與補費',
       {
         type: 'warning',
         confirmButtonText: '確認匯入',
@@ -329,7 +355,7 @@ async function confirmApply() {
     confirmed = false
   }
   draft.confirming = false
-  if (!confirmed || revision !== draft.revision || draft.preview !== preview || !props.modelValue) return
+  if (!confirmed || revision !== draft.revision || draft.preview !== preview || draft.reconcileFees !== reconcileFees || !props.modelValue) return
 
   draft.applying = true
   draft.applyError = ''
@@ -338,15 +364,20 @@ async function confirmApply() {
     rawMimeBase64: draft.rawMimeBase64,
     attestedOwnerAccount: true,
     attestedAuthenticReport: true,
+    reconcileFees,
     previewHash: preview.previewHash
   }
   try {
     const result = await bffApi.transaction.applyTradeReportImport(payload)
     if (!props.modelValue || appliedForCurrentDraft) return
     appliedForCurrentDraft = true
-    ElMessage.success(result?.insertedCount === 0
-      ? '來源郵件已記錄；帳本已有相同成交，未新增交易'
-      : `已匯入成交回報${result?.insertedCount != null ? `，新增 ${result.insertedCount} 筆` : ''}`)
+    const insertedCount = Number.isSafeInteger(result?.insertedCount) && result.insertedCount >= 0
+      ? result.insertedCount
+      : 0
+    const feeUpdatedCount = Number.isSafeInteger(result?.feeUpdatedCount) && result.feeUpdatedCount >= 0
+      ? result.feeUpdatedCount
+      : 0
+    ElMessage.success(`已完成成交回報處理：新增 ${insertedCount} 筆成交，補費 ${feeUpdatedCount} 筆`)
     draft.applying = false
     emit('applied', result)
     emit('update:modelValue', false)
@@ -399,6 +430,7 @@ watch(() => props.modelValue, (visible, wasVisible) => {
 .trade-import-dialog { display: flex; flex-direction: column; gap: 12px; }
 .trade-import-form { display: flex; flex-direction: column; gap: 2px; }
 .trade-import-help, .trade-import-hash, .trade-import-unknown-hint { color: var(--el-text-color-secondary); font-size: 12px; line-height: 1.6; }
+.trade-import-reconcile-help { margin: -6px 0 2px 24px; }
 .trade-import-filename { margin-top: 4px; font-size: 12px; color: var(--el-text-color-regular); overflow-wrap: anywhere; }
 .trade-import-preview { display: flex; flex-direction: column; gap: 8px; }
 .trade-import-preview-head { display: flex; justify-content: space-between; align-items: center; }

@@ -55,3 +55,25 @@ test('fee provenance formatter does not determine transaction conflicts or apply
   assert.match(projection, /provenance\.status === 'RECORDED'/)
   assert.doesNotMatch(projection, /canApplyTradeReportPreview|getTradeReportConflictRows|\.filter\(/)
 })
+
+test('fee reconciliation mode is explicit, bound into both requests, and invalidates the preview', async () => {
+  const dialog = await source('../components/TradeReportImportDialog.vue')
+  assert.match(dialog, /v-model="draft\.reconcileFees" @change="onReconcileFeesChanged"[\s\S]*?重新核對待補費/)
+  assert.match(dialog, /function onReconcileFeesChanged\(\)[\s\S]*?invalidatePreview\(\)/)
+  assert.match(dialog, /reconcileFees: Boolean\(draft\.reconcileFees\)/)
+  assert.match(dialog, /reconcileFees,\s*previewHash: preview\.previewHash/)
+  assert.match(dialog, /previewReconcileFees === draft\.reconcileFees/)
+  assert.match(dialog, /previewReconcileFees = payload\.reconcileFees/)
+})
+
+test('pending fees and fee updates are distinguished from new trades in confirmation and result', async () => {
+  const dialog = await source('../components/TradeReportImportDialog.vue')
+  const utility = await source('./tradeReportImport.js')
+  assert.match(dialog, /tradeReportRowStatusLabel\(row\)/)
+  assert.match(utility, /已匯入，但待補費/)
+  assert.match(dialog, /previewCounts\.newRowCount/)
+  assert.match(dialog, /previewCounts\.feeUpdateRowCount/)
+  assert.match(dialog, /result\?\.insertedCount/)
+  assert.match(dialog, /result\?\.feeUpdatedCount/)
+  assert.match(dialog, /新增 \$\{insertedCount\} 筆成交，補費 \$\{feeUpdatedCount\} 筆/)
+})

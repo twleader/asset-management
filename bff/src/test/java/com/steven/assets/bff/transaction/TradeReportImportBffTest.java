@@ -180,4 +180,76 @@ class TradeReportImportBffTest {
             assertThat(actual.path("canApply").asBoolean()).isTrue();
         }
     }
+    @Test void feeUpdateProjectionOnlyAllowsCompleteSuccessfulPreview() throws Exception {
+        var controller = new TradeReportImportBffController(WebClient.create());
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var report = mapper.createObjectNode().put("status", "FEE_UPDATE_READY").put("previewHash", "hash")
+                .put("insertedCount", 0).put("feeUpdatedCount", 0);
+        var row = report.putArray("rows").addObject().put("status", "FEE_UPDATE_READY").put("fee", 20);
+        row.putObject("feeProvenance").put("status", "DERIVED");
+        var preview = mapper.readTree(controller.project("preview", 200, mapper.writeValueAsBytes(report)).getBody());
+        assertThat(preview.path("canApply").asBoolean()).isTrue();
+        assertThat(preview.path("rows")).isEqualTo(report.path("rows"));
+        assertThat(preview.path("conflictRows").isEmpty()).isTrue();
+        assertThat(preview.path("feeUpdatedCount").asInt()).isZero();
+        assertThat(preview.path("newRowCount").asInt(-1)).isZero();
+        assertThat(preview.path("feeUpdateRowCount").asInt(-1)).isEqualTo(1);
+
+        for (int status : List.of(200, 409)) {
+            var apply = controller.project("apply", status, mapper.writeValueAsBytes(report));
+            assertThat(apply.getStatusCode().value()).isEqualTo(status);
+            assertThat(mapper.readTree(apply.getBody()).path("canApply").asBoolean()).isFalse();
+        }
+        assertThat(mapper.readTree(controller.project("preview", 409, mapper.writeValueAsBytes(report)).getBody())
+                .path("canApply").asBoolean()).isFalse();
+        row.put("reason", "LEDGER_CHANGED");
+        var conflict = mapper.readTree(controller.project("preview", 200, mapper.writeValueAsBytes(report)).getBody());
+        assertThat(conflict.path("canApply").asBoolean()).isFalse();
+        assertThat(conflict.path("conflictRows").size()).isEqualTo(1);
+        assertThat(conflict.path("feeUpdateRowCount").asInt(-1)).isZero();
+        row.remove("reason");
+        report.put("previewHash", " ");
+        assertThat(mapper.readTree(controller.project("preview", 200, mapper.writeValueAsBytes(report)).getBody())
+                .path("canApply").asBoolean()).isFalse();
+    }
+
+    @Test void applyAndIdempotentRetryPreserveFeeCountSeparatelyFromInsertCount() throws Exception {
+        var controller = new TradeReportImportBffController(WebClient.create());
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        for (int count : List.of(1, 0)) {
+            var report = mapper.createObjectNode().put("status", count == 1 ? "FEE_UPDATED" : "ALREADY_IMPORTED")
+                    .put("previewHash", "hash").put("insertedCount", 0).put("feeUpdatedCount", count);
+            var result = mapper.readTree(controller.project("apply", 200, mapper.writeValueAsBytes(report)).getBody());
+            assertThat(result.path("insertedCount").asInt()).isZero();
+            assertThat(result.path("feeUpdatedCount").asInt()).isEqualTo(count);
+            assertThat(result.path("feeUpdateRowCount").asInt(-1)).isZero();
+            assertThat(result.path("canApply").asBoolean()).isFalse();
+        }
+    }
+
+    @Test void reconcileModeDoesNotBypassExistingBoundary() {
+        var count = new AtomicInteger();
+        var c = client(ORIGIN, 7L, 7L, count, 200);
+        request(c, PATH).header("Sec-Fetch-Site", "cross-site").bodyValue("{\"reconcileFees\":true}")
+                .exchange().expectStatus().isForbidden();
+        assertThat(count.get()).isZero();
+        request(c, PATH).bodyValue("{\"reconcileFees\":true}").exchange().expectStatus().isOk();
+        assertThat(count.get()).isEqualTo(1);
+    }
+    @Test void newPreviewCountExcludesAlreadyImportedRowsAndOverwritesUpstreamProjection() throws Exception {
+        var controller = new TradeReportImportBffController(WebClient.create());
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var report = mapper.createObjectNode().put("status", "READY").put("previewHash", "hash")
+                .put("newRowCount", 99).put("feeUpdateRowCount", 99);
+        var rows = report.putArray("rows");
+        rows.addObject().put("status", "NEW");
+        rows.addObject().put("status", "ALREADY_IMPORTED");
+        rows.addObject().put("status", "NEW");
+        var preview = mapper.readTree(controller.project("preview", 200, mapper.writeValueAsBytes(report)).getBody());
+        assertThat(preview.path("newRowCount").asInt(-1)).isEqualTo(2);
+        assertThat(preview.path("feeUpdateRowCount").asInt(-1)).isZero();
+        var invalid = mapper.readTree(controller.project("preview", 200, new byte[0]).getBody());
+        assertThat(invalid.path("newRowCount").asInt(-1)).isZero();
+        assertThat(invalid.path("feeUpdateRowCount").asInt(-1)).isZero();
+    }
 }

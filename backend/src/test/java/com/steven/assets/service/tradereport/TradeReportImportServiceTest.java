@@ -16,8 +16,9 @@ class TradeReportImportServiceTest {
  AppUserRepository users=mock(AppUserRepository.class);BrokerRepository brokers=mock(BrokerRepository.class);
  StockMasterService stocks=mock(StockMasterService.class);TenantGuard tenant=mock(TenantGuard.class);TradeReportLedgerGuard guard=mock(TradeReportLedgerGuard.class);
  FubonSettlementReceiptStore settlements=mock(FubonSettlementReceiptStore.class); FubonSrppSourceStore orders=mock(FubonSrppSourceStore.class);
+ TradeReportFeeEventStore events=mock(TradeReportFeeEventStore.class);
  TradeReportImportService service;
- @BeforeEach void setup(){service=new TradeReportImportService(new TradeReportParser(),store,tx,users,brokers,stocks,tenant,guard,new ObjectMapper().findAndRegisterModules(),settlements,orders);
+ @BeforeEach void setup(){service=new TradeReportImportService(new TradeReportParser(),store,tx,users,brokers,stocks,tenant,guard,new ObjectMapper().findAndRegisterModules(),new TradeReportFeeSourceLoader(settlements,orders),events);
  when(tenant.hasUser()).thenReturn(true);when(tenant.requireCurrentUserId()).thenReturn(1L);when(users.findById(1L)).thenReturn(Optional.of(AppUser.builder().id(1L).status("ACTIVE").build()));
  when(brokers.findByCode("fubon")).thenReturn(Optional.of(BrokerEntity.builder().id(1L).code("fubon").active(true).build()));when(stocks.resolveNameLocalOnly("0050","台股")).thenReturn("測試ETF");
  when(store.receipt(any(),any())).thenReturn(Optional.empty());when(store.evidence(any(),any())).thenReturn(Optional.empty());when(tx.findReportCandidates(any(),any(),any(),any(),any())).thenReturn(List.of());
@@ -61,5 +62,14 @@ class TradeReportImportServiceTest {
    ArgumentCaptor<String> hash=ArgumentCaptor.forClass(String.class),facts=ArgumentCaptor.forClass(String.class);verify(store).addEvidence(eq(1L),anyString(),hash.capture(),facts.capture(),eq(9L));
    when(store.evidence(any(),any())).thenReturn(Optional.of(new TradeReportStore.Evidence(7,hash.getValue(),facts.getValue(),9L)));when(tx.findById(9L)).thenReturn(Optional.of(saved.getValue()));clearInvocations(settlements,orders);
    var replay=service.preview(request);assertThat(replay.status()).isEqualTo("ALREADY_IMPORTED");assertThat(replay.rows().getFirst().feeProvenance()).isEqualTo(applied.rows().getFirst().feeProvenance());assertThat(replay.rows().getFirst().fee()).isEqualByComparingTo("20");verifyNoInteractions(settlements,orders);
+   var legacy=(com.fasterxml.jackson.databind.node.ObjectNode)new ObjectMapper().readTree(facts.getValue());legacy.put("schemaVersion",2);
+   when(store.evidence(any(),any())).thenReturn(Optional.of(new TradeReportStore.Evidence(7,hash.getValue(),legacy.toString(),9L)));
+   var refused=service.preview(new TradeReportImportService.Request("derived",raw,true,true,null,true));assertThat(refused.rows().getFirst().fee()).isEqualByComparingTo("20");assertThat(refused.rows().getFirst().feeProvenance().reason()).isEqualTo("LEGACY_MANUAL_HISTORY_UNKNOWN");
+
+ }
+ @Test void enrichmentFeeDomainValidationIsOwnedByService(){
+   assertThatCode(()->TradeReportImportService.validateEnrichmentFees(BigDecimal.ZERO,BigDecimal.ZERO)).doesNotThrowAnyException();
+   assertThatCode(()->TradeReportImportService.validateEnrichmentFees(new BigDecimal("20"),BigDecimal.ZERO)).doesNotThrowAnyException();
+   for(BigDecimal[] pair:List.of(new BigDecimal[]{null,BigDecimal.ZERO},new BigDecimal[]{BigDecimal.ZERO,null},new BigDecimal[]{BigDecimal.ONE.negate(),BigDecimal.ZERO},new BigDecimal[]{BigDecimal.ZERO,BigDecimal.ONE.negate()}))assertThatThrownBy(()->TradeReportImportService.validateEnrichmentFees(pair[0],pair[1])).isInstanceOf(TradeReportProblem.class).hasMessage("INVALID_TRADE_REPORT_FEES");
  }
 }
