@@ -40,7 +40,7 @@ class FubonScheduleSwitchControllerTest {
     @Test
     void anythingButAJsonBooleanIsRejectedWith400AndNeverReachesTheService() throws Exception {
         when(user.isAdmin()).thenReturn(true);
-        var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(controller).build();
+        var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(controller).setControllerAdvice(new GlobalExceptionHandler()).build();
         for (String body : new String[] {"{}", "{\"enabled\":null}", "{\"enabled\":\"true\"}", "{\"enabled\":\"false\"}",
                 "{\"enabled\":0}", "{\"enabled\":1}", "{\"enabled\":[]}", "{\"enabled\":{}}", "[]", "\"x\"", "not json"}) {
             mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/settings/fubon-schedule-switches/trade")
@@ -55,7 +55,7 @@ class FubonScheduleSwitchControllerTest {
         when(user.isAdmin()).thenReturn(true);
         when(service.setEnabled("trade", true)).thenReturn(new FubonScheduleSwitchDto("trade", true, Instant.EPOCH));
         when(service.setEnabled("trade", false)).thenReturn(new FubonScheduleSwitchDto("trade", false, Instant.EPOCH));
-        var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(controller).build();
+        var mvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(controller).setControllerAdvice(new GlobalExceptionHandler()).build();
         for (boolean value : new boolean[] {true, false}) {
             mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/settings/fubon-schedule-switches/trade")
                             .contentType("application/json").content("{\"enabled\":" + value + "}"))
