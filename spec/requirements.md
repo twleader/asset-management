@@ -7257,3 +7257,16 @@ D223買方以精確ADD_CANDIDATE及consumer同輪LLM採納獨立評估；不套D
 7. replay沿原immutable import加合法補費事件驗after hash；費用由已保存新事件回覆，不因官方來源消失/更動重新推導或抹掉。人工編輯後仍LEDGER_CHANGED或人工接管狀態，不偷偷恢復。重送第一次成功apply的原previewHash，只在新event完整request binding一致、來源原文未變、全批交易afterHash仍匹配且無人工接管時允許冪等回覆；其餘舊hash仍409，不重推來源。補費重放為ALREADY_IMPORTED，insertedCount=0，另feeUpdatedCount明示，不能把費用更新當新增交易。
 8. UI只render BFF投影canApply/conflictRows/feeUpdatedCount與待補狀態，reconcile勾選變動清除preview；確認框須區別新成交與補費。沿既有Origin/session/header保護，不增加9090或新權限。
 9. 先隔離worktree合成單元/一次性Postgres測試；使用者後續明確授權驗證好後部署及commit/merge/push。通過spec/arch與測試後依run-stack核對main/正式設定與同檔衝突，重建必要business/BFF/frontend，正式Liquibase僅新增本版事件schema並依規範pg_dump重產schema.sql，再依commit-merge-push收尾及main版本驗收。禁止正式成交匯入、補費執行、交易、寄信或重跑同步。
+
+## Requirement 218：富邦唯讀排程 API 執行開關（Task 612）
+
+**User Story：** 身為系統管理者，我希望在「系統資訊 → 富邦證 API」頁直接決定每一支富邦唯讀排程要不要執行，不必改環境變數或重建容器，才能停掉不需要的呼叫（例如每分鐘讀取官方當日委託的 SRPP 來源擷取）。
+
+**Acceptance Criteria：**
+1. 新增全域設定表 `fubon_schedule_switch`（`schedule_key` 主鍵、`enabled`、`updated_at`），由 Liquibase v1.171.0 建表並 seed 七列：`inventory`（現股庫存＋未實現損益）、`bank-balance`、`settlement`、`realized-gain`、`trade`、`etf-holdings`、`srpp-order-source`（官方當日委託，`/internal/orders/read`）。除 `srpp-order-source` 預設 `enabled=false` 外，其餘預設 `true`，維持現行行為。可用的 key 一律以資料表為準，不寫死 Enum。
+2. 七個排程開關對應七個 scheduler 類別、八個 `@Scheduled` 方法（ETF 早晚兩個方法共用 `etf-holdings`；`FubonInventorySyncScheduler`、`FubonBankBalanceSyncScheduler`、`FubonSettlementSyncScheduler`、`FubonRealizedGainSyncScheduler`、`FubonTradeSyncScheduler`、`FubonEtfHoldingsSyncScheduler`、`FubonSrppSourceScheduler`）於每次觸發前讀取開關；關閉、查無該列或讀取失敗一律略過本次執行（fail-closed，不呼叫富邦）；使用者正常停用記 DEBUG，查無該列（seed 缺失）與讀取失敗記 WARN。環境變數閘（`FUBON_*_SYNC_ENABLED`、`localConfigGate`）維持原樣，兩者皆放行才會執行。開關只管排程觸發，手動同步端點行為不變。
+3. 新增 business API `GET /api/settings/fubon-schedule-switches`（已登入者）與 `PUT /api/settings/fubon-schedule-switches/{scheduleKey}`（限 ADMIN，body `{enabled}`，未知 key 回 404；缺少 `enabled`、null 或非 boolean 回 400，BFF 與 business 皆不得把無效值當成 false）。修改後即時生效，不需重啟。
+4. BFF 純 passthrough：`/api/bff/fubon-api/schedule-switches` 以 WebClient 轉呼 business（同 `CrawlerDataBffController` 慣例），寫入限 ADMIN 並維持既有 Origin／session／header 保護；不新增 9090／Tailscale 路由、不新增券商呼叫。
+5. 「富邦證 API」頁新增「排程開關」欄：有對應排程的列顯示 `el-switch`（管理者可切換、其他角色唯讀），切換成功才更新畫面、失敗還原並提示；無排程的列顯示「－」。`get_order_results` 列改標示已串接（`POST /internal/orders/read`，Cron `0 * * * * *`（程式再限制台北 09:00–14:00 交易日））並對應 `srpp-order-source`。
+6. 本期不納入由 `external-materials-service` 驅動的行情／技術指標／配息等 marketdata 排程（十秒報價、13:40 技術指標等）；這些列的開關欄顯示「－」並在任務檔註明。
+7. 券商鐵則：只新增啟停既有唯讀查詢的開關，不新增任何交易能力。

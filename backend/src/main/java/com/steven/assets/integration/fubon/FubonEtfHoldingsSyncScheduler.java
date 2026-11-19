@@ -55,11 +55,13 @@ public class FubonEtfHoldingsSyncScheduler {
     }
 
     @Scheduled(cron = "0 50 8 * * MON-FRI", zone = "Asia/Taipei")
+    @FubonScheduleSwitched("etf-holdings")
     public void syncMorning() {
         submit(Intent.FULL);
     }
 
     @Scheduled(cron = "0 30 15 * * MON-FRI", zone = "Asia/Taipei")
+    @FubonScheduleSwitched("etf-holdings")
     public void syncAfternoon() {
         submit(Intent.FULL);
     }

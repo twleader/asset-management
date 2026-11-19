@@ -19,8 +19,8 @@ public class FubonSrppSourceScheduler {
     private final Clock clock;private final AtomicBoolean inFlight=new AtomicBoolean();
     @Autowired public FubonSrppSourceScheduler(MarketDataService calendar,FubonConfigState config,FubonSyncOwnerPort owners,BrokerRepository brokers,FubonSrppObservationPort adapter,FubonSrppSourceWriter writer){this(calendar,config,owners,brokers,adapter,writer,Clock.systemUTC());}
     FubonSrppSourceScheduler(MarketDataService calendar,FubonConfigState config,FubonSyncOwnerPort owners,BrokerRepository brokers,FubonSrppObservationPort adapter,FubonSrppSourceWriter writer,Clock clock){this.calendar=calendar;this.config=config;this.owners=owners;this.brokers=brokers;this.adapter=adapter;this.writer=writer;this.clock=clock;}
-    /** 預設停用（"-"）；需重新啟用時設 FUBON_SRPP_SOURCE_CRON，例如 "0 * * * * *"。 */
-    @Scheduled(cron="${fubon.srpp-source-cron:-}",zone="Asia/Taipei")
+    @Scheduled(cron="${fubon.srpp-source-cron:0 * * * * *}",zone="Asia/Taipei")
+    @FubonScheduleSwitched("srpp-order-source")
     public void observe(){
         ZonedDateTime now=ZonedDateTime.now(clock.withZone(TAIPEI));if(now.toLocalTime().isBefore(LocalTime.of(9,0))||!now.toLocalTime().isBefore(LocalTime.of(14,0)))return;
         try{if(!Optional.of(true).equals(calendar.isTwTradingDayCachedOnly(now.toLocalDate())))return;}catch(RuntimeException noCalendar){return;}

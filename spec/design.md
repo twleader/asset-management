@@ -14267,3 +14267,11 @@ STRATEGIC_PRICE僅執行原政策適用symbols規則；00881不在D188 price_pos
 7. replay沿原immutable import加合法補費事件驗after hash；費用由已保存新事件回覆，不因官方來源消失/更動重新推導或抹掉。人工編輯後仍LEDGER_CHANGED或人工接管狀態，不偷偷恢復。重送第一次成功apply的原previewHash，只在新event完整request binding一致、來源原文未變、全批交易afterHash仍匹配且無人工接管時允許冪等回覆；其餘舊hash仍409，不重推來源。補費重放為ALREADY_IMPORTED，insertedCount=0，另feeUpdatedCount明示，不能把費用更新當新增交易。
 8. UI只render BFF投影canApply/conflictRows/feeUpdatedCount與待補狀態，reconcile勾選變動清除preview；確認框須區別新成交與補費。沿既有Origin/session/header保護，不增加9090或新權限。
 9. 先隔離worktree合成單元/一次性Postgres測試；使用者後續明確授權驗證好後部署及commit/merge/push。通過spec/arch與測試後依run-stack核對main/正式設定與同檔衝突，重建必要business/BFF/frontend，正式Liquibase僅新增本版事件schema並依規範pg_dump重產schema.sql，再依commit-merge-push收尾及main版本驗收。禁止正式成交匯入、補費執行、交易、寄信或重跑同步。
+
+## Requirement 218／Task 612：富邦唯讀排程開關設計
+
+- **資料模型：** `fubon_schedule_switch(schedule_key varchar(64) PK, enabled boolean NOT NULL, updated_at timestamptz)`，全域設定，無 owner。Liquibase v1.171.0 建表並 seed 七個 key（`srpp-order-source` 預設 false，其餘 true）；`db/schema.sql` 於部署後以 pg_dump 重產。
+- **後端：** `FubonScheduleSwitch` entity／`FubonScheduleSwitchRepository`／`FubonScheduleSwitchService`（`state(key)` 回 ON／OFF／MISSING／UNREADABLE，只有 ON 放行，`isEnabled` 為其薄包裝；`list()`；`setEnabled(key, enabled)` 未知 key 擲 NotFound）。自訂註解 `@FubonScheduleSwitched("key")` 加在八個 `@Scheduled` 方法（七個 scheduler 類別），`FubonScheduleSwitchAspect`（`@Around`）於呼叫前檢查，非 ON 則直接返回：OFF 記 DEBUG（不洗版），MISSING／UNREADABLE 記 WARN。排程類別不改建構子。`FubonSrppSourceScheduler` 的 cron 還原為 `${fubon.srpp-source-cron:0 * * * * *}`，是否執行改由開關決定。
+- **API：** `FubonScheduleSwitchController`（`/api/settings/fubon-schedule-switches`）：GET 已登入者；PUT `/{scheduleKey}` 以 `CurrentUserContext.isAdmin()` 擋非管理者，未知 key 404。
+- **BFF：** `FubonApiInfoBffController` 靜態清單 DTO 新增 `scheduleKey`（依 sdkReference 對照，見任務檔）；新增 `FubonScheduleSwitchBffController`（`/api/bff/fubon-api/schedule-switches`）WebClient 轉呼 business；SecurityConfig 沿用 `PUT` 限 ADMIN 規則。
+- **前端：** `FubonApiView.vue` 加「排程開關」欄與 `bffApi.fubonApi.scheduleSwitches.get/put`；以 `scheduleKey` 對應開關狀態，非管理者 `disabled`。

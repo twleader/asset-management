@@ -93,6 +93,21 @@
             <span v-else class="not-connected">無固定 Cron</span>
           </template>
         </el-table-column>
+        <el-table-column label="排程開關" width="110">
+          <template #default="{ row }">
+            <el-switch
+              v-if="hasSwitch(row, switchMap)"
+              :model-value="switchMap[row.scheduleKey]"
+              :disabled="!auth.isAdmin || switchBusy[row.scheduleKey]"
+              :loading="Boolean(switchBusy[row.scheduleKey])"
+              :before-change="() => changeSwitch(row)"
+              inline-prompt
+              active-text="執行"
+              inactive-text="停用"
+            />
+            <span v-else class="not-connected">－</span>
+          </template>
+        </el-table-column>
         <el-table-column label="唯讀用途說明" prop="description" min-width="280" show-overflow-tooltip />
         <el-table-column label="呼叫端／使用情境" prop="consumer" min-width="220" show-overflow-tooltip />
       </el-table>
@@ -101,7 +116,10 @@
 </template>
 
 <script setup>
+import { ElMessage } from 'element-plus'
 import { bffApi } from '@/api'
+import { useAuthStore } from '@/stores/authStore'
+import { hasSwitch, toSwitchMap } from '@/utils/fubonScheduleSwitch'
 
 /** 七類固定分類，順序與 BFF DTO 說明一致。 */
 const CATEGORIES = [
@@ -109,7 +127,10 @@ const CATEGORIES = [
   '個股報價查詢', '歷史成交查詢', '行情查詢', '即時推播'
 ]
 
+const auth = useAuthStore()
 const apis = ref([])
+const switchMap = ref({})
+const switchBusy = ref({})
 const loading = ref(false)
 const keyword = ref('')
 const connectedFilter = ref('all')
@@ -137,7 +158,38 @@ async function fetchData() {
   }
 }
 
-onMounted(fetchData)
+async function fetchSwitches() {
+  try {
+    switchMap.value = toSwitchMap(await bffApi.fubonApi.scheduleSwitches.get())
+  } catch {
+    // 讀不到就不顯示開關，避免把「讀取失敗」誤當成全部關閉
+    switchMap.value = {}
+  }
+}
+
+/** el-switch before-change：先寫後端，成功才讓畫面切換；失敗維持原狀並提示。 */
+async function changeSwitch(row) {
+  const key = row.scheduleKey
+  if (!auth.isAdmin || switchBusy.value[key]) return false
+  const next = !switchMap.value[key]
+  switchBusy.value = { ...switchBusy.value, [key]: true }
+  try {
+    const saved = await bffApi.fubonApi.scheduleSwitches.put(key, next)
+    switchMap.value = { ...switchMap.value, [key]: saved?.enabled === true }
+    ElMessage.success(next ? '已啟用排程' : '已停用排程')
+    return true
+  } catch {
+    ElMessage.error('排程開關更新失敗，維持原狀')
+    return false
+  } finally {
+    switchBusy.value = { ...switchBusy.value, [key]: false }
+  }
+}
+
+onMounted(() => {
+  fetchData()
+  fetchSwitches()
+})
 </script>
 
 <style scoped>

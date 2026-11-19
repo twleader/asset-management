@@ -36,6 +36,7 @@ public class FubonBankBalanceSyncScheduler {
     @Scheduled(cron = "0 20 9 * * *", zone = "Asia/Taipei")
     @Scheduled(cron = "0 20 14 * * *", zone = "Asia/Taipei")
     @Scheduled(cron = "0 0 22 * * *", zone = "Asia/Taipei")
+    @FubonScheduleSwitched("bank-balance")
     public void scheduledBankBalanceSync() {
         if (syncService.localConfigGate() != null) return;
         if (!inFlight.compareAndSet(false, true)) return;

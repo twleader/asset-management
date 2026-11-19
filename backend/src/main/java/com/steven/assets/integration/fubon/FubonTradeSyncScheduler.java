@@ -50,6 +50,7 @@ public class FubonTradeSyncScheduler {
 
     @Scheduled(cron = "0 0,30 9-13 * * MON-FRI", zone = "Asia/Taipei")
     @Scheduled(cron = "0 0 14 * * MON-FRI", zone = "Asia/Taipei")
+    @FubonScheduleSwitched("trade")
     public void scheduledTradeSync() {
         if (!inFlight.compareAndSet(false, true)) return;
         try {

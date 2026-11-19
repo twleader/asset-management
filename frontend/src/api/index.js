@@ -569,7 +569,13 @@ export const bffApi = {
 
   // FubonApi（系統資訊 → 富邦證 API，Requirement 121）
   fubonApi: {
-    get: () => api.get('/bff/fubon-api')
+    get: () => api.get('/bff/fubon-api'),
+    // 排程開關（Requirement 218／Task 612）：GET 已登入者；PUT 限管理者
+    scheduleSwitches: {
+      get: () => api.get('/bff/fubon-api/schedule-switches'),
+      put: (scheduleKey, enabled) =>
+        api.put(`/bff/fubon-api/schedule-switches/${encodeURIComponent(scheduleKey)}`, { enabled })
+    }
   },
 
   // SnapshotList
