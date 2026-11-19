@@ -39,6 +39,7 @@ public class FubonInventorySyncScheduler {
     }
 
     @Scheduled(cron = "0 5,35 9-13 * * MON-FRI", zone = "Asia/Taipei")
+    @FubonScheduleSwitched("inventory")
     public void scheduledInventorySync() {
         if (!inFlight.compareAndSet(false, true)) return;
         try {

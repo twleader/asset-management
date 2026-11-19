@@ -32,7 +32,8 @@ public record FubonApiInfoDto(
         String consumer,
         String requestSummary,
         String responseSummary,
-        List<String> cronExpressions
+        List<String> cronExpressions,
+        String scheduleKey
 ) {
     public FubonApiInfoDto {
         cronExpressions = List.copyOf(Objects.requireNonNull(cronExpressions, "cronExpressions"));
@@ -51,6 +52,22 @@ public record FubonApiInfoDto(
             String responseSummary
     ) {
         this(connected, category, name, sdkReference, httpEndpoint, description, consumer, requestSummary,
-                responseSummary, List.of());
+                responseSummary, List.of(), null);
+    }
+
+    public FubonApiInfoDto(
+            boolean connected,
+            String category,
+            String name,
+            String sdkReference,
+            String httpEndpoint,
+            String description,
+            String consumer,
+            String requestSummary,
+            String responseSummary,
+            List<String> cronExpressions
+    ) {
+        this(connected, category, name, sdkReference, httpEndpoint, description, consumer, requestSummary,
+                responseSummary, cronExpressions, null);
     }
 }

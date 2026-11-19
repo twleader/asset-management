@@ -45,6 +45,7 @@ public class FubonApiInfoBffController {
      * 這是展示用靜態對照，不讀取 scheduler registry，也不代表 feature gate 每次都會放行 SDK 呼叫。
      */
     private static final Map<String, List<String>> CRON_EXPRESSIONS_BY_SDK_REFERENCE = Map.ofEntries(
+            Map.entry("sdk.stock.get_order_results", List.of("0 * * * * *")),
             Map.entry("sdk.accounting.inventories", List.of("0 5,35 9-13 * * MON-FRI")),
             Map.entry("sdk.accounting.unrealized_gains_and_loses", List.of("0 5,35 9-13 * * MON-FRI")),
             Map.entry("sdk.accounting.bank_remain", List.of("0 0 8 * * *", "0 20 9 * * *", "0 20 14 * * *", "0 0 22 * * *")),
@@ -63,6 +64,21 @@ public class FubonApiInfoBffController {
             Map.entry("marketdata.rest_client.stock.technical.bb", List.of("0 40 13 * * MON-FRI", "0 * 9-13 * * MON-FRI")),
             Map.entry("marketdata.rest_client.stock.corporate_actions.dividends", List.of("0 0 9 * * MON-FRI", "0 30 13 * * MON-FRI")),
             Map.entry("marketdata.rest_client.stock.ownership.etf_holdings", List.of("0 50 8 * * MON-FRI", "0 30 15 * * MON-FRI"))
+    );
+
+    /**
+     * Requirement 218／Task 612：有對應 business-services 排程的列 → {@code fubon_schedule_switch.schedule_key}。
+     * 由 external-materials-service 驅動的 marketdata 排程不在此表，開關欄顯示「－」。
+     */
+    private static final Map<String, String> SCHEDULE_KEY_BY_SDK_REFERENCE = Map.of(
+            "sdk.accounting.inventories", "inventory",
+            "sdk.accounting.unrealized_gains_and_loses", "inventory",
+            "sdk.accounting.bank_remain", "bank-balance",
+            "sdk.accounting.query_settlement", "settlement",
+            "sdk.accounting.realized_gains_and_loses", "realized-gain",
+            "sdk.stock.filled_history", "trade",
+            "marketdata.rest_client.stock.ownership.etf_holdings", "etf-holdings",
+            "sdk.stock.get_order_results", "srpp-order-source"
     );
 
     /** 富邦 SDK 唯讀查詢能力全量盤點（52 筆：21 已串接、31 未串接）。 */
@@ -152,10 +168,12 @@ public class FubonApiInfoBffController {
                             + "buy_sell／order_type／filled_qty／filled_avg_price／realized_profit_and_loss"),
 
             // ===== 委託與交易資訊查詢（18：sdk.stock.*，皆未串接）=====
-            new FubonApiInfoDto(false, "委託與交易資訊查詢", "當日委託回報查詢",
-                    "sdk.stock.get_order_results", NO_HTTP,
-                    "查詢當日所有委託（在途、已刪、已成交）" + RO, NOT_CONNECTED,
-                    "account",
+            new FubonApiInfoDto(true, "委託與交易資訊查詢", "當日委託回報查詢",
+                    "sdk.stock.get_order_results", "POST /internal/orders/read",
+                    "查詢當日所有委託（在途、已刪、已成交）" + RO,
+                    "business-services（SRPP 官方委託來源擷取排程，台股交易日 09:00–14:00 每分鐘；預設關閉，"
+                            + "可於本頁排程開關啟用）",
+                    "account（由服務端自動帶入，需 internal token）",
                     "OrderResult 陣列，每筆含 function_type／date／seq_no／branch_no 等委託回報欄位（docstring 未列完整欄位）"),
             new FubonApiInfoDto(false, "委託與交易資訊查詢", "當日委託回報明細查詢",
                     "sdk.stock.get_order_results_detail", NO_HTTP,
@@ -443,7 +461,8 @@ public class FubonApiInfoBffController {
                 .map(api -> new FubonApiInfoDto(
                         api.connected(), api.category(), api.name(), api.sdkReference(), api.httpEndpoint(),
                         api.description(), api.consumer(), api.requestSummary(), api.responseSummary(),
-                        CRON_EXPRESSIONS_BY_SDK_REFERENCE.getOrDefault(api.sdkReference(), List.of())))
+                        CRON_EXPRESSIONS_BY_SDK_REFERENCE.getOrDefault(api.sdkReference(), List.of()),
+                        SCHEDULE_KEY_BY_SDK_REFERENCE.get(api.sdkReference())))
                 .toList();
     }
 }

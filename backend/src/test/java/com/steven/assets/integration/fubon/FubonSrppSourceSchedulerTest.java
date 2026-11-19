@@ -32,5 +32,5 @@ class FubonSrppSourceSchedulerTest {
     @Test void singleFlightBlocksOverlappingTickAndResumesAfterCompletion()throws Exception{
         CountDownLatch entered=new CountDownLatch(1),finish=new CountDownLatch(1);when(adapter.observe()).thenAnswer(inv->{entered.countDown();finish.await(5,TimeUnit.SECONDS);return known();});var worker=at(AT);var pool=Executors.newSingleThreadExecutor();try{var future=pool.submit(worker::observe);assertThat(entered.await(5,TimeUnit.SECONDS)).isTrue();worker.observe();verify(adapter,times(1)).observe();finish.countDown();future.get(5,TimeUnit.SECONDS);worker.observe();verify(adapter,times(2)).observe();}finally{pool.shutdownNow();}
     }
-    @Test void cronDefaultIsDisabledAndZoneMatchesCatalog()throws Exception{var schedule=FubonSrppSourceScheduler.class.getMethod("observe").getAnnotation(org.springframework.scheduling.annotation.Scheduled.class);assertThat(schedule.cron()).isEqualTo("${fubon.srpp-source-cron:-}");assertThat(schedule.zone()).isEqualTo("Asia/Taipei");}
+    @Test void cronDefaultAndZoneMatchCatalog()throws Exception{var schedule=FubonSrppSourceScheduler.class.getMethod("observe").getAnnotation(org.springframework.scheduling.annotation.Scheduled.class);assertThat(schedule.cron()).isEqualTo("${fubon.srpp-source-cron:0 * * * * *}");assertThat(schedule.zone()).isEqualTo("Asia/Taipei");}
 }

@@ -79,7 +79,7 @@ public class SchedulePublicBffController {
                     "每分鐘（美東交易日09:35–10:45，依srpp.us-report-producer-cron可配置）", "0 * * * * *", NYC),
             new ScheduledJobDto(BUSINESS, "SRPP", "富邦官方委託與庫存不可變來源",
                     "先驗 cached 台股日曆與 ACTIVE configured owner，只在 09:00–14:00 單飛唯讀官方委託及庫存；完整成功空集合才是所選富邦帳號零掛單，最新失敗不回退舊成功，GET 不觸發同步",
-                    "每分鐘（交易日 09:00–14:00，依 fubon.srpp-source-cron 可配置）", "0 * * * * *", TPE),
+                    "每分鐘（交易日 09:00–14:00，依 fubon.srpp-source-cron 可配置；另受「富邦證 API」頁排程開關控制，預設關閉）", "0 * * * * *", TPE),
             // ===== business-services（33）=====
             new ScheduledJobDto(BUSINESS, "SRPP", "SRPP 不可變報告計算包發布",
                     "每 60 秒短 tick 先讀 cached 交易日曆；交易日 09:05–12:00 處理 09:05、12:00–14:00 處理 12:00；來源晚到、restart 與來源 revision 變動時原子發布新包，同輸入不重算。GET 純讀且不觸發 producer",

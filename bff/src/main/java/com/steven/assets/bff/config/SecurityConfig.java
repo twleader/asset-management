@@ -149,6 +149,9 @@ public class SecurityConfig {
                             .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         .pathMatchers(HttpMethod.POST, "/api/bff/portfolio-advice/srpp/drafts/*/publish")
                             .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
+                        // 富邦排程開關（Requirement 218／Task 612）：讀開放已登入者；啟停排程限 ADMIN
+                        .pathMatchers(HttpMethod.PUT, "/api/bff/fubon-api/schedule-switches/*")
+                            .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
                         // 爬蟲資訊查詢（Requirement 38）：查詢與讀排程／輸出路徑開放已登入者；改爬蟲執行時間限 ADMIN（系統設定變更）
                         .pathMatchers(HttpMethod.PUT, "/api/bff/crawler-data/schedule")
                             .hasAuthority(AuthConstants.AUTHORITY_ADMIN)
