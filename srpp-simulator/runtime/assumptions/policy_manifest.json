@@ -8,7 +8,7 @@
     "README.md": "8c7e4e7fa35562ea4a45e3e19be785025a1759b1cde34ffb073aad22f8dca167",
     "assumptions/bond_forward_yields.json": "1cb1e2ae47f25c247bd796801c3390b5cdd5b0927593b7962c3411db62fa7ccd",
     "assumptions/core_sell_watch_legacy_policies.json": "9806bd6d5a84f3ecf07ebba6f84be6eb098e939382ff0ec756b495e15eea9da9",
-    "assumptions/daily_runtime_contract.json": "16929a235c32660f17249b06a404223a203b57f1c0ba0817bedf96c163da13d9",
+    "assumptions/daily_runtime_contract.json": "1c0629f086ba46ce3459d74c8ee60c8f787aeb1b4c02904b7d55b0064a8fcfeb",
     "assumptions/financial.md": "5b2307780acee03e5b9b787e00a0e2306a76c57a02dcf8a7c1c440db721e937e",
     "assumptions/market.md": "3938bc8fe6928d77828f020d3490be185d68abf38303af26dee0658a7e290109",
     "assumptions/model_inputs.json": "cf9c73ae407eae1af277247af1ad0390c5dbdd8eaa5544b5a328b6d52a98775c",
@@ -126,7 +126,7 @@
     "scripts/record_report_inputs.py": "1e0ec7aabe1bb2f3937da2ce7ef5f81c979fa538898c37a88cc249809a1f5bb6",
     "scripts/render_daily_report.py": "d38bd964077cc3ddd100ef66a1cf53d3fa901753e5038c8576784d90d3054b3a",
     "scripts/repair_short_term_ledger.py": "b2587c041fddcf9566dde54f059f9fc21f2ab7ffa741be19595884ca8982bddd",
-    "scripts/report_evidence_guard.py": "3f46206a096c7d67eeab54eff136fcb4ce436b93aa6df7fbf4fa951a2673d3d5",
+    "scripts/report_evidence_guard.py": "c5b04d8ecfa200dec17de5f1a18d2748ef5a27bab1e69b598f640aa6cb25a287",
     "scripts/report_risk_notes.py": "bcbecf56b2d49127f6f4af2304b8c5d54d6e7e04680bad58799d90ac215f4bd0",
     "scripts/report_tasks.py": "549d45af611eb9ff22b905933958c8e4344022f22fde068a432b8a5d8b4c5d68",
     "scripts/reserve_allocation.py": "7a20e73868f804786eface316325aa98e3793496550d0c02897b2d576995f6d0",
@@ -166,7 +166,7 @@
     "scripts/test_d208_00919_sell_protection.py": "c6dbe7edff4254977af4bbe8b9a6f34ec4be530416bdd2f6dd574069b11b029a",
     "scripts/test_d209_00919_high_zone_reversal.py": "a9866d82fb1f6771c01d66f00b1033c5af5349a8ac1d8ca7ab79efe5719edfd2",
     "scripts/test_d211_cash_first_high_sell.py": "78a4f3749ae41b8cbef79f5817928f898287b93ec722a05daa6fba144a03fe85",
-    "scripts/test_d222_report_compatibility.py": "efc38bc9ed717a7aae32cae8d07c8d35529a83e26d98741ed8d5cb72750ffa36",
+    "scripts/test_d222_report_compatibility.py": "eaff02f61f0838c2726d98c9bfad9f205093d020070758c6232293861aa138e5",
     "scripts/test_daily_runtime.py": "5ef5d9f7097d32ad1581ae2eb3590630aeffbfd6940b35c5533d1b38657bf691",
     "scripts/test_daily_timing.py": "1fc12aeee7e88a608f67f506f4df0c3d97df72b305341d4946118b365a68b786",
     "scripts/test_data_tools.py": "d949633da69f1cf899d2d4e2a3529258020f1a335a5f0e3be94ca1835df5743d",
@@ -241,5 +241,5 @@
     "scripts/voo_bridge.py": "dc1735c2d35b2bcc7fbdd087175c945406986a05d42c594c694ae5bd6972d6bd",
     "scripts/voo_bridge_proxy.py": "3a7bd68cc8202bbf039641afa13dac5a4b228cf04e7c63159cf1ffa9b2ddf590"
   },
-  "POLICY_BUNDLE_SHA256": "dba79ef253742b1a9681f607a52069930bf48b2fc1d11c0151389db9a713dab5"
+  "POLICY_BUNDLE_SHA256": "ef3453229237c7e6995c3fa8bd77c428afe424aa58692be8c78ccf66d3f277cd"
 }
