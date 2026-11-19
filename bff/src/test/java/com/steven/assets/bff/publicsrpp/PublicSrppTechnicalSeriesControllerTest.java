@@ -50,6 +50,26 @@ class PublicSrppTechnicalSeriesControllerTest {
     }
 
     @Test
+    void relaysDividendUnverifiedSeriesAsUnavailableInsteadOf502() {
+        ObjectNode body = sample();
+        ObjectNode summary = (ObjectNode) body.get("summary");
+        summary.put("status", "UNAVAILABLE");
+        summary.put("priceBasis", "UNAVAILABLE");
+        summary.putNull("sourceSha256");
+        summary.putNull("indicators");
+        summary.putArray("missing").add("DIVIDEND_HISTORY_UNVERIFIED").add("reason");
+        body.putNull("additionalIndicators");
+        body.putArray("dailyBars");
+        WebClient client = WebClient.builder().exchangeFunction(request -> Mono.just(
+                ClientResponse.create(HttpStatus.OK).header("Content-Type", "application/json")
+                        .body(body.toString()).build())).build();
+        var response = new PublicSrppTechnicalSeriesController(client).read(valid()).block();
+        assertThat(response).isNotNull();
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody().path("dailyBars")).isEmpty();
+    }
+
+    @Test
     void rejectsDuplicateQueryBeforeBusinessCall() {
         AtomicInteger outbound = new AtomicInteger();
         WebClient client = WebClient.builder().exchangeFunction(request -> {

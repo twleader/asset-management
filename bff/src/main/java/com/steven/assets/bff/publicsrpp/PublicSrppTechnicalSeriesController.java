@@ -107,7 +107,7 @@ public class PublicSrppTechnicalSeriesController {
                 || rows.size() > summary.path("sampleCount").intValue()) throw badGateway();
         boolean missingBar = false;
         for (JsonNode reason : summary.path("missing")) {
-            if ("AS_OF_BAR_MISSING".equals(reason.asText())) missingBar = true;
+            if (PublicSrppCompletedTechnicalController.NO_DATA_REASONS.contains(reason.asText())) missingBar = true;
         }
         if (missingBar) {
             if (!rows.isEmpty() || !additional.isNull()) throw badGateway();
