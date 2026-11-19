@@ -29,6 +29,18 @@ class FormulaV3Test(unittest.TestCase):
             python_source = srpp / GEN.PYTHON_SOURCE
             python_source.parent.mkdir(parents=True)
             python_source.write_text("# isolated synthetic source\n")
+            # The current manifest also binds reserve, named BUY and SELL
+            # implementations. Build the complete declared source tree rather
+            # than quietly relying on files from the developer's worktree.
+            current = json.loads((REPO / "spec/fixtures/srpp_formula_manifest_v3.json").read_text())
+            declared = {name for value in current["calculations"].values()
+                        for name in value.get("sourceSha256", {})}
+            for name in declared:
+                prefix, relative = name.split("/", 1)
+                destination = (root if prefix == "asset-management" else srpp) / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text("// isolated synthetic source\n" if prefix == "asset-management"
+                                       else "# isolated synthetic source\n")
             catalog = root / "Catalog.java"
             catalog.write_text("class Catalog {\n    // BEGIN GENERATED D218 FORMULA V3\n    // END GENERATED D218 FORMULA V3\n}\n")
             with patch.object(GEN, "ROOT", root), patch.object(GEN, "FIXTURE", fixture), patch.object(GEN, "CATALOG", catalog), patch.object(GEN, "BFF_MIRROR", root / "bff/mirror.json"):
@@ -43,6 +55,14 @@ class FormulaV3Test(unittest.TestCase):
                     GEN.generate(srpp, True)
                 self.assertEqual(before, fixture.read_bytes())
                 self.assertNotEqual(digest, GEN.generate(srpp, False))
+                for name in (
+                        "backend/src/main/java/com/steven/assets/service/srpp/report/SrppReportMediumDipCalculator.java",
+                        "backend/src/main/java/com/steven/assets/service/srpp/report/SrppNamedRadarSellCalculator.java"):
+                    source = root / name
+                    source.write_text("// changed independent strategy source\n")
+                    with self.assertRaisesRegex(ValueError, "FORMULA_V3_SOURCE_OR_ARTIFACT_DRIFT"):
+                        GEN.generate(srpp, True)
+                    GEN.generate(srpp, False)
                 (root / GEN.JAVA_SOURCES[0]).unlink()
                 with self.assertRaises(FileNotFoundError):
                     GEN.generate(srpp, True)

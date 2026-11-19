@@ -1,0 +1,14 @@
+{
+  "stage": "offline_authority_preparation",
+  "command": [
+    "python3",
+    "scripts/check-srpp-report-authority.py",
+    "--srpp-root",
+    "/Users/steven/.codex/worktrees/medium-dip-report/SRPP",
+    "--check"
+  ],
+  "exit_code": 1,
+  "bundle_at_failure": "6795882d14c812bdbca04059b0eddffdccb64bc8a988bc8f4cbcaa6c26a151cf",
+  "stderr": "SRPP_REPORT_AUTHORITY_CHECK_FAIL:FORMULA_V3_SOURCE_IDENTITY_FAILED:SRPP_FORMULA_V3_FAIL:FORMULA_V3_SOURCE_OR_ARTIFACT_DRIFT",
+  "explanation": "Source-bound formula manifest had not yet been regenerated while the implementation agent was still editing its calculator. Dependent authority validation and release actions remained unpassed."
+}

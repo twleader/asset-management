@@ -1,0 +1,793 @@
+{
+  "status": "PASS",
+  "qualification": "SYNTHETIC_OFFLINE_FULL_CONSUMER_VERIFIER_NOT_RUNTIME_ACCEPTANCE",
+  "identity": {
+    "consumer": "Codex",
+    "ownerUserId": 7,
+    "policyBundleSha256": "15ca8f63f3adcfe8ce912c684d4d46d5924f98eb6d657cc605522118a0408092",
+    "reportSlot": "12:00",
+    "swaggerSha256": "aaedb6b9e647878bc22eef33969ad41896828476a7d2b75b7f3bb709f5f40135",
+    "tradingDate": "2026-11-19"
+  },
+  "calculation_run_id": "a6280c15-143f-41c8-87e2-9fa2418a2b76",
+  "adopted_medium_legs": [
+    {
+      "symbol": "0050",
+      "strategy": "NAMED_DEEP_DRAWDOWN_D215",
+      "status": "BLOCKED",
+      "lots": 0,
+      "limitPrice": null,
+      "amount": null,
+      "fees": null
+    },
+    {
+      "symbol": "00881",
+      "strategy": "NAMED_DEEP_DRAWDOWN_D215",
+      "status": "BLOCKED",
+      "lots": 0,
+      "limitPrice": null,
+      "amount": null,
+      "fees": null
+    }
+  ],
+  "plan_source_materialization": {
+    "status": "COPIED",
+    "trade_authorization": false
+  },
+  "prepared_candidate_results": [
+    {
+      "id": "D215_MEDIUM_0050",
+      "symbol": "0050",
+      "analysis_status": "INCOMPLETE",
+      "outcome": "BLOCKED"
+    },
+    {
+      "id": "D215_MEDIUM_00881",
+      "symbol": "00881",
+      "analysis_status": "INCOMPLETE",
+      "outcome": "BLOCKED"
+    },
+    {
+      "id": "D226_ROTATION_SELL_2881",
+      "symbol": "2881",
+      "analysis_status": "INCOMPLETE",
+      "outcome": "NOT_EVALUATED"
+    },
+    {
+      "id": "D226_PLAN_BUY_00881",
+      "symbol": "00881",
+      "analysis_status": "INCOMPLETE",
+      "outcome": "NOT_EVALUATED"
+    }
+  ],
+  "adopted_named_plan_buy_legs": [
+    {
+      "action": "BUY",
+      "amount": "200250",
+      "blockingReasons": [],
+      "broker": "國泰證券",
+      "currency": "TWD",
+      "fees": "285.36",
+      "limitPrice": "40.05",
+      "lots": 5,
+      "market": "台股",
+      "netProfitSpace": null,
+      "rankingReason": "D215_NAMED_MEDIUM_CAPACITY_CEILING_FIXED_SYMBOL_ORDER",
+      "receipts": [
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "market:台股:00881",
+            "policy"
+          ],
+          "reason": "D215_D226_BUY_PATH_SOURCE_VERIFIED",
+          "ruleId": "D226_BUY_PATH",
+          "scope": null,
+          "status": "PASS",
+          "values": []
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "assets",
+            "classifications",
+            "market:台股:00881",
+            "policy",
+            "report-reservations",
+            "topup-state"
+          ],
+          "reason": "D215_D223_PLAN_BUDGET_SOURCE_VERIFIED",
+          "ruleId": "D223_PLAN_BUDGET",
+          "scope": null,
+          "status": "PASS",
+          "values": [
+            {
+              "name": "usedTwd",
+              "quality": "EXACT",
+              "reason": null,
+              "subject": "D223",
+              "unit": "TWD",
+              "value": "40057"
+            },
+            {
+              "name": "committedTwd",
+              "quality": "EXACT",
+              "reason": null,
+              "subject": "D223",
+              "unit": "TWD",
+              "value": "0"
+            },
+            {
+              "name": "remainingTwd",
+              "quality": "EXACT",
+              "reason": null,
+              "subject": "D223",
+              "unit": "TWD",
+              "value": "359943"
+            },
+            {
+              "name": "planEntryDebitTwd",
+              "quality": "EXACT",
+              "reason": null,
+              "subject": "FILL:prior-1",
+              "unit": "TWD",
+              "value": "40057"
+            }
+          ]
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "market:台股:00881",
+            "policy"
+          ],
+          "reason": "D215_QUOTE_SOURCE_VERIFIED",
+          "ruleId": "QUOTE",
+          "scope": null,
+          "status": "PASS",
+          "values": []
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "market:台股:00881",
+            "policy"
+          ],
+          "reason": "D215_RADAR_SOURCE_VERIFIED",
+          "ruleId": "RADAR",
+          "scope": null,
+          "status": "PASS",
+          "values": []
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "market:台股:00881",
+            "policy"
+          ],
+          "reason": "D215_STRATEGIC_PRICE_SOURCE_VERIFIED",
+          "ruleId": "STRATEGIC_PRICE",
+          "scope": null,
+          "status": "PASS",
+          "values": []
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "assets",
+            "classifications",
+            "fx",
+            "market:台股:0050",
+            "market:台股:00881",
+            "market:美股:VOO",
+            "policy"
+          ],
+          "reason": "D215_ALLOCATION_SOURCE_VERIFIED",
+          "ruleId": "ALLOCATION",
+          "scope": null,
+          "status": "PASS",
+          "values": []
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "assets",
+            "classifications",
+            "market:台股:00881",
+            "policy",
+            "report-reservations",
+            "topup-state"
+          ],
+          "reason": "D215_FUNDING_SOURCE_VERIFIED",
+          "ruleId": "FUNDING",
+          "scope": null,
+          "status": "PASS",
+          "values": []
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "assets",
+            "classifications",
+            "market:台股:00881",
+            "policy",
+            "report-reservations",
+            "topup-state"
+          ],
+          "reason": "D215_PENDING_SOURCE_VERIFIED",
+          "ruleId": "PENDING",
+          "scope": null,
+          "status": "PASS",
+          "values": []
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "assets",
+            "classifications",
+            "market:台股:00881",
+            "policy",
+            "report-reservations",
+            "topup-state"
+          ],
+          "reason": "D215_RESERVATIONS_SOURCE_VERIFIED",
+          "ruleId": "RESERVATIONS",
+          "scope": null,
+          "status": "PASS",
+          "values": []
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "assets",
+            "classifications",
+            "market:台股:00881",
+            "policy",
+            "report-reservations",
+            "topup-state"
+          ],
+          "reason": "D215_DEDUPLICATION_SOURCE_VERIFIED",
+          "ruleId": "DEDUPLICATION",
+          "scope": null,
+          "status": "PASS",
+          "values": []
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "market:台股:00881",
+            "policy"
+          ],
+          "reason": "D215_DEPTH_SOURCE_VERIFIED",
+          "ruleId": "DEPTH",
+          "scope": null,
+          "status": "PASS",
+          "values": []
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "assets",
+            "classifications",
+            "market:台股:00881",
+            "policy",
+            "report-reservations",
+            "topup-state"
+          ],
+          "reason": "D215_EXECUTION_ACCOUNT_SOURCE_VERIFIED",
+          "ruleId": "EXECUTION_ACCOUNT",
+          "scope": null,
+          "status": "PASS",
+          "values": []
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "classifications",
+            "market:台股:00881",
+            "policy"
+          ],
+          "reason": "D215_THESIS_SOURCE_VERIFIED",
+          "ruleId": "THESIS",
+          "scope": null,
+          "status": "PASS",
+          "values": []
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "market:台股:00881",
+            "policy",
+            "topup-state"
+          ],
+          "reason": "D215_TRADABILITY_SOURCE_VERIFIED",
+          "ruleId": "TRADABILITY",
+          "scope": null,
+          "status": "PASS",
+          "values": []
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "assets",
+            "policy",
+            "report-reservations",
+            "topup-state"
+          ],
+          "reason": "FIXED_MODULE_ORDER_SAME_CAPTURE_PRIOR_AND_CURRENT_BUY_FUNDS_RESERVED",
+          "ruleId": "SHARED_CURRENCY_CAPACITY",
+          "scope": null,
+          "status": "PASS",
+          "values": []
+        }
+      ],
+      "status": "ACTIONABLE_FOR_REPORT",
+      "strategy": "NAMED_CASH_BUY_D226",
+      "subaccount": "CORE_D226_BUY",
+      "symbol": "00881",
+      "units": null
+    }
+  ],
+  "adopted_named_seller_legs": [
+    {
+      "action": "SELL",
+      "amount": "415500",
+      "blockingReasons": [],
+      "broker": "富邦證券",
+      "currency": "TWD",
+      "fees": "1838.59",
+      "limitPrice": "138.5",
+      "lots": null,
+      "market": "台股",
+      "netProfitSpace": null,
+      "rankingReason": "D226_NAMED_SELL_CEILING_LLM_TIMING_STILL_REQUIRED",
+      "receipts": [
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "assets",
+            "classifications",
+            "market:台股:2881",
+            "policy",
+            "report-reservations",
+            "topup-state"
+          ],
+          "reason": "D226_D226_SELL_PATH_SOURCE_VERIFIED",
+          "ruleId": "D226_SELL_PATH",
+          "scope": null,
+          "status": "PASS",
+          "values": []
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "market:台股:2881",
+            "policy"
+          ],
+          "reason": "D226_QUOTE_SOURCE_VERIFIED",
+          "ruleId": "QUOTE",
+          "scope": null,
+          "status": "PASS",
+          "values": []
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "market:台股:2881",
+            "policy"
+          ],
+          "reason": "D226_RADAR_SOURCE_VERIFIED",
+          "ruleId": "RADAR",
+          "scope": null,
+          "status": "PASS",
+          "values": []
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "assets",
+            "classifications",
+            "market:台股:2881",
+            "policy",
+            "report-reservations",
+            "topup-state"
+          ],
+          "reason": "D226_POSITION_SOURCE_VERIFIED",
+          "ruleId": "POSITION",
+          "scope": null,
+          "status": "PASS",
+          "values": [
+            {
+              "name": "settledShares",
+              "quality": "EXACT",
+              "reason": null,
+              "subject": "2881",
+              "unit": "SHARES",
+              "value": "9000"
+            },
+            {
+              "name": "officialSellableShares",
+              "quality": "EXACT",
+              "reason": null,
+              "subject": "2881",
+              "unit": "SHARES",
+              "value": "9000"
+            },
+            {
+              "name": "pendingSellShares",
+              "quality": "EXACT",
+              "reason": null,
+              "subject": "2881",
+              "unit": "SHARES",
+              "value": "0"
+            },
+            {
+              "name": "unlinkedReservedSellShares",
+              "quality": "EXACT",
+              "reason": null,
+              "subject": "2881",
+              "unit": "SHARES",
+              "value": "0"
+            }
+          ]
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "assets",
+            "classifications",
+            "market:台股:2881",
+            "policy",
+            "report-reservations",
+            "topup-state"
+          ],
+          "reason": "D226_PENDING_SOURCE_VERIFIED",
+          "ruleId": "PENDING",
+          "scope": null,
+          "status": "PASS",
+          "values": []
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "assets",
+            "classifications",
+            "market:台股:2881",
+            "policy",
+            "report-reservations",
+            "topup-state"
+          ],
+          "reason": "D226_RESERVATIONS_SOURCE_VERIFIED",
+          "ruleId": "RESERVATIONS",
+          "scope": null,
+          "status": "PASS",
+          "values": []
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "assets",
+            "classifications",
+            "market:台股:2881",
+            "policy",
+            "report-reservations",
+            "topup-state"
+          ],
+          "reason": "D226_DEDUPLICATION_SOURCE_VERIFIED",
+          "ruleId": "DEDUPLICATION",
+          "scope": null,
+          "status": "PASS",
+          "values": []
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "assets",
+            "classifications",
+            "market:台股:2881",
+            "policy",
+            "report-reservations",
+            "topup-state"
+          ],
+          "reason": "D226_CORE_RETENTION_SOURCE_VERIFIED",
+          "ruleId": "CORE_RETENTION",
+          "scope": null,
+          "status": "PASS",
+          "values": []
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "assets",
+            "classifications",
+            "market:台股:2881",
+            "policy",
+            "report-reservations",
+            "topup-state"
+          ],
+          "reason": "D226_D152_BATCH_SOURCE_VERIFIED",
+          "ruleId": "D152_BATCH",
+          "scope": null,
+          "status": "PASS",
+          "values": [
+            {
+              "name": "baselineShares",
+              "quality": "EXACT",
+              "reason": null,
+              "subject": "2881",
+              "unit": "SHARES",
+              "value": "9000"
+            },
+            {
+              "name": "confirmedBatches",
+              "quality": "EXACT",
+              "reason": null,
+              "subject": "2881",
+              "unit": "COUNT",
+              "value": "0"
+            },
+            {
+              "name": "openingValueTwd",
+              "quality": "EXACT",
+              "reason": null,
+              "subject": "2881",
+              "unit": "TWD",
+              "value": "1260000"
+            }
+          ]
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "assets",
+            "classifications",
+            "market:台股:2881",
+            "policy",
+            "report-reservations",
+            "topup-state"
+          ],
+          "reason": "D226_COOLDOWN_SOURCE_VERIFIED",
+          "ruleId": "COOLDOWN",
+          "scope": null,
+          "status": "PASS",
+          "values": []
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "market:台股:2881",
+            "policy"
+          ],
+          "reason": "D226_DEPTH_SOURCE_VERIFIED",
+          "ruleId": "DEPTH",
+          "scope": null,
+          "status": "PASS",
+          "values": []
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "assets",
+            "classifications",
+            "market:台股:2881",
+            "policy",
+            "report-reservations",
+            "topup-state"
+          ],
+          "reason": "D226_EXECUTION_ACCOUNT_SOURCE_VERIFIED",
+          "ruleId": "EXECUTION_ACCOUNT",
+          "scope": null,
+          "status": "PASS",
+          "values": []
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "assets",
+            "classifications",
+            "market:台股:2881",
+            "policy",
+            "report-reservations",
+            "topup-state"
+          ],
+          "reason": "D226_COSTS_SOURCE_VERIFIED",
+          "ruleId": "COSTS",
+          "scope": null,
+          "status": "PASS",
+          "values": [
+            {
+              "name": "sellCommissionTwd",
+              "quality": "EXACT",
+              "reason": null,
+              "subject": "2881",
+              "unit": "TWD",
+              "value": "592.09"
+            },
+            {
+              "name": "sellTaxTwd",
+              "quality": "EXACT",
+              "reason": null,
+              "subject": "2881",
+              "unit": "TWD",
+              "value": "1246.5"
+            },
+            {
+              "name": "netProceedsTwd",
+              "quality": "EXACT",
+              "reason": null,
+              "subject": "2881",
+              "unit": "TWD",
+              "value": "413661.41"
+            }
+          ]
+        },
+        {
+          "calculatorVersion": "SRPP_REPORT_CALCULATIONS_V1",
+          "inputRefs": [
+            "market:台股:2881",
+            "policy",
+            "topup-state"
+          ],
+          "reason": "D226_TRADABILITY_SOURCE_VERIFIED",
+          "ruleId": "TRADABILITY",
+          "scope": null,
+          "status": "PASS",
+          "values": []
+        }
+      ],
+      "status": "ACTIONABLE_FOR_REPORT",
+      "strategy": "NAMED_RADAR_ROTATION_D226",
+      "subaccount": "CORE_D226",
+      "symbol": "2881",
+      "units": "3000"
+    }
+  ],
+  "adopted_final_targets": [
+    {
+      "name": "targetWeight",
+      "quality": "EXACT",
+      "reason": null,
+      "subject": "0050",
+      "unit": "RATIO",
+      "value": "0.13"
+    },
+    {
+      "name": "targetWeight",
+      "quality": "EXACT",
+      "reason": null,
+      "subject": "0056",
+      "unit": "RATIO",
+      "value": "0.03"
+    },
+    {
+      "name": "targetWeight",
+      "quality": "EXACT",
+      "reason": null,
+      "subject": "00679B",
+      "unit": "RATIO",
+      "value": "0"
+    },
+    {
+      "name": "targetWeight",
+      "quality": "EXACT",
+      "reason": null,
+      "subject": "00697B",
+      "unit": "RATIO",
+      "value": "0.02"
+    },
+    {
+      "name": "targetWeight",
+      "quality": "EXACT",
+      "reason": null,
+      "subject": "00713",
+      "unit": "RATIO",
+      "value": "0.045"
+    },
+    {
+      "name": "targetWeight",
+      "quality": "EXACT",
+      "reason": null,
+      "subject": "00719B",
+      "unit": "RATIO",
+      "value": "0.17"
+    },
+    {
+      "name": "targetWeight",
+      "quality": "EXACT",
+      "reason": null,
+      "subject": "00751B",
+      "unit": "RATIO",
+      "value": "0"
+    },
+    {
+      "name": "targetWeight",
+      "quality": "EXACT",
+      "reason": null,
+      "subject": "00850",
+      "unit": "RATIO",
+      "value": "0"
+    },
+    {
+      "name": "targetWeight",
+      "quality": "EXACT",
+      "reason": null,
+      "subject": "00878",
+      "unit": "RATIO",
+      "value": "0.03"
+    },
+    {
+      "name": "targetWeight",
+      "quality": "EXACT",
+      "reason": null,
+      "subject": "00881",
+      "unit": "RATIO",
+      "value": "0.067090921733791622608695652173913043"
+    },
+    {
+      "name": "targetWeight",
+      "quality": "EXACT",
+      "reason": null,
+      "subject": "00919",
+      "unit": "RATIO",
+      "value": "0.03"
+    },
+    {
+      "name": "targetWeight",
+      "quality": "EXACT",
+      "reason": null,
+      "subject": "009826",
+      "unit": "RATIO",
+      "value": "0.02"
+    },
+    {
+      "name": "targetWeight",
+      "quality": "EXACT",
+      "reason": null,
+      "subject": "SGOV",
+      "unit": "RATIO",
+      "value": "0.02"
+    },
+    {
+      "name": "targetWeight",
+      "quality": "EXACT",
+      "reason": null,
+      "subject": "TWD_term_deposits",
+      "unit": "RATIO",
+      "value": "0.10048854026292968"
+    },
+    {
+      "name": "targetWeight",
+      "quality": "EXACT",
+      "reason": null,
+      "subject": "VOO",
+      "unit": "RATIO",
+      "value": "0.2197"
+    },
+    {
+      "name": "targetWeight",
+      "quality": "EXACT",
+      "reason": null,
+      "subject": "VT",
+      "unit": "RATIO",
+      "value": "0.025"
+    },
+    {
+      "name": "targetWeight",
+      "quality": "EXACT",
+      "reason": null,
+      "subject": "demand_deposits_and_cash",
+      "unit": "RATIO",
+      "value": "0.03276800225965098260869565217391304"
+    }
+  ],
+  "all_adopted_modules": [
+    "ASSET_RECONCILIATION",
+    "ALLOCATION_GAP",
+    "FUNDING_CAPACITY",
+    "CASH_INCOME",
+    "BOND_D130_D195",
+    "DIVIDEND_TOPUP",
+    "STRATEGIC_BUY_GATES"
+  ],
+  "trade_authorization": false
+}

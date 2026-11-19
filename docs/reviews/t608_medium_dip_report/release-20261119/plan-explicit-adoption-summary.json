@@ -1,0 +1,36 @@
+{
+  "status": "PASS",
+  "qualification": "SYNTHETIC_OFFLINE_EXPLICIT_LLM_AND_RISK_ADOPTION_ONLY",
+  "bundle": "15ca8f63f3adcfe8ce912c684d4d46d5924f98eb6d657cc605522118a0408092",
+  "mode": "plan",
+  "eligible_count": 2,
+  "candidate_outcomes": [
+    {
+      "id": "D215_MEDIUM_0050",
+      "outcome": "BLOCKED"
+    },
+    {
+      "id": "D215_MEDIUM_00881",
+      "outcome": "BLOCKED"
+    },
+    {
+      "id": "D226_ROTATION_SELL_2881",
+      "outcome": "ELIGIBLE_FOR_REVIEW"
+    },
+    {
+      "id": "D226_PLAN_BUY_00881",
+      "outcome": "ELIGIBLE_FOR_REVIEW"
+    }
+  ],
+  "checks": [
+    "candidate_evidence_issue",
+    "named_cash_rotation_d223_issue",
+    "seller.validated_order",
+    "ordinary_equity_d211_issue",
+    "verified_d226_sell_ids",
+    "risk_block_still_rejected",
+    "sell_quantity_mutation_rejected"
+  ],
+  "places_orders": false,
+  "report_delivery_tested": false
+}

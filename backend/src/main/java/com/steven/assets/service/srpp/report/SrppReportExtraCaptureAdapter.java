@@ -7,6 +7,7 @@ import com.steven.assets.repository.*;
 import com.steven.assets.service.*;
 import com.steven.assets.srpp.SrppJcs;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 import java.time.*;
 import java.util.*;
 
@@ -15,10 +16,15 @@ import java.util.*;
 public final class SrppReportExtraCaptureAdapter implements SrppReportExtraCapturePort {
     private final PriceQueryService prices;private final MarketDataService market;private final TradingRadarService radar;
     private final StockPriceHistoryRepository history;private final StockDividendHistoryRepository dividends;
-    private final TechnicalIndicatorService indicators;private final ObjectMapper mapper;
+    private final TechnicalIndicatorService indicators;private final ObjectMapper mapper;private final ExchangeRateHistoryRepository fxHistory;
     public SrppReportExtraCaptureAdapter(PriceQueryService prices,MarketDataService market,TradingRadarService radar,
             StockPriceHistoryRepository history,StockDividendHistoryRepository dividends,TechnicalIndicatorService indicators,ObjectMapper mapper){
-        this.prices=prices;this.market=market;this.radar=radar;this.history=history;this.dividends=dividends;this.indicators=indicators;this.mapper=mapper;
+        this(prices,market,radar,history,dividends,indicators,mapper,null);
+    }
+    @Autowired
+    public SrppReportExtraCaptureAdapter(PriceQueryService prices,MarketDataService market,TradingRadarService radar,
+            StockPriceHistoryRepository history,StockDividendHistoryRepository dividends,TechnicalIndicatorService indicators,ObjectMapper mapper,ExchangeRateHistoryRepository fxHistory){
+        this.prices=prices;this.market=market;this.radar=radar;this.history=history;this.dividends=dividends;this.indicators=indicators;this.mapper=mapper;this.fxHistory=fxHistory;
     }
     public ExtraCapture capture(long ownerId,LocalDate date,String slot,Instant at,JsonNode model,JsonNode assets,JsonNode frozenSources){
         ObjectNode sources=JsonNodeFactory.instance.objectNode(),vector=JsonNodeFactory.instance.objectNode();
@@ -26,6 +32,7 @@ public final class SrppReportExtraCaptureAdapter implements SrppReportExtraCaptu
         model.path("detailed_target_allocation_2027").fieldNames().forEachRemaining(c->{if(!Set.of("TWD_term_deposits","demand_deposits_and_cash").contains(c))universe.add(market(c)+":"+c);});
         assets.path("snapshot").path("stocks").forEach(h->{String m=h.path("market").asText(),c=h.path("stockCode").asText();if(Set.of("台股","美股").contains(m)&&!c.isBlank())universe.add(m+":"+c);});
         JsonNode e=model.path("execution_policy");for(String key:List.of("short_term_opportunity_d171","bond_short_term_opportunity_d185"))e.path(key).path("symbols").forEach(c->universe.add("台股:"+c.asText()));
+        JsonNode named=e.path("named_cash_rotation_d223");if(named.path("enabled").asBoolean())for(String key:List.of("buy_symbol","sell_symbol"))if(!named.path(key).asText().isBlank())universe.add("台股:"+named.path(key).asText());
         Map<String,List<LocalDate>> calendarSessions=new HashMap<>();Map<String,Boolean> calendarQuality=new HashMap<>(),calendarComplete=new HashMap<>();Map<String,LocalDate>calendarStart=new HashMap<>(),calendarUnknown=new HashMap<>();
         for(String m:List.of("台股","美股")){List<LocalDate> dates=new ArrayList<>();boolean known=false,complete=true;LocalDate start=null,unknown=null;for(int d=1;d<=550;d++){LocalDate day=date.minusDays(d);Optional<Boolean> flag=market.isTradingDayCachedOnly(m,day);if(flag.isEmpty()){complete=false;unknown=day;break;}known=true;start=day;if(flag.get())dates.add(day);}Collections.reverse(dates);calendarSessions.put(m,dates);calendarQuality.put(m,known);calendarComplete.put(m,complete);calendarStart.put(m,start);calendarUnknown.put(m,unknown);}
         Set<String> reused=new HashSet<>();model.path("execution_policy").path("bond_price_selection_d195").path("strategic_symbols").forEach(c->reused.add(c.asText()));
@@ -44,6 +51,27 @@ public final class SrppReportExtraCaptureAdapter implements SrppReportExtraCaptu
             var dividendRows=dividends.findByStockSinceYear(code,m,date.getYear()-2);
             if(financialDividends(dividendRows,model,code,date))body.set("dividends",json(dividendRows));
             else body.putNull("dividends");
+            if(Set.of("VOO","0050","00881").contains(code)){
+                try{
+                    List<StockPriceHistory> desc=new ArrayList<>(rows);desc.sort(Comparator.comparing(StockPriceHistory::getTradingDate).reversed());
+                    var adjustment=new DistributionAdjustedPriceService();
+                    var priceOnly=adjustment.priceReturnBasis(desc,dividendRows,m);var totalReturn=adjustment.adjust(desc,dividendRows);
+                    Set<LocalDate> trustedDates=new HashSet<>();for(var row:rows)if(prices.isTrustedClose(row))trustedDates.add(row.getTradingDate());
+                    ArrayNode priceRows=body.putArray("priceOnlyDaily"),adjustedRows=body.putArray("adjustedDaily");
+                    for(var row:priceOnly.rowsDesc()){ObjectNode raw=(ObjectNode)json(row);raw.put("trusted",trustedDates.contains(row.getTradingDate()));priceRows.add(raw);}
+                    for(var row:totalReturn.rowsDesc()){ObjectNode raw=(ObjectNode)json(row);raw.put("trusted",trustedDates.contains(row.getTradingDate()));adjustedRows.add(raw);}
+                    body.put("priceOnlyBasis",m.equals("台股")?"TW_SPLIT_STOCK_PRICE":"STORED_PRICE_ONLY").put("priceOnlyBasisStatus","AVAILABLE").put("adjustedBasisStatus","AVAILABLE");
+                    if("VOO".equals(code)){try{
+                        if(fxHistory==null)body.putObject("usdFxPurchase").put("evaluated",false);
+                        else {
+                            var rate=mapper.treeToValue(frozenSources.path("fx"),UsdTwdLiveRateService.LiveRate.class);
+                            var fxRows=fxHistory.findByCurrencyAndRateDateBetweenOrderByRateDateAsc("USD",date.minusYears(2),date.minusDays(1));
+                            List<LocalDate> tw=calendarSessions.get("台股");LocalDate completedTw=tw.isEmpty()?null:tw.getLast();
+                            body.set("usdFxPurchase",json(UsdFxPurchaseContext.forAsset("VOO","美股","USD",UsdFxPurchaseContext.live(rate,at,completedTw,fxRows,null))));
+                        }
+                    }catch(Exception fxUnavailable){body.putObject("usdFxPurchase").put("evaluated",false).put("reason","D222_FX_SELECTION_CONTEXT_UNAVAILABLE");}}
+                }catch(Exception unavailable){body.put("priceOnlyBasisStatus","UNAVAILABLE").put("adjustedBasisStatus","UNAVAILABLE");}
+            }
             // Existing business indicator-series computes from canonical persisted rows; no vendor IO.
             try{body.set("indicators",json(indicators.indicatorSeries(code,m,date.minusDays(730),date.minusDays(1))));}catch(RuntimeException absent){body.set("indicators",JsonNodeFactory.instance.arrayNode());}
             }
@@ -58,7 +86,8 @@ public final class SrppReportExtraCaptureAdapter implements SrppReportExtraCaptu
     public static SourceQuality assess(JsonNode body,LocalDate date,Instant at){
         String symbol=body.path("symbol").asText(),market=body.path("market").asText();JsonNode quote=body.path("quote"),radar=body.path("radar"),stock=radar.path("stock");
         boolean known=body.path("calendarVerified").asBoolean()&&body.path("completedSessions").isArray()&&!body.path("completedSessions").isEmpty()&&body.path("daily").isArray()&&!body.path("daily").isEmpty();
-        boolean valid=known&&body.path("dividends").isArray()&&!symbol.isBlank()&&Set.of("台股","美股").contains(market)&&symbol.equals(quote.path("stockCode").asText())&&market.equals(quote.path("market").asText())&&!quote.path("source").asText().isBlank()&&Set.of("LIVE","VERIFIED_CLOSE").contains(quote.path("quoteStatus").asText())&&positive(quote.path("price"))&&quote.path("closed").isBoolean()&&validTime(quote.path("updatedAt").asText(),at)&&date.toString().equals(quote.path("tradingDate").asText())&&symbol.equals(stock.path("stockCode").asText())&&market.equals(stock.path("market").asText())&&date.toString().equals(stock.path("asOfDate").asText())&&stock.path("dataComplete").asBoolean()&&!radar.path("ruleVersion").asText().isBlank()&&SrppRadarPolicy.supportsVersion(radar)&&validTime(radar.path("generatedAt").asText(),at);
+        String expectedQuoteDate=date.toString();if("美股".equals(market)&&body.path("completedSessions").isArray()&&!body.path("completedSessions").isEmpty())expectedQuoteDate=body.path("completedSessions").get(body.path("completedSessions").size()-1).asText();
+        boolean valid=known&&body.path("dividends").isArray()&&!symbol.isBlank()&&Set.of("台股","美股").contains(market)&&symbol.equals(quote.path("stockCode").asText())&&market.equals(quote.path("market").asText())&&!quote.path("source").asText().isBlank()&&Set.of("LIVE","VERIFIED_CLOSE").contains(quote.path("quoteStatus").asText())&&positive(quote.path("price"))&&quote.path("closed").isBoolean()&&validTime(quote.path("updatedAt").asText(),at)&&expectedQuoteDate.equals(quote.path("tradingDate").asText())&&symbol.equals(stock.path("stockCode").asText())&&market.equals(stock.path("market").asText())&&expectedQuoteDate.equals(stock.path("asOfDate").asText())&&stock.path("dataComplete").asBoolean()&&!radar.path("ruleVersion").asText().isBlank()&&SrppRadarPolicy.supportsVersion(radar)&&validTime(radar.path("generatedAt").asText(),at);
         Set<String> sessionDates=new HashSet<>(),dailyDates=new HashSet<>();try{for(JsonNode session:body.path("completedSessions")){String day=session.asText();valid&=LocalDate.parse(day).isBefore(date)&&sessionDates.add(day);}for(JsonNode row:body.path("daily")){String day=row.path("tradingDate").asText();valid&=LocalDate.parse(day).isBefore(date)&&dailyDates.add(day)&&row.path("trusted").isBoolean()&&positive(row.path("closePrice"));if(row.hasNonNull("stockCode"))valid&=symbol.equals(row.path("stockCode").asText());if(row.hasNonNull("market"))valid&=market.equals(row.path("market").asText());}}catch(RuntimeException malformed){valid=false;}
         boolean complete=valid&&body.path("lookbackComplete").asBoolean(true)&&dailyDates.containsAll(sessionDates)&&body.path("dividends").isArray()&&body.path("indicators").isArray()&&!body.path("indicators").isEmpty();if("台股".equals(market))complete&=body.path("book").path("available").asBoolean()&&body.path("book").path("levels").size()==5&&positive(body.path("nav").path("nav"));
         return new SourceQuality(!known?"NONE":complete?"COMPLETE":"PARTIAL",valid?"VERIFIED":"UNAVAILABLE");

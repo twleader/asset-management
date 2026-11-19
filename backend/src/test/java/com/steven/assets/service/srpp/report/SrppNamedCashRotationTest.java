@@ -111,4 +111,22 @@ class SrppNamedCashRotationTest {
         assertThat(strategic.path("receipts").toString()).contains("D223:00881","TOTAL_BUDGET_TWD=400000","SPENT_TWD=UNKNOWN","REMAINING_TWD=UNKNOWN","PRICE_TRIGGER=UNKNOWN");
         assertThat(strategic.path("missing").toString()).contains(SrppNamedCashRotation.LEDGER_UNAVAILABLE+":00881");
     }
+    private static ObjectNode radarModel()throws Exception{
+        ObjectNode m=model(),p=(ObjectNode)m.path("execution_policy").path("named_cash_rotation_d223");p.remove(List.of("buy_price_exclusive_upper_twd","sell_price_exclusive_lower_twd"));p.put("entry_rule_decision","D-226").put("buy_radar_action","ADD_CANDIDATE").put("buy_requires_llm_adoption",true).put("sell_requires_llm_adoption",true);p.putArray("sell_radar_actions").add("EXIT_CANDIDATE").add("REDUCE_CANDIDATE");return m;
+    }
+    @Test void d226BuyerUsesExactAddInsteadOfAny38PriceBoundary()throws Exception{
+        ObjectNode radar=M.createObjectNode();radar.putObject("stock").put("stockCode","00881").put("market","台股").put("asOfDate",DATE.toString()).put("dataComplete",true).put("action","ADD_CANDIDATE");
+        for(String price:List.of("37.99","38","40","100")){ObjectNode result=SrppNamedCashRotation.buyObservation(radarModel(),"00881","台股",DATE,n(price),radar);assertThat(result.path("radarTriggered").asBoolean()).isTrue();assertThat(result.path("priceTriggered").isNull()).isTrue();assertThat(result.path("reason").asText()).isEqualTo(SrppNamedCashRotation.LEDGER_UNAVAILABLE);assertThat(result.path("totalBudgetTwd").asText()).isEqualTo("400000");}
+        ((ObjectNode)radar.path("stock")).put("action","BUY_CANDIDATE");assertThat(SrppNamedCashRotation.buyObservation(radarModel(),"00881","台股",DATE,n("37"),radar).path("radarTriggered").asBoolean()).isFalse();
+    }
+    @Test void d226FinalGateKeepsBudgetUnknownWithoutReintroducingPriceVeto()throws Exception{
+        ArrayNode modules=M.createArrayNode().add(module("FUTURE_ORDINARY","","ACTIONABLE_FOR_REPORT",null,"40"));SrppReportModuleCalculator.namedCashRotationFinalGates(modules,radarModel(),DATE);JsonNode l=modules.get(0).path("data").path("legs").get(0);assertThat(l.path("blockingReasons").toString()).contains(SrppNamedCashRotation.LEDGER_UNAVAILABLE).doesNotContain("38");assertThat(l.path("status").asText()).isEqualTo("NOT_EVALUATED");
+    }
+    @Test void d226IndependentMediumMustHaveAllFormalReceiptsBeforeBypassingNamedPlan()throws Exception{
+        ObjectNode independent=module("STRATEGIC_BUY_GATES",SrppReportMediumDipCalculator.STRATEGY,"ACTIONABLE_FOR_REPORT",null,"40"),forged=independent.deepCopy();JsonNode l=independent.path("data").path("legs").get(0);for(String rule:SrppReportMediumDipCalculator.REQUIRED)((ArrayNode)l.path("receipts")).addObject().put("ruleId",rule).put("status","PASS");ArrayNode modules=M.createArrayNode().add(independent).add(forged);SrppReportModuleCalculator.namedCashRotationFinalGates(modules,radarModel(),DATE);assertThat(l.path("status").asText()).isEqualTo("ACTIONABLE_FOR_REPORT");assertThat(forged.path("data").path("legs").get(0).path("status").asText()).isEqualTo("NOT_EVALUATED");
+    }
+    @Test void d226NamedSellerDoesNotRetain152OverlayWhile2885RetentionRemains()throws Exception{
+        ObjectNode pass=M.createObjectNode().put("timingPass",true).put("reason","ORDINARY_PATH_REVIEW");assertThat(SrppNamedCashRotation.coreOverlay(radarModel(),"2881","台股",DATE,n("140"),n("140"),pass)).isEqualTo(pass);assertThat(SrppNamedCashRotation.coreOverlay(radarModel(),"2885","台股",DATE,n("70"),n("70"),pass).path("timingPass").asBoolean()).isFalse();
+    }
+
 }
