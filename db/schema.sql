@@ -45,7 +45,7 @@
 --   asset-postgres 是多個 worktree 共用的可變狀態，本檔因此可能短暫含尚未 merge 的表；
 --   那不影響它的標準地位——那些 changeset 其後都會 land，本檔的下一次重產也會自動收斂。
 --
--- 產生當下表數：128 張（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
+-- 產生當下表數：129 張（對照：SELECT count(*) FROM pg_tables WHERE schemaname='public';）
 --
 --
 --
@@ -1797,6 +1797,17 @@ CREATE TABLE public.fubon_intraday_candle_capture (
     CONSTRAINT ck_fubon_intraday_capture_observation CHECK ((captured_at >= request_started_at)),
     CONSTRAINT ck_fubon_intraday_capture_source_day CHECK ((((request_started_at AT TIME ZONE 'Asia/Taipei'::text))::date = source_date)),
     CONSTRAINT ck_fubon_intraday_capture_status CHECK (((status)::text = ANY ((ARRAY['AVAILABLE'::character varying, 'UNAVAILABLE'::character varying, 'CONFLICT'::character varying])::text[])))
+);
+
+
+--
+-- Name: fubon_schedule_switch; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.fubon_schedule_switch (
+    schedule_key character varying(64) NOT NULL,
+    enabled boolean NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
 
@@ -4844,6 +4855,14 @@ ALTER TABLE ONLY public.foreign_stock_daily_history
 
 ALTER TABLE ONLY public.fubon_historical_daily_candle
     ADD CONSTRAINT fubon_historical_daily_candle_pkey PRIMARY KEY (stock_code, market, trading_date);
+
+
+--
+-- Name: fubon_schedule_switch fubon_schedule_switch_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fubon_schedule_switch
+    ADD CONSTRAINT fubon_schedule_switch_pkey PRIMARY KEY (schedule_key);
 
 
 --

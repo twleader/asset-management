@@ -24,4 +24,4 @@
 - 先 `scripts/spec-check.sh` 與 `scripts/codex-review.sh` spec，再實作，最後 arch 審查。
 
 ## 完成報告
-（實作後回填）
+2026-11-19：spec 第 1、2 輪 Codex 審查的 major／minor 皆已修（BFF 與 business 對無效 enabled 一律 400、計數改七個開關／七類別／八方法、日誌層級分 OFF=DEBUG 與 MISSING／UNREADABLE=WARN）；arch 第 1 輪唯一 major（schema.sql 未重產）已於部署後重產（129 表、B10 PASS）。Backend 相關測試與 BFF 測試全綠；已重建 business-services／bff／frontend（compose 專案 `asset-management`），Liquibase v1.171.0 已套用，七列 seed 正確（`srpp-order-source` 為 false）。待觀察：下個台股交易日 09:00 起 `fubon_srpp_source_snapshot` 不應再新增列；於頁面開啟後應恢復每分鐘寫入。排程代理（Spring 實際攔截 `@Scheduled`）尚無整合測試，以上述隔日觀察為驗證。
