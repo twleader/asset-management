@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 @DataJpaTest(properties={"spring.jpa.hibernate.ddl-auto=create-drop","spring.liquibase.enabled=false"},showSql=false)
 @AutoConfigureTestDatabase(replace=AutoConfigureTestDatabase.Replace.NONE)
-@Import({FubonSettlementReceiptRepository.class,FubonSettlementReceiptCapture.class,AssetTransactionService.class,FubonTradeWriter.class,FubonSyncOwnerPolicy.class,FubonSyncOwnerDirectoryAdapter.class,JpaFubonSyncFreshness.class,TradeReportImportService.class,TradeReportParser.class,TradeReportLedgerGuard.class,JdbcTradeReportStore.class,TradeReportImportPostgresTest.Config.class})
+@Import({TradeReportFeeSourceLoader.class,JdbcTradeReportFeeEventStore.class,FubonSettlementReceiptRepository.class,FubonSettlementReceiptCapture.class,AssetTransactionService.class,FubonTradeWriter.class,FubonSyncOwnerPolicy.class,FubonSyncOwnerDirectoryAdapter.class,JpaFubonSyncFreshness.class,TradeReportImportService.class,TradeReportParser.class,TradeReportLedgerGuard.class,JdbcTradeReportStore.class,TradeReportImportPostgresTest.Config.class})
 @Testcontainers @Transactional(propagation=Propagation.NOT_SUPPORTED)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TradeReportImportPostgresTest {
@@ -42,6 +42,7 @@ class TradeReportImportPostgresTest {
  static { PG.start(); }
  @DynamicPropertySource static void properties(DynamicPropertyRegistry r){r.add("spring.datasource.url",PG::getJdbcUrl);r.add("spring.datasource.username",PG::getUsername);r.add("spring.datasource.password",PG::getPassword);}
  @TestConfiguration static class Config{@Bean ObjectMapper reportMapper(){return new ObjectMapper().findAndRegisterModules();}@Bean JdbcTemplate jdbc(DataSource ds){return new JdbcTemplate(ds);}}
+ @Autowired TradeReportFeeEventStore events;
  @Autowired JdbcTemplate jdbc;@Autowired TradeReportImportService service;@Autowired AppUserRepository users;@Autowired BrokerRepository brokers;@Autowired AssetTransactionRepository tx;@Autowired PlatformTransactionManager manager;@MockitoSpyBean TradeReportLedgerGuard guard;
  @MockitoSpyBean FubonSyncOwnerPolicy ownerPolicy;
  @MockitoSpyBean FubonSyncOwnerDirectoryAdapter directory;
@@ -50,7 +51,7 @@ class TradeReportImportPostgresTest {
  @MockitoSpyBean FubonSettlementReceiptStore settlements; @Autowired FubonSettlementReceiptCapture capture; @MockitoBean FubonSrppSourceStore orders;
  @MockitoBean TenantGuard tenant;@MockitoBean StockMasterService stocks;
  Long owner;
- @BeforeAll void schema()throws Exception{jdbc.execute(Files.readString(Path.of("src/main/resources/db/changelog/changes/v1.168.0-broker-trade-report-import.sql")));jdbc.execute(Files.readString(Path.of("src/main/resources/db/changelog/changes/v1.169.0-fubon-settlement-receipt.sql")));}
+ @BeforeAll void schema()throws Exception{jdbc.execute(Files.readString(Path.of("src/main/resources/db/changelog/changes/v1.168.0-broker-trade-report-import.sql")));jdbc.execute(Files.readString(Path.of("src/main/resources/db/changelog/changes/v1.169.0-fubon-settlement-receipt.sql")));jdbc.execute(Files.readString(Path.of("src/main/resources/db/changelog/changes/v1.170.0-trade-report-fee-event.sql")));}
  @BeforeEach void setup(){AppUser u=AppUser.builder().email(UUID.randomUUID()+"@example.invalid").name("synthetic").role("ADMIN").status("ACTIVE").build();owner=users.saveAndFlush(u).getId();if(brokers.findByCode("fubon").isEmpty())brokers.saveAndFlush(BrokerEntity.builder().code("fubon").displayName("富邦證券").active(true).build());doReturn(u.getEmail()).when(directory).syncOwnerEmail();when(admins.isConfiguredAdmin(u.getEmail())).thenReturn(true);
  when(classification.resolve(any(),any())).thenReturn(new TransactionAssetClassService.Classification(null,null,false));
  when(tenant.hasUser()).thenReturn(true);when(tenant.requireCurrentUserId()).thenReturn(owner);when(stocks.resolveNameLocalOnly("0050","台股")).thenReturn("測試ETF");}
@@ -142,5 +143,65 @@ class TradeReportImportPostgresTest {
    assertThat(settlements.latest(owner)).isPresent();
    assertThat(jdbc.queryForObject("select count(*) from asset_transaction where owner_user_id=?",Integer.class,owner)).isEqualTo(captureFirst?0:1);
    if(!captureFirst)assertThat(service.preview(req("source-race",null)).status()).isEqualTo("ALREADY_IMPORTED");
+ }
+
+ TradeReportImportService.Request lateReq(boolean reconcile,String hash){return new TradeReportImportService.Request("late",TradeReportParserTest.mime(TradeReportParserTest.html(TradeReportParserTest.row("0050","synthetic1")).replace("11 月 17 日","10 月 5 日")),true,true,hash,reconcile);}
+ TradeReportImportService.Response applyLate(boolean reconcile){return service.apply(lateReq(reconcile,service.preview(lateReq(reconcile,null)).previewHash()));}
+ void seedLateSources(){
+   var r=TradeReportFeeResolverTest.receipt(TradeReportFeeResolverTest.settlement());
+   new TransactionTemplate(manager).execute(status->{guard.lock(owner);settlements.append(new FubonSettlementReceiptStore.Receipt(0,owner,r.queryDate(),r.observedAt(),r.status(),r.accountFingerprint(),r.payloadHash(),r.payload(),r.reason()));return null;});
+   var o=TradeReportFeeResolverTest.snapshot(TradeReportFeeResolverTest.orders());when(orders.latest(owner,o.date())).thenReturn(Optional.of(new FubonSrppSourceStore.Observation(o.id(),owner,o.date(),o.accountFingerprint(),o.capturedAt(),o.status(),o.revision(),o.payload())));
+ }
+ @Test void threeDifferentUnknownFeeRowsImportOnceAndReplay(){
+   when(stocks.resolveNameLocalOnly(anyString(),eq("台股"))).thenReturn("測試ETF");
+   String raw=TradeReportParserTest.mime(TradeReportParserTest.html(TradeReportParserTest.row("0050","a1")+TradeReportParserTest.row("00679B","a2")+TradeReportParserTest.row("00878","a3")));
+   var request=new TradeReportImportService.Request("three",raw,true,true,null);var preview=service.preview(request);assertThat(preview.status()).isEqualTo("READY");assertThat(preview.rows()).allMatch(r->r.fee()==null&&r.transactionTax()==null);
+   var apply=new TradeReportImportService.Request("three",raw,true,true,preview.previewHash());assertThat(service.apply(apply).insertedCount()).isEqualTo(3);assertThat(service.apply(apply).insertedCount()).isZero();
+ }
+ @Test void realSqlSourceFailureRollsBackOnlyIndependentReader(){
+   doAnswer(inv->{jdbc.execute("SELECT * FROM synthetic_missing_fee_source");return Optional.empty();}).when(settlements).latest(owner);
+   var preview=service.preview(req("sql-fail",null));assertThat(preview.rows().getFirst().feeProvenance().reason()).isEqualTo("FEE_SOURCE_UNAVAILABLE");
+   assertThat(service.apply(req("sql-fail",preview.previewHash())).insertedCount()).isEqualTo(1);
+   assertThat(jdbc.queryForObject("select count(*) from asset_transaction where owner_user_id=?",Integer.class,owner)).isEqualTo(1);
+ }
+ @Test void lateFeeUpdatesOnceWithBoundRetryAndStableReplay(){
+   long id=applyLate(false).rows().getFirst().transactionId();String original=jdbc.queryForObject("select canonical_facts from broker_trade_report_import where owner_user_id=?",String.class,owner);
+   seedLateSources();var preview=service.preview(lateReq(true,null));assertThat(preview.status()).isEqualTo("FEE_UPDATE_READY");assertThat(preview.rows().getFirst().fee()).isEqualByComparingTo("20");
+   var request=lateReq(true,preview.previewHash());var applied=service.apply(request);assertThat(applied.insertedCount()).isZero();assertThat(applied.feeUpdatedCount()).isEqualTo(1);
+   assertThat(tx.findById(id).orElseThrow().getFee()).isEqualByComparingTo("20");assertThat(service.apply(request).feeUpdatedCount()).isZero();
+   assertThatThrownBy(()->service.apply(lateReq(false,preview.previewHash()))).hasMessage("PREVIEW_HASH_MISMATCH");
+   capture.unavailable(owner,java.time.Instant.now(),FubonSettlementOutcome.SETTLEMENT_FAILED);when(orders.latest(owner,TradeReportFeeResolverTest.DATE)).thenReturn(Optional.empty());
+   assertThat(service.preview(lateReq(false,null)).status()).isEqualTo("ALREADY_IMPORTED");assertThat(service.apply(request).feeUpdatedCount()).isZero();
+   assertThat(jdbc.queryForObject("select canonical_facts from broker_trade_report_import where owner_user_id=?",String.class,owner)).isEqualTo(original);
+ }
+ @Test void manualZeroThenClearNullPermanentlyBlocksLateFee(){
+   long id=applyLate(false).rows().getFirst().transactionId();var original=tx.findById(id).orElseThrow();
+   var zero=new AssetTransactionDto.CreateAssetTransactionRequest(original.getTransactionType(),original.getAssetType(),original.getAssetName(),original.getAssetCode(),original.getMarket(),original.getCurrency(),original.getChannel(),original.getTradeDate(),original.getShares(),original.getPrice(),original.getAmount(),BigDecimal.ZERO,null,original.getExchangeRate(),original.getNotes());
+   manual.updateAssetTransaction(id,zero);assertThat(service.preview(lateReq(true,null)).rows().getFirst().reason()).isEqualTo("LEDGER_CHANGED");
+   var clear=new AssetTransactionDto.CreateAssetTransactionRequest(original.getTransactionType(),original.getAssetType(),original.getAssetName(),original.getAssetCode(),original.getMarket(),original.getCurrency(),original.getChannel(),original.getTradeDate(),original.getShares(),original.getPrice(),original.getAmount(),null,null,original.getExchangeRate(),original.getNotes());
+   manual.updateAssetTransaction(id,clear);seedLateSources();var preview=service.preview(lateReq(true,null));assertThat(preview.status()).isEqualTo("ALREADY_IMPORTED");assertThat(preview.rows().getFirst().feeProvenance().reason()).isEqualTo("MANUAL_FEE_CONTROL");assertThat(preview.rows().getFirst().fee()).isNull();
+   assertThat(events.manuallyEdited(owner,events.importEvidenceId(owner,id).orElseThrow())).isTrue();
+ }
+ @Test void lateFeeSourceDriftRejectsPreview(){applyLate(false);seedLateSources();String hash=service.preview(lateReq(true,null)).previewHash();capture.unavailable(owner,java.time.Instant.now(),FubonSettlementOutcome.SETTLEMENT_FAILED);assertThatThrownBy(()->service.apply(lateReq(true,hash))).hasMessage("PREVIEW_HASH_MISMATCH");}
+
+ @Test void twoConcurrentLateAppliesOnlyEnrichOnce()throws Exception{
+   applyLate(false);seedLateSources();String hash=service.preview(lateReq(true,null)).previewHash();
+   try(var pool=Executors.newFixedThreadPool(2)){var a=pool.submit(()->service.apply(lateReq(true,hash)));var b=pool.submit(()->service.apply(lateReq(true,hash)));assertThat(a.get(15,TimeUnit.SECONDS).feeUpdatedCount()+b.get(15,TimeUnit.SECONDS).feeUpdatedCount()).isEqualTo(1);}
+   assertThat(jdbc.queryForObject("select count(*) from broker_trade_report_fee_event where owner_user_id=? and kind='FEE_ENRICHMENT'",Integer.class,owner)).isEqualTo(1);
+ }
+ @ParameterizedTest @ValueSource(booleans={true,false}) void manualAndLateEnrichmentSerializeBothOrders(boolean manualFirst)throws Exception{
+   long id=applyLate(false).rows().getFirst().transactionId();seedLateSources();String hash=service.preview(lateReq(true,null)).previewHash();var t=tx.findById(id).orElseThrow();
+   var put=new AssetTransactionDto.CreateAssetTransactionRequest(t.getTransactionType(),t.getAssetType(),t.getAssetName(),t.getAssetCode(),t.getMarket(),t.getCurrency(),t.getChannel(),t.getTradeDate(),t.getShares(),t.getPrice(),t.getAmount(),null,null,t.getExchangeRate(),t.getNotes());
+   CountDownLatch locked=new CountDownLatch(1),release=new CountDownLatch(1),started=new CountDownLatch(1);
+   doAnswer(inv->{Object result=inv.callRealMethod();if(Thread.currentThread().getName().equals("first-fee-writer")){locked.countDown();if(!release.await(10,TimeUnit.SECONDS))throw new AssertionError("timeout");}return result;}).when(guard).lock(owner);
+   Runnable edit=()->manual.updateAssetTransaction(id,put),enrich=()->service.apply(lateReq(true,hash));
+   try(var pool=Executors.newFixedThreadPool(2)){
+     var a=pool.submit(()->{Thread.currentThread().setName("first-fee-writer");(manualFirst?edit:enrich).run();});assertThat(locked.await(10,TimeUnit.SECONDS)).isTrue();
+     var b=pool.submit(()->{Thread.currentThread().setName("second-fee-writer");started.countDown();try{(manualFirst?enrich:edit).run();return (Throwable)null;}catch(Throwable failure){return failure;}});assertThat(started.await(5,TimeUnit.SECONDS)).isTrue();
+     try{assertThatThrownBy(()->b.get(200,TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);}finally{release.countDown();}a.get(15,TimeUnit.SECONDS);Throwable failure=b.get(15,TimeUnit.SECONDS);
+     if(manualFirst)assertThat(failure).hasMessage("PREVIEW_HASH_MISMATCH");else assertThat(failure).isNull();
+   }finally{release.countDown();}
+   assertThat(tx.findById(id).orElseThrow().getFee()).isNull();assertThat(events.manuallyEdited(owner,events.importEvidenceId(owner,id).orElseThrow())).isTrue();
+   assertThat(jdbc.queryForObject("select count(*) from broker_trade_report_fee_event where owner_user_id=? and kind='FEE_ENRICHMENT'",Integer.class,owner)).isEqualTo(manualFirst?0:1);
  }
 }

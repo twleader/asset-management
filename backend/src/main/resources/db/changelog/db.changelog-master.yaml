@@ -542,3 +542,5 @@ databaseChangeLog:
       relativeToChangelogFile: false
   - include:
       file: db/changelog/changes/v1.169.0-fubon-settlement-receipt.sql
+  - include:
+      file: db/changelog/changes/v1.170.0-trade-report-fee-event.sql

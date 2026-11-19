@@ -8,10 +8,12 @@ import {
   createTradeReportImportDraft,
   feeProvenanceLabel,
   extractMessageIdHeader,
+  getTradeReportPreviewCounts,
   getTradeReportConflictRows,
   importStatusLabel,
   invalidateTradeReportPreview,
   readEmlFile,
+  tradeReportRowStatusLabel,
   validateEmlFile
 } from './tradeReportImport.js'
 
@@ -87,12 +89,34 @@ test('requires a bounded message ID, both attestations, and a locally loaded fil
 test('input invalidation discards stale preview and advances the revision', () => {
   const draft = createTradeReportImportDraft()
   draft.preview = { status: 'READY', previewHash: 'hash', rows: [{ status: 'NEW' }] }
+  draft.previewReconcileFees = true
   draft.previewing = true
   const previousRevision = draft.revision
   invalidateTradeReportPreview(draft)
   assert.equal(draft.preview, null)
+  assert.equal(draft.previewReconcileFees, null)
   assert.equal(draft.previewing, false)
   assert.equal(draft.revision, previousRevision + 1)
+})
+
+test('fee reconciliation defaults off and row labels distinguish imported trades with pending fees', () => {
+  const draft = createTradeReportImportDraft()
+  assert.equal(draft.reconcileFees, false)
+  assert.equal(tradeReportRowStatusLabel({ status: 'ALREADY_IMPORTED', fee: null, transactionTax: null }), '已匯入，但待補費')
+  assert.equal(tradeReportRowStatusLabel({ status: 'ALREADY_IMPORTED', fee: 0, transactionTax: null }), '已匯入，仍有費用未知')
+  assert.equal(tradeReportRowStatusLabel({ status: 'ALREADY_IMPORTED', fee: 0, transactionTax: 0 }), '已匯入，待確認來源紀錄')
+  assert.equal(tradeReportRowStatusLabel({ status: 'FEE_UPDATE_READY', fee: 12, transactionTax: 3 }), '待補費更新（需明確確認）')
+})
+
+test('confirmation counts are rendered from BFF preview projections, not inferred from rows', () => {
+  assert.deepEqual(
+    getTradeReportPreviewCounts({ newRowCount: 2, feeUpdateRowCount: 1, rows: [{ status: 'CONFLICT' }] }),
+    { newRowCount: 2, feeUpdateRowCount: 1 }
+  )
+  assert.deepEqual(
+    getTradeReportPreviewCounts({ insertedCount: 99, rows: [{ status: 'NEW' }, { status: 'FEE_UPDATE_READY' }] }),
+    { newRowCount: 0, feeUpdateRowCount: 0 }
+  )
 })
 
 test('ALREADY_IMPORTED still needs explicit apply; conflicts never expose an apply path', () => {

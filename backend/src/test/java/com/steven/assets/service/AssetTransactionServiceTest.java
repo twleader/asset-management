@@ -44,6 +44,7 @@ class AssetTransactionServiceTest {
                 new TransactionAssetClassService.Classification(null, "STOCK", false));
     }
 
+    @Mock com.steven.assets.service.tradereport.TradeReportFeeEventStore feeEvents;
     @InjectMocks private AssetTransactionService service;
 
     private static AssetTransaction tx(String type, String currency, LocalDate date,

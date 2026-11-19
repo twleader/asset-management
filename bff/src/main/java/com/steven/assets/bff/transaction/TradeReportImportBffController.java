@@ -57,26 +57,34 @@ public final class TradeReportImportBffController {
                 return error(502, "INVALID_REPORT_RESPONSE");
             var conflicts = mapper.createArrayNode();
             var rows = node.path("rows");
+            int newRowCount = 0;
+            int feeUpdateRowCount = 0;
             boolean completeRows = rows.isArray() && !rows.isEmpty() && rows.size() <= 100;
             if (rows.isArray()) for (var row : rows) {
                 boolean reason = !row.path("reason").isNull() && !row.path("reason").isMissingNode()
                         && !row.path("reason").asText().isBlank();
                 if ("CONFLICT".equals(row.path("status").asText()) || reason) conflicts.add(row);
                 String rowStatus = row.path("status").asText();
-                completeRows &= row.isObject() && ("NEW".equals(rowStatus) || "ALREADY_IMPORTED".equals(rowStatus)) && !reason;
+                boolean feeUpdate = "FEE_UPDATE_READY".equals(rowStatus);
+                if ("NEW".equals(rowStatus)) newRowCount++;
+                if (feeUpdate) feeUpdateRowCount++;
+                completeRows &= row.isObject() && ("NEW".equals(rowStatus) || "ALREADY_IMPORTED".equals(rowStatus) || feeUpdate) && !reason;
             }
             String reportStatus = node.path("status").asText();
             boolean canApply = "preview".equals(operation) && status == 200 && completeRows && conflicts.isEmpty()
-                    && ("READY".equals(reportStatus) || "ALREADY_IMPORTED".equals(reportStatus))
+                    && (feeUpdateRowCount > 0 ? "FEE_UPDATE_READY".equals(reportStatus)
+                            : "READY".equals(reportStatus) || "ALREADY_IMPORTED".equals(reportStatus))
                     && node.path("previewHash").isTextual() && !node.path("previewHash").asText().isBlank();
             node.set("conflictRows", conflicts);
             node.put("canApply", canApply);
+            node.put("newRowCount", canApply ? newRowCount : 0);
+            node.put("feeUpdateRowCount", canApply ? feeUpdateRowCount : 0);
             return ResponseEntity.status(status).contentType(MediaType.APPLICATION_JSON).body(mapper.writeValueAsBytes(node));
         } catch (Exception ignored) { return error(502, "INVALID_REPORT_RESPONSE"); }
     }
 
     private static ResponseEntity<byte[]> error(int status, String code) {
         return ResponseEntity.status(status).contentType(MediaType.APPLICATION_JSON)
-                .body(("{\"code\":\"" + code + "\",\"conflictRows\":[],\"canApply\":false}").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                .body(("{\"code\":\"" + code + "\",\"conflictRows\":[],\"canApply\":false,\"newRowCount\":0,\"feeUpdateRowCount\":0}").getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 }

@@ -7243,3 +7243,17 @@ D226股票費稅authority補明：COSTS的account.costs.sellTaxRate必須精確�
 D223買方以精確ADD_CANDIDATE及consumer同輪LLM採納獨立評估；不套D215的20%回撤、38元、2881的152元或D174條件。既有STRATEGIC_BUY_GATES新增NAMED_CASH_BUY_D226/00881/BUY，整張lots、subaccount CORE_D226_BUY，沿用全部配置、資金、帳戶、費用、五檔、風險與原交易硬閘，新增D223_PLAN_BUDGET；不新增路由或下單。
 
 跨日400000元含費上限不得重設。正式namedCashRotation完整自2026-11-18至交易日confirmed fills逐筆amount+fees，加上全部有效同plan pending剩餘股數乘限價加剩餘費用、未連結正式預留amount+fees；精確linkedOrderId去重。缺完整owner帳掛單、預留或plan歸屬不猜0。D215與SHORT_TERM_D173已證獨立策略不扣此plan預算，但仍扣全帳資金。兩路徑都評估後D215優先，僅本輪正數候選去重，不把候選當已用額。預算helper只回PASS/UNAVAILABLE/BLOCKED與used/committed/remaining；零已用PASS 400000、額滿PASS 0、超額BLOCKED 0、缺證remaining=null。完整fixture須在回撤不足20%但ADD成立仍有獨立正量，最終risk與LLM仍由consumer採納。
+
+### Task611（既有 Requirement214 延伸） 待補費成交匯入與明確重新核對
+
+使用者希望可信且已授權的成交回報不因官方訂單失敗或費用未知而無法記錄，後到可信唯一證據能補費且永不覆蓋人工意圖。
+
+1. 維持既有 authenticated owner、來源/帳戶聲明、MIME安全及去重。現行 orders UNAVAILABLE 已允許NEW及fee/tax NULL；本次保留並測試，不宣稱未執行手動匯入是fee gate故障。僅可選費用來源讀取的資料存取/解析例外降級 FEE_SOURCE_UNAVAILABLE；身分、原匯入證據、帳本或寫入失敗不得吞掉。來源讀取隔離交易避免PostgreSQL失敗污染主匯入交易。
+2. 不新增掃信、排程或券商呼叫。沿現有手動dialog preview/apply Request增加optional reconcileFees=false；UI明示已匯入但待補費，使用者勾選重新核對時才提出後補預覽及明確apply。未勾選重放只讀已保存證據。原新交易仍可立即匯入未知fee/tax，不等待orders。
+3. 本版只接Task602既有官方orders+settlement唯一對帳，所有原限制原樣保留。官方FilledTrade目前無逐筆fee/tax及email orderNo，不提供client fee冒充官方入口。不將日總225分攤；不得把輸入只篩NEW/待補列而將多筆日誤當單筆，resolver始終看完整parsed rows與完整官方orders。
+4. 新匯入canonical envelope schemaVersion3標示late-fee可追蹤；舊version1/2無人工歷史，一律不自動補（LEGACY_MANUAL_HISTORY_UNKNOWN）。只在原fee與tax皆NULL、交易完整hash仍匹配、無人工編輯marker、來源唯一且DERIVED時可提出FEE_UPDATE_READY。任何人工PUT更新該FUBON_EMAIL交易即append MANUAL_EDIT事件（含未改值、0、清NULL），阻止以後自動補費；不得推測舊資料無人工變更。
+5. apply鎖既有owner並重讀，previewHash包含reconcileFees、完整fee候選與來源identity/version；來源/帳本/模式變更須409而非套用新值。以單一原子SQL UPDATE 精確owner/id/source且fee IS NULL AND transaction_tax IS NULL，更新數非1 rollback；和append-only FEE_ENRICHMENT事件同交易。人工update沿既有相同owner鎖。只補fee/tax，不改notes/gross/庫存/資金/成交身分。
+6. 新broker_trade_report_fee_event具名不可變稽核snapshot例外：id、owner、import evidence FK、kind、canonical payload、created_at。FEE_ENRICHMENT payload含before/after ledgerHash、fee/tax、provenance/receipt IDs/evidenceHash、resolverVersion、appliedPreviewHash及完整request binding（owner、rawSha256、messageId、reconcile mode）；每個import evidence最多一筆成功補費，DB partial unique index；MANUAL_EDIT保留人工接管事實。DB禁止UPDATE/DELETE，FK/owner一致性由約束及服務核對。原receipt/import canonical永不UPDATE。
+7. replay沿原immutable import加合法補費事件驗after hash；費用由已保存新事件回覆，不因官方來源消失/更動重新推導或抹掉。人工編輯後仍LEDGER_CHANGED或人工接管狀態，不偷偷恢復。重送第一次成功apply的原previewHash，只在新event完整request binding一致、來源原文未變、全批交易afterHash仍匹配且無人工接管時允許冪等回覆；其餘舊hash仍409，不重推來源。補費重放為ALREADY_IMPORTED，insertedCount=0，另feeUpdatedCount明示，不能把費用更新當新增交易。
+8. UI只render BFF投影canApply/conflictRows/feeUpdatedCount與待補狀態，reconcile勾選變動清除preview；確認框須區別新成交與補費。沿既有Origin/session/header保護，不增加9090或新權限。
+9. 先隔離worktree合成單元/一次性Postgres測試；使用者後續明確授權驗證好後部署及commit/merge/push。通過spec/arch與測試後依run-stack核對main/正式設定與同檔衝突，重建必要business/BFF/frontend，正式Liquibase僅新增本版事件schema並依規範pg_dump重產schema.sql，再依commit-merge-push收尾及main版本驗收。禁止正式成交匯入、補費執行、交易、寄信或重跑同步。

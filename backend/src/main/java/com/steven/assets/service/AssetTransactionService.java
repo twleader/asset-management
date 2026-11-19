@@ -36,6 +36,7 @@ public class AssetTransactionService {
     private final TenantGuard tenantGuard;
     private final TransactionAssetClassService classification;
     private final com.steven.assets.service.tradereport.TradeReportLedgerGuard reportGuard;
+    private final com.steven.assets.service.tradereport.TradeReportFeeEventStore feeEvents;
 
     @Transactional
     public AssetTransactionDto.AssetTransactionResponse createAssetTransaction(
@@ -74,6 +75,8 @@ public class AssetTransactionService {
         tenantGuard.assertOwned(tx.getOwnerUserId());
 
         reportGuard.rejectEmailCollision(tx.getOwnerUserId(), req.tradeDate(), req.assetCode(), req.transactionType(), req.market(), req.channel(), id);
+        if ("FUBON_EMAIL".equals(tx.getSource())) feeEvents.importEvidenceId(tx.getOwnerUserId(),tx.getId())
+                .ifPresent(evidence -> feeEvents.append(tx.getOwnerUserId(),evidence,"MANUAL_EDIT","{\"action\":\"MANUAL_PUT\"}"));
         tx.setTransactionType(req.transactionType());
         tx.setAssetType(req.assetType());
         tx.setAssetName(req.assetName());
