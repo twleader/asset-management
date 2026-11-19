@@ -35,6 +35,8 @@ public class PublicSrppCompletedTechnicalController {
             "plusDi14", "minusDi14", "obv20Change", "volumeRatio20", "oneYearPositionPct");
     private static final Set<String> COVERAGE_KEYS = Set.of("requestedCount", "completeCount",
             "partialCount", "unavailableCount");
+    /** Business-side per-symbol "no facts at all" reasons: relayed as UNAVAILABLE, never a malformed payload. */
+    static final Set<String> NO_DATA_REASONS = Set.of("AS_OF_BAR_MISSING", "DIVIDEND_HISTORY_UNVERIFIED");
     private final WebClient marketData;
 
     public PublicSrppCompletedTechnicalController(
@@ -129,7 +131,7 @@ public class PublicSrppCompletedTechnicalController {
         boolean missingBar = false;
         for (JsonNode reason : missing) {
             if (!reason.isTextual() || reason.asText().isBlank()) throw badGateway();
-            if ("AS_OF_BAR_MISSING".equals(reason.asText())) missingBar = true;
+            if (NO_DATA_REASONS.contains(reason.asText())) missingBar = true;
         }
         String status = symbol.path("status").asText();
         JsonNode indicators = symbol.path("indicators");

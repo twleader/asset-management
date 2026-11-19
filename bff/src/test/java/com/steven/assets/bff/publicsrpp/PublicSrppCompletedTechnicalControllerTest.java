@@ -59,6 +59,51 @@ class PublicSrppCompletedTechnicalControllerTest {
     }
 
     @Test
+    void relaysDividendUnverifiedSymbolAsUnavailableInsteadOf502() {
+        String body = """
+                {"formulaVersion":"SRPP_DAILY_OHLCV_V1","market":"美股","asOf":"2026-01-15",
+                 "coverage":{"requestedCount":2,"completeCount":0,"partialCount":0,"unavailableCount":2},
+                 "symbols":[{"stockCode":"VOO","market":"美股","asOf":"2026-01-15",
+                 "status":"UNAVAILABLE","historyStart":"2024-01-16","sampleCount":500,"priceBasis":"UNAVAILABLE",
+                 "appliedEventDates":[],"sourceSha256":null,"indicators":null,
+                 "missing":["DIVIDEND_HISTORY_UNVERIFIED","reason"]},
+                 {"stockCode":"AMD","market":"美股","asOf":"2026-01-15",
+                 "status":"UNAVAILABLE","historyStart":null,"sampleCount":0,"priceBasis":"UNAVAILABLE",
+                 "appliedEventDates":[],"sourceSha256":null,"indicators":null,
+                 "missing":["AS_OF_BAR_MISSING"]}]}
+                """;
+        WebClient client = WebClient.builder().exchangeFunction(request -> Mono.just(
+                ClientResponse.create(HttpStatus.OK).header("Content-Type", "application/json")
+                        .body(body).build())).build();
+        var req = MockServerHttpRequest.get(PATH).queryParam("market", "美股")
+                .queryParam("asOf", DATE).queryParam("stockCodes", "VOO,AMD").build();
+        var response = new PublicSrppCompletedTechnicalController(client).read(req).block();
+        assertThat(response).isNotNull();
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody().path("symbols").get(0).path("missing").get(0).asText())
+                .isEqualTo("DIVIDEND_HISTORY_UNVERIFIED");
+    }
+
+    @Test
+    void rejectsUnavailableSymbolCarryingIndicators() {
+        String body = """
+                {"formulaVersion":"SRPP_DAILY_OHLCV_V1","market":"美股","asOf":"2026-01-15",
+                 "coverage":{"requestedCount":1,"completeCount":0,"partialCount":0,"unavailableCount":1},
+                 "symbols":[{"stockCode":"VOO","market":"美股","asOf":"2026-01-15",
+                 "status":"UNAVAILABLE","historyStart":null,"sampleCount":5,"priceBasis":"UNAVAILABLE",
+                 "appliedEventDates":[],"sourceSha256":null,"indicators":{"ma5":1},
+                 "missing":["DIVIDEND_HISTORY_UNVERIFIED"]}]}
+                """;
+        WebClient client = WebClient.builder().exchangeFunction(request -> Mono.just(
+                ClientResponse.create(HttpStatus.OK).header("Content-Type", "application/json")
+                        .body(body).build())).build();
+        var req = MockServerHttpRequest.get(PATH).queryParam("market", "美股")
+                .queryParam("asOf", DATE).queryParam("stockCodes", "VOO").build();
+        assertThatThrownBy(() -> new PublicSrppCompletedTechnicalController(client).read(req).block())
+                .isInstanceOf(ResponseStatusException.class).hasMessageContaining("502 BAD_GATEWAY");
+    }
+
+    @Test
     void rejectsMismatchedBusinessDate() {
         String body = """
                 {"formulaVersion":"SRPP_DAILY_OHLCV_V1","market":"台股","asOf":"2026-01-14",
