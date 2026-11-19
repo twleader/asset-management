@@ -1,12 +1,18 @@
 package com.steven.assets.controller;
 
 import com.steven.assets.service.PublicTradingRadarProjectionService.PublicTradingRadarProjectionException;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-/** Internal selector failures carry no stock/user detail; BFF maps the status to its public fixed problem. */
+/**
+ * Internal selector failures carry no stock/user detail; BFF maps the status to its public fixed problem.
+ * Must precede {@code GlobalExceptionHandler#handleGeneral(Exception)}, otherwise a missing 404 is turned into 500.
+ */
+@Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(assignableTypes = InternalPublicTradingRadarController.class)
 public class InternalPublicTradingRadarExceptionAdvice {
 
