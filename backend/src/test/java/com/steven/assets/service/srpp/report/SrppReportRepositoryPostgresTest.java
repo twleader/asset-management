@@ -37,6 +37,56 @@ class SrppReportRepositoryPostgresTest {
         jdbc.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public; CREATE TABLE api_error_log_operation(source varchar(16),operation_key varchar(96),operation_label varchar(96),display_order int,PRIMARY KEY(source,operation_key)); CREATE TABLE app_user(id bigint PRIMARY KEY); INSERT INTO app_user VALUES(7),(8); CREATE TABLE srpp_policy_registry(policy_bundle_sha256 char(64) PRIMARY KEY); CREATE FUNCTION reject_srpp_immutable_update() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'immutable'; END $$;");jdbc.update("INSERT INTO srpp_policy_registry VALUES(?)",AUTHORITY.decision().policy().bundleHash());jdbc.execute(new ClassPathResource("db/changelog/changes/v1.150.0-srpp-report-calculations.sql").getContentAsString(StandardCharsets.UTF_8));
         repository=new SrppReportRepository(jdbc);calculator=spy(new PureSrppReportCalculations());publisher=new SrppReportPublisher(repository,AUTHORITY,calculator,MAPPER,manager,new SrppReportBuildIdentity());scope=new Scope(7,DATE,"09:05",supported().bundleHash(),SWAGGER,SrppReportModuleCalculator.VERSION);
     }
+    @Test void repeatedSourceGapsPublishUniqueWireReasonsForBothConsumersAndKeepReplayImmutable() throws Exception {
+        var original = frozen(7, AT, "09:05", "shared-topup-gap");
+        ObjectNode input = original.input();
+        input.withObject("sources").putObject("topup-state").put("status", "UNAVAILABLE");
+        var refreshed = fixtureWithFreshVector(original, input);
+        ObjectNode vector=refreshed.sourceVector();vector.withObject("topup-state").put("validation", "UNAVAILABLE").put("coverage", "NONE");
+        var captured=new com.steven.assets.service.srpp.decision.DecisionInputCapturePort.Frozen(refreshed.facts(),refreshed.input(),vector,refreshed.assetSnapshotId(),refreshed.assetGeneratedAt());
+        var raw = new PureSrppReportCalculations().shared(captured, AUTHORITY.decision().policy(), AUTHORITY.model(), supported(), input.path("sources"));
+        Set<String> affected = new HashSet<>();
+        for (JsonNode module : raw) for (JsonNode leg : module.path("data").path("legs")) {
+            if (!Set.of("NAMED_DEEP_DRAWDOWN_D215", "NAMED_CASH_BUY_D226", "NAMED_RADAR_ROTATION_D226").contains(leg.path("strategy").asText())) continue;
+            affected.add(leg.path("strategy").asText());
+            List<String> reasons = new ArrayList<>();leg.path("blockingReasons").forEach(r -> reasons.add(r.asText()));
+            assertThat(reasons.size()).isGreaterThan(new HashSet<>(reasons).size());
+            long sourceReceipts = java.util.stream.StreamSupport.stream(leg.path("receipts").spliterator(),false)
+                    .filter(r -> r.path("reason").asText().endsWith("SOURCE_UNAVAILABLE:topup-state"))
+                    .peek(r -> assertThat(r.path("status").asText()).isEqualTo("UNAVAILABLE")).count();
+            assertThat(sourceReceipts).isGreaterThanOrEqualTo(3);
+        }
+        assertThat(affected).containsExactlyInAnyOrder("NAMED_DEEP_DRAWDOWN_D215", "NAMED_CASH_BUY_D226", "NAMED_RADAR_ROTATION_D226");
+        var packages = publisher.publish(scope,captured,supported(),input.path("sources"),states(7,"09:05"),AT);
+        assertThat(packages).hasSize(2);
+        java.nio.file.Path output = java.nio.file.Path.of("target/blocking-reason-wire");java.nio.file.Files.createDirectories(output);
+        for (var saved : packages) {
+            JsonNode envelope = SrppReportEnvelopeValidator.validate(saved.content());
+            for (JsonNode module : envelope.path("modules")) for (JsonNode leg : module.path("data").path("legs")) {
+                List<String> reasons = new ArrayList<>();leg.path("blockingReasons").forEach(r -> reasons.add(r.asText()));
+                assertThat(reasons).doesNotHaveDuplicates();
+                if (!Set.of("NAMED_DEEP_DRAWDOWN_D215", "NAMED_CASH_BUY_D226", "NAMED_RADAR_ROTATION_D226").contains(leg.path("strategy").asText())) continue;
+                assertThat(leg.path("status").asText()).isEqualTo("BLOCKED");
+                assertThat(leg.path("lots").asLong(0)).isZero();assertThat(leg.path("units").asLong(0)).isZero();
+                assertThat(leg.path("limitPrice").isNull()).isTrue();
+                JsonNode originalLeg = null;
+                for (JsonNode rawModule : raw) for (JsonNode candidate : rawModule.path("data").path("legs"))
+                    if (leg.path("strategy").equals(candidate.path("strategy")) && leg.path("symbol").equals(candidate.path("symbol"))) originalLeg=candidate;
+                assertThat(originalLeg).isNotNull();assertThat(leg.path("receipts")).isEqualTo(originalLeg.path("receipts"));
+            }
+            java.nio.file.Files.writeString(output.resolve(saved.consumer().toLowerCase(Locale.ROOT)+".json"),saved.content());
+            assertThat(repository.byId(7,saved.id()).orElseThrow().content()).isEqualTo(saved.content());
+        }
+        var replay = publisher.publish(scope,captured,supported(),input.path("sources"),states(7,"09:05"),AT.plusSeconds(1));
+        assertThat(replay).isEqualTo(packages);assertThat(count("srpp_report_calculation_base")).isEqualTo(1);assertThat(count("srpp_report_calculation_package")).isEqualTo(2);
+        // A deployed artifact change creates a new base while the prior immutable bytes remain addressable.
+        var nextBuild = new SrppReportPublisher(repository,AUTHORITY,calculator,MAPPER,manager,"synthetic-next-build");
+        var newer=nextBuild.publish(scope,captured,supported(),input.path("sources"),states(7,"09:05"),AT.plusSeconds(2));
+        assertThat(newer.getFirst().id()).isNotEqualTo(packages.getFirst().id());
+        for(var old:packages)assertThat(repository.byId(7,old.id()).orElseThrow().content()).isEqualTo(old.content());
+        assertThat(count("srpp_report_calculation_base")).isEqualTo(2);assertThat(count("srpp_report_calculation_package")).isEqualTo(4);
+    }
+
     @Test void sixteenConcurrentProducersComputeSharedOnceAndPublishTwoIsolatedPackages()throws Exception{
         ExecutorService pool=Executors.newFixedThreadPool(16);CountDownLatch ready=new CountDownLatch(16),go=new CountDownLatch(1);List<Future<List<com.steven.assets.repository.SrppReportRepository.Package>>> futures=new ArrayList<>();
         for(int i=0;i<16;i++)futures.add(pool.submit(()->{ready.countDown();go.await();return publisher.publish(scope,frozen(7,AT,"09:05","same-source"),supported(),extras(),states(7,"09:05"),AT);}));assertThat(ready.await(10,TimeUnit.SECONDS)).isTrue();go.countDown();Set<UUID> runs=new HashSet<>(),bases=new HashSet<>();try{for(var f:futures)for(var p:f.get(30,TimeUnit.SECONDS)){runs.add(p.id());bases.add(p.sharedId());SrppReportEnvelopeValidator.validate(p.content());}}finally{pool.shutdownNow();pool.awaitTermination(10,TimeUnit.SECONDS);}

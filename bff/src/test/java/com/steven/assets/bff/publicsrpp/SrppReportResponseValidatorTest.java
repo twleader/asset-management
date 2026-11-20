@@ -12,6 +12,22 @@ class SrppReportResponseValidatorTest {
  private static byte[] signed(ObjectNode n){n.remove("contentSha256");n.put("contentSha256",SrppJcs.sha256Hex(SrppJcs.canonicalize(n)));return SrppJcs.canonicalize(n).getBytes(StandardCharsets.UTF_8);}
  private static void validate(ObjectNode n){SrppReportResponseValidator.validate(QUERY,1L,MediaType.APPLICATION_JSON,signed(n));}
  private static void rejects(Consumer<ObjectNode> mutation){var n=fixture();mutation.accept(n);assertThatThrownBy(()->validate(n)).isInstanceOf(RuntimeException.class);}
+ @Test
+ @org.junit.jupiter.api.condition.EnabledIfSystemProperty(named="srpp.blockingReasonWire.dir",matches=".+")
+ void acceptsPublishedCommonSourceGapsAndStillRejectsDuplicateReasonAttack() throws Exception {
+  for(String consumer:java.util.List.of("codex","claude")) {
+   byte[] bytes=java.nio.file.Files.readAllBytes(java.nio.file.Path.of(System.getProperty("srpp.blockingReasonWire.dir"),consumer+".json"));
+   ObjectNode root=(ObjectNode)SrppDailyContextResponseValidator.parseStrict(bytes);var identity=root.path("identity");
+   var query=new SrppReportQuery(null,identity.path("consumer").asText(),identity.path("tradingDate").asText(),identity.path("reportSlot").asText(),identity.path("policyBundleSha256").asText(),identity.path("swaggerSha256").asText(),root.path("calculationRunId").asText());
+   SrppReportResponseValidator.validate(query,identity.path("ownerUserId").asLong(),MediaType.APPLICATION_JSON,bytes);
+   JsonNode attacked=null;
+   for(JsonNode module:root.path("modules"))for(JsonNode leg:module.path("data").path("legs"))
+    if("NAMED_CASH_BUY_D226".equals(leg.path("strategy").asText()))attacked=leg;
+   assertThat(attacked).isNotNull();assertThat(attacked.path("status").asText()).isEqualTo("BLOCKED");
+   var reasons=(com.fasterxml.jackson.databind.node.ArrayNode)attacked.path("blockingReasons");assertThat(reasons).isNotEmpty();reasons.add(reasons.get(0));
+   assertThatThrownBy(()->SrppReportResponseValidator.validate(query,identity.path("ownerUserId").asLong(),MediaType.APPLICATION_JSON,signed(root))).isInstanceOf(SrppPayloadException.class);
+  }
+ }
  @Test void completeReadbackOfSyntheticPackageValidatesWithUnknownScopesExplicit(){validate(fixture());}
  @Test void acceptsActualPostgresqlPublisherWireWithScopeGapsExplicit() throws Exception {
   byte[] bytes=getClass().getResourceAsStream("/srpp-report/report-producer-pg.json").readAllBytes();

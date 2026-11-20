@@ -50,7 +50,7 @@ public class SrppReportPublisher {
             String scopeIdentity=scope.owner()+"/"+scope.date()+"/"+scope.slot()+"/"+scope.policy()+"/"+scope.swagger()+"/"+scope.calculator();
             repository.lock(scopeIdentity+"/"+fingerprint);
             Base base=repository.base(scope,fingerprint).orElseGet(() -> {
-                ArrayNode shared=calculations.shared(frozen,authority.decision().policy(),authority.model(),supported,extra);
+                ArrayNode shared=SrppReportWireNormalizer.modules(calculations.shared(frozen,authority.decision().policy(),authority.model(),supported,extra));
                 String inputJcs=SrppJcs.canonicalize(input),vectorJcs=SrppJcs.canonicalize(vector),modulesJcs=SrppJcs.canonicalize(shared);
                 Base candidate=new Base(UUID.randomUUID(),scope,fingerprint,frozen.facts().capturedAt(),Instant.parse(frozen.assetGeneratedAt()),frozen.assetSnapshotId(),UUID.randomUUID(),inputJcs,vectorJcs,modulesJcs,baseHash(inputJcs,vectorJcs,modulesJcs),publishedAt);
                 repository.insert(candidate);return candidate;
@@ -72,7 +72,7 @@ public class SrppReportPublisher {
                 DecisionFacts.Input facts=mapper.convertValue(original.path("facts"),DecisionFacts.Input.class);
                 Frozen originalFrozen=new Frozen(facts,original,sourceVector,base.snapshotId(),originalAssetGenerated.toString());
                 ObjectNode core=calculations.core(originalFrozen,authority.model(),state,consumer);
-                ArrayNode modules=calculations.compose((ArrayNode)SrppJcs.parseStrict(base.modules()),core);
+                ArrayNode modules=SrppReportWireNormalizer.modules(calculations.compose((ArrayNode)SrppJcs.parseStrict(base.modules()),core));
                 UUID id=UUID.randomUUID();String inputJcs=SrppJcs.canonicalize(original),inputHash=SrppJcs.sha256Hex(inputJcs);
                 ObjectNode envelope=F.objectNode();envelope.put("schemaVersion",1);envelope.put("calculationRunId",id.toString());envelope.put("status","FINAL");
                 ObjectNode identity=envelope.putObject("identity");identity.put("ownerUserId",scope.owner());identity.put("consumer",consumer);identity.put("tradingDate",scope.date().toString());identity.put("reportSlot",scope.slot());identity.put("policyBundleSha256",scope.policy());identity.put("swaggerSha256",scope.swagger());
