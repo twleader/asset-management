@@ -1,0 +1,220 @@
+{
+  "fixture": "SYNTHETIC_ONLY",
+  "tmpfsBytes": 16777216,
+  "hostPorts": [],
+  "runs": [
+    {
+      "mode": "buffered-control",
+      "route": "/api/public/srpp/report-calculations",
+      "responses": [
+        {
+          "consumer": "Codex",
+          "status": 200,
+          "contentLength": 12582972,
+          "receivedBytes": 71680,
+          "expectedBytes": 12582972,
+          "sha256": "56e165cd0b261e159574bfd20cac8608a95db0ac5fe366d5c90e97cd867e632d",
+          "expectedSha256": "795241bb01bde4ed18a0804a1079d264540742bc0d7dbe10d9ebbe9dd84aebbb",
+          "validJson": false,
+          "cacheControl": "private, no-store",
+          "complete": false
+        },
+        {
+          "consumer": "Claude",
+          "status": 200,
+          "contentLength": 12582973,
+          "receivedBytes": 12582973,
+          "expectedBytes": 12582973,
+          "sha256": "a7968f2b2b436a3b8e7304204388ea886e36c51878c199c783ccc6c2e959efbe",
+          "expectedSha256": "a7968f2b2b436a3b8e7304204388ea886e36c51878c199c783ccc6c2e959efbe",
+          "validJson": true,
+          "cacheControl": "private, no-store",
+          "complete": true
+        }
+      ],
+      "matrix": [
+        {
+          "method": "POST",
+          "path": "/api/public/srpp/report-calculations",
+          "status": 405
+        },
+        {
+          "method": "PUT",
+          "path": "/api/public/srpp/report-calculations",
+          "status": 405
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/public/srpp/report-calculations",
+          "status": 405
+        },
+        {
+          "method": "GET",
+          "path": "/api/public/srpp/report-calculations/child",
+          "status": 404
+        }
+      ],
+      "tempCapacityError": true
+    },
+    {
+      "mode": "buffered-control",
+      "route": "/api/public/srpp/us-report-calculations",
+      "responses": [
+        {
+          "consumer": "Codex",
+          "status": 200,
+          "contentLength": 12582972,
+          "receivedBytes": 71680,
+          "expectedBytes": 12582972,
+          "sha256": "56e165cd0b261e159574bfd20cac8608a95db0ac5fe366d5c90e97cd867e632d",
+          "expectedSha256": "795241bb01bde4ed18a0804a1079d264540742bc0d7dbe10d9ebbe9dd84aebbb",
+          "validJson": false,
+          "cacheControl": "private, no-store",
+          "complete": false
+        },
+        {
+          "consumer": "Claude",
+          "status": 200,
+          "contentLength": 12582973,
+          "receivedBytes": 12582973,
+          "expectedBytes": 12582973,
+          "sha256": "a7968f2b2b436a3b8e7304204388ea886e36c51878c199c783ccc6c2e959efbe",
+          "expectedSha256": "a7968f2b2b436a3b8e7304204388ea886e36c51878c199c783ccc6c2e959efbe",
+          "validJson": true,
+          "cacheControl": "private, no-store",
+          "complete": true
+        }
+      ],
+      "matrix": [
+        {
+          "method": "POST",
+          "path": "/api/public/srpp/us-report-calculations",
+          "status": 405
+        },
+        {
+          "method": "PUT",
+          "path": "/api/public/srpp/us-report-calculations",
+          "status": 405
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/public/srpp/us-report-calculations",
+          "status": 405
+        },
+        {
+          "method": "GET",
+          "path": "/api/public/srpp/us-report-calculations/child",
+          "status": 404
+        }
+      ],
+      "tempCapacityError": true
+    },
+    {
+      "mode": "streaming",
+      "route": "/api/public/srpp/report-calculations",
+      "responses": [
+        {
+          "consumer": "Codex",
+          "status": 200,
+          "contentLength": 12582972,
+          "receivedBytes": 12582972,
+          "expectedBytes": 12582972,
+          "sha256": "795241bb01bde4ed18a0804a1079d264540742bc0d7dbe10d9ebbe9dd84aebbb",
+          "expectedSha256": "795241bb01bde4ed18a0804a1079d264540742bc0d7dbe10d9ebbe9dd84aebbb",
+          "validJson": true,
+          "cacheControl": "private, no-store",
+          "complete": true
+        },
+        {
+          "consumer": "Claude",
+          "status": 200,
+          "contentLength": 12582973,
+          "receivedBytes": 12582973,
+          "expectedBytes": 12582973,
+          "sha256": "a7968f2b2b436a3b8e7304204388ea886e36c51878c199c783ccc6c2e959efbe",
+          "expectedSha256": "a7968f2b2b436a3b8e7304204388ea886e36c51878c199c783ccc6c2e959efbe",
+          "validJson": true,
+          "cacheControl": "private, no-store",
+          "complete": true
+        }
+      ],
+      "matrix": [
+        {
+          "method": "POST",
+          "path": "/api/public/srpp/report-calculations",
+          "status": 405
+        },
+        {
+          "method": "PUT",
+          "path": "/api/public/srpp/report-calculations",
+          "status": 405
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/public/srpp/report-calculations",
+          "status": 405
+        },
+        {
+          "method": "GET",
+          "path": "/api/public/srpp/report-calculations/child",
+          "status": 404
+        }
+      ],
+      "tempCapacityError": false
+    },
+    {
+      "mode": "streaming",
+      "route": "/api/public/srpp/us-report-calculations",
+      "responses": [
+        {
+          "consumer": "Codex",
+          "status": 200,
+          "contentLength": 12582972,
+          "receivedBytes": 12582972,
+          "expectedBytes": 12582972,
+          "sha256": "795241bb01bde4ed18a0804a1079d264540742bc0d7dbe10d9ebbe9dd84aebbb",
+          "expectedSha256": "795241bb01bde4ed18a0804a1079d264540742bc0d7dbe10d9ebbe9dd84aebbb",
+          "validJson": true,
+          "cacheControl": "private, no-store",
+          "complete": true
+        },
+        {
+          "consumer": "Claude",
+          "status": 200,
+          "contentLength": 12582973,
+          "receivedBytes": 12582973,
+          "expectedBytes": 12582973,
+          "sha256": "a7968f2b2b436a3b8e7304204388ea886e36c51878c199c783ccc6c2e959efbe",
+          "expectedSha256": "a7968f2b2b436a3b8e7304204388ea886e36c51878c199c783ccc6c2e959efbe",
+          "validJson": true,
+          "cacheControl": "private, no-store",
+          "complete": true
+        }
+      ],
+      "matrix": [
+        {
+          "method": "POST",
+          "path": "/api/public/srpp/us-report-calculations",
+          "status": 405
+        },
+        {
+          "method": "PUT",
+          "path": "/api/public/srpp/us-report-calculations",
+          "status": 405
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/public/srpp/us-report-calculations",
+          "status": 405
+        },
+        {
+          "method": "GET",
+          "path": "/api/public/srpp/us-report-calculations/child",
+          "status": 404
+        }
+      ],
+      "tempCapacityError": false
+    }
+  ],
+  "status": "PASS"
+}

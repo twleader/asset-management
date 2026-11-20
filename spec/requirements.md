@@ -6094,6 +6094,8 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 
 **Task 613 發布格式修正：**同一缺失來源可使多個獨立 gate 產生相同阻擋原因；新發布的 shared module 與 consumer envelope 在 publisher wire adapter 中，對每腿 `blockingReasons` 依首次出現順序保留唯一完整字串。全部 gate receipts、missing、reasonCodes、狀態、股數、限價及金額原樣保留；不把 BLOCKED／UNAVAILABLE 轉成可執行。正規化在 canonical/hash/insert 前完成且不改 calculator 原輸出；既有 immutable base/package 不覆寫。BFF 仍拒絕重複原因、未知欄位及錯誤 hash；不改金融公式、formula manifest、政策包、Swagger、owner 或 GET 純讀邊界。publisher build identity 自動區分新產物，讓背景排程正常產生新包；舊 run ID 仍讀舊 bytes。以真共同缺源 D215/D226、publisher→BFF round trip 及重複原因攻擊回歸驗證。
 
+**Task 614 gateway 大型報告傳輸修正（共用 Requirement 199）：**exact GET `/api/public/srpp/report-calculations` 與 `/api/public/srpp/us-report-calculations` 必須以 `proxy_buffering off` 直接串流既有 BFF 回應，避免兩個 consumer 並行各約 9 MB 時爭用 gateway 16 MiB `/tmp` 而在 HTTP 200 後截斷。只限這兩個既有 location，不放大 tmpfs／buffer／資源；method/allowlist/timeout/header、GET 純讀、owner、schema、Swagger 與 bundle 不變。以隔離 Nginx、synthetic upstream、16 MiB tmpfs、兩個慢 client 的實際傳輸回歸：舊 buffering on 可重現 temp 寫入失敗／不完整回應，修後兩路各完整 JSON、Content-Length 與 SHA256 一致；非法 method／descendant 維持拒絕，不用正式資料或第二套 stack。
+
 ### Requirement 188／Tasks 490、493：API logs 的 API 名稱「全部」篩選與 30 天保留確認
 
 Task 493 的 business 參數型別轉換錯誤由既有 `GlobalExceptionHandler` 統一處理 `MethodArgumentTypeMismatchException`，回 400 與固定 detail「Invalid request parameter」，不得回傳 raw value 或型別診斷；API logs controller 不新增局部 exception handler。此 framework 參數錯誤映射共用於 business controllers，既有業務例外映射不變。

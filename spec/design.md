@@ -14280,3 +14280,8 @@ STRATEGIC_PRICE僅執行原政策適用symbols規則；00881不在D188 price_pos
 ## Task 613：SRPP publisher 阻擋原因傳輸正規化
 
 `SrppReportPublisher` 在 shared calculation 回傳後及 consumer compose 後，以純函式 wire adapter 深拷貝 modules，僅對 `data.legs[].blockingReasons` 的完整字串 stable-distinct。首次出現的順序保留；每 gate 的收據仍逐筆保留，因此多個 gate 共缺 topup-state 仍可逐項稽核。正規化後才產生 modules JCS／base hash／envelope content hash 並 insert。既有 immutable base/package 讀回不改；新 build identity 是原 fingerprint 的既有 authority 輸入，不另加政策或 DB 欄位。calculator、數值與阻擋不變量不重算，不放寬 BFF。錯誤型別或缺少原欄位不由 adapter 修補，仍交既有驗證拒絕。
+
+
+## Task 614：SRPP 大型報告的 gateway 串流傳輸
+
+僅在 Nginx 既有 exact `/api/public/srpp/report-calculations` 與 `/api/public/srpp/us-report-calculations` 兩個 location 設 `proxy_buffering off`。既有 BFF 完整驗證後的 body 由 Nginx 直接轉送，不落 proxy_temp；不改 BFF 驗證或金融內容，不承諾上游斷線仍成功。其他 route 與 Nginx 全域設定、16 MiB tmpfs、timeout、method 與權限不變。慢 consumer 的背壓由既有串流承接，兩份大型包不再共同占滿 temp disk。回歸使用獨立 Docker network、無 host port 的 synthetic upstream 與 Nginx，只對測試容器施 16 MiB tmpfs／慢讀 socket，不讀正式 DB／憑證，不改正式 stack。測試 baseline 僅還原這兩條 buffering 設定，保留原 allowlist 跑實際 HTTP 矩陣。
