@@ -6092,6 +6092,8 @@ const belongsToRow = p && p.tradingDate === latest.value?.snapshotDate
 
 **Task 517 authority 發布補充：**兩軌共用 API-first／通膨可比證據／額度收據機械檢核完成後，以獨立審查並凍結的 SRPP source commit 為唯一來源，同步新規則包 identity；本次不改投資門檻、模型計算、金融 API 契約或 producer。完整 model/manifest bytes 與 bundle hash 必經既有 gate，生成原 22 案例 golden 及 insert-only registry SQL，不手填新 hash。既有 state-topup fixture 若有可由 Git 歷史證實的單一 calculator source-hash metadata 漂移，須原生成器隔離預覽證明全部22案例不變後才同步，不更動金融 expected。兩 repo main 已提交、no-ff merge、push 且 remote 回讀後才登錄新 row；正式容器僅從乾淨 asset main 重建。今日合法窗口內須以新 hash 真 GET 與同 run ID 讀回驗證，13:30 後維持 NOT_YET_EXECUTED，不以舊 hash 或靜態證據代替。
 
+**Task 613 發布格式修正：**同一缺失來源可使多個獨立 gate 產生相同阻擋原因；新發布的 shared module 與 consumer envelope 在 publisher wire adapter 中，對每腿 `blockingReasons` 依首次出現順序保留唯一完整字串。全部 gate receipts、missing、reasonCodes、狀態、股數、限價及金額原樣保留；不把 BLOCKED／UNAVAILABLE 轉成可執行。正規化在 canonical/hash/insert 前完成且不改 calculator 原輸出；既有 immutable base/package 不覆寫。BFF 仍拒絕重複原因、未知欄位及錯誤 hash；不改金融公式、formula manifest、政策包、Swagger、owner 或 GET 純讀邊界。publisher build identity 自動區分新產物，讓背景排程正常產生新包；舊 run ID 仍讀舊 bytes。以真共同缺源 D215/D226、publisher→BFF round trip 及重複原因攻擊回歸驗證。
+
 ### Requirement 188／Tasks 490、493：API logs 的 API 名稱「全部」篩選與 30 天保留確認
 
 Task 493 的 business 參數型別轉換錯誤由既有 `GlobalExceptionHandler` 統一處理 `MethodArgumentTypeMismatchException`，回 400 與固定 detail「Invalid request parameter」，不得回傳 raw value 或型別診斷；API logs controller 不新增局部 exception handler。此 framework 參數錯誤映射共用於 business controllers，既有業務例外映射不變。

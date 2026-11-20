@@ -14275,3 +14275,8 @@ STRATEGIC_PRICE僅執行原政策適用symbols規則；00881不在D188 price_pos
 - **API：** `FubonScheduleSwitchController`（`/api/settings/fubon-schedule-switches`）：GET 已登入者；PUT `/{scheduleKey}` 以 `CurrentUserContext.isAdmin()` 擋非管理者，未知 key 404。
 - **BFF：** `FubonApiInfoBffController` 靜態清單 DTO 新增 `scheduleKey`（依 sdkReference 對照，見任務檔）；新增 `FubonScheduleSwitchBffController`（`/api/bff/fubon-api/schedule-switches`）WebClient 轉呼 business；SecurityConfig 沿用 `PUT` 限 ADMIN 規則。
 - **前端：** `FubonApiView.vue` 加「排程開關」欄與 `bffApi.fubonApi.scheduleSwitches.get/put`；以 `scheduleKey` 對應開關狀態，非管理者 `disabled`。
+
+
+## Task 613：SRPP publisher 阻擋原因傳輸正規化
+
+`SrppReportPublisher` 在 shared calculation 回傳後及 consumer compose 後，以純函式 wire adapter 深拷貝 modules，僅對 `data.legs[].blockingReasons` 的完整字串 stable-distinct。首次出現的順序保留；每 gate 的收據仍逐筆保留，因此多個 gate 共缺 topup-state 仍可逐項稽核。正規化後才產生 modules JCS／base hash／envelope content hash 並 insert。既有 immutable base/package 讀回不改；新 build identity 是原 fingerprint 的既有 authority 輸入，不另加政策或 DB 欄位。calculator、數值與阻擋不變量不重算，不放寬 BFF。錯誤型別或缺少原欄位不由 adapter 修補，仍交既有驗證拒絕。
