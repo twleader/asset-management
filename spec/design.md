@@ -14285,3 +14285,7 @@ STRATEGIC_PRICE僅執行原政策適用symbols規則；00881不在D188 price_pos
 ## Task 614：SRPP 大型報告的 gateway 串流傳輸
 
 僅在 Nginx 既有 exact `/api/public/srpp/report-calculations` 與 `/api/public/srpp/us-report-calculations` 兩個 location 設 `proxy_buffering off`。既有 BFF 完整驗證後的 body 由 Nginx 直接轉送，不落 proxy_temp；不改 BFF 驗證或金融內容，不承諾上游斷線仍成功。其他 route 與 Nginx 全域設定、16 MiB tmpfs、timeout、method 與權限不變。慢 consumer 的背壓由既有串流承接，兩份大型包不再共同占滿 temp disk。回歸使用獨立 Docker network、無 host port 的 synthetic upstream 與 Nginx，只對測試容器施 16 MiB tmpfs／慢讀 socket，不讀正式 DB／憑證，不改正式 stack。測試 baseline 僅還原這兩條 buffering 設定，保留原 allowlist 跑實際 HTTP 矩陣。
+
+## Requirement 219／Task 615：D-227 台股高檔門檻證據
+
+日報沿用 CORE_SELL_GUARD 的通用 receipts.values 契約。只在 D-227 bundle 啟用時，從凍結的同 owner 台股正持倉及既有市場 sources 回傳 D227:<symbol>。驗證雷達 identity、交易日、版本、資料完整、即時性，並檢查兩數值範圍。正向門檻收據只代表兩項數字達標，對缺少 D-174 watch state 的報告也能獨立評估。D-227 收據值使用 d227DValue（PERCENT，0–100）及 d227Week52Position（RATIO，0–1），原本封閉的 data.facts、scope 與模組覆蓋只按 D-174 原義解讀。純報告組裝器將獨立計算的 D-227 收據加到 D-174 模組，D-174 觀察帳本缺口不影響該組裝。D-227 政策鍵位於 D-174 設定之外，沿用既有 D-174 watch 指紋與 registry 公式 V3 的精確內容。新 bundle 綁定 D-227 政策與 SRPP verifier 來源，並同步更新 policy authority 及測試資料。SRPP verifier 獨立核對同一凍結來源，將此證據標為觀察。D-227 的週期、市場方向、LLM 採納及執行條件由 SRPP 同輪判定。沿用既有 envelope、OpenAPI、路由、券商及寄信界線。

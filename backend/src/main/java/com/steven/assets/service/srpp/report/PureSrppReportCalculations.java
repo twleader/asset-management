@@ -11,6 +11,9 @@ import org.springframework.stereotype.Component;
 @Component
 public class PureSrppReportCalculations implements SrppReportCalculationPort {
     public ArrayNode shared(Frozen input, Policy policy, JsonNode model, SupportedPolicy supported, JsonNode extra) { return SrppReportModuleCalculator.calculateShared(input,policy,model,supported,extra); }
-    public ObjectNode core(Frozen input, JsonNode model, JsonNode state, String consumer) { return SrppReportModuleCalculator.calculateCore(input,model,state,consumer); }
+    public ObjectNode core(Frozen input, JsonNode model, JsonNode state, String consumer) {
+        ObjectNode core = SrppReportModuleCalculator.calculateCore(input, model, state, consumer);
+        return SrppBearHighSellObservations.attach(core, input, model);
+    }
     public ArrayNode compose(ArrayNode shared, ObjectNode core) { return SrppReportModuleCalculator.compose(shared,core); }
 }
