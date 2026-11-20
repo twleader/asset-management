@@ -37,6 +37,60 @@ class SrppReportModuleCalculatorTest {
         assertThat(count).isEqualTo(111);
     }
     @Test void formalTargetsAndRegistryArtifactUseExactCurrentAuthorityBytes()throws Exception{JsonNode model=model();JsonNode artifact=SrppJcs.parseStrict(new String(getClass().getResourceAsStream("/srpp/report/d201-policy-document.json").readAllBytes(),java.nio.charset.StandardCharsets.UTF_8));assertThat(SrppReportModuleCalculator.registryDocument(model)).isEqualTo(artifact);assertThat(SrppReportModuleCalculator.formalTargets(model).path("00865B").asText()).isEqualTo("0.025");assertThat(SrppReportModuleCalculator.targetAllocationSha256(model)).matches("[a-f0-9]{64}");assertThat(SrppPolicyDocument.parse(SrppJcs.canonicalize(artifact)).targets()).hasSize(18);}
+    @Test void d227PublishesOnlyExactTaiwanThresholdObservationsIndependentlyOfD174Watch() throws Exception {
+        FrozenFixture base = fixture();
+        ObjectNode input = base.frozen.input().deepCopy();
+        ObjectNode sources = (ObjectNode) input.path("sources");
+        ObjectNode vector = base.frozen.sourceVector().deepCopy();
+        ArrayNode holdings = (ArrayNode) sources.path("assets").path("snapshot").path("stocks");
+        holdings.addObject().put("stockCode", "0050").put("market", "台股").put("shares", "100");
+        holdings.addObject().put("stockCode", "0000").put("market", "台股").put("shares", "0");
+        holdings.addObject().put("stockCode", "VOO").put("market", "美股").put("shares", "100");
+        String sourceId = "market:台股:0050";
+        ObjectNode body = sources.putObject(sourceId).put("symbol", "0050").put("market", "台股");
+        vector.putObject(sourceId).put("sourceId", sourceId);
+        ObjectNode radar = body.putObject("radar").put("ruleVersion", "fixture")
+                .put("actionPolicyVersion", "EVIDENCE_GATE_V1").put("generatedAt", "2026-10-08T11:59:00");
+        ObjectNode stock = radar.putObject("stock").put("stockCode", "0050").put("market", "台股")
+                .put("asOfDate", "2026-10-08").put("quoteStatus", "LIVE").put("dataComplete", true)
+                .put("dValue", "80.001").put("week52Position", "0.80");
+        var frozen = new DecisionInputCapturePort.Frozen(base.frozen.facts(), input, vector, 1, base.frozen.assetGeneratedAt());
+        ObjectNode configured = model().deepCopy();
+        ObjectNode execution = (ObjectNode) configured.path("execution_policy");
+        execution.putObject("bear_high_sell_d227").put("decision", "D-227").put("market", "台股")
+                .put("minimum_d_exclusive", 80).put("minimum_week52_position_inclusive", new BigDecimal("0.80"));
+        JsonNode module = new PureSrppReportCalculations().core(frozen, configured, NullNode.instance, "Codex");
+        assertThat(module.path("status").asText()).isEqualTo("UNAVAILABLE");
+        assertThat(module.path("scope").get(0).asText()).isEqualTo("D174_CONSUMER_ISOLATED_HIGH_WATER_AND_KD");
+        assertThat(module.path("data").path("facts").isEmpty()).isTrue();
+        assertThat(module.path("data").path("legs").isEmpty()).isTrue();
+        assertThat(module.path("receipts").size()).isEqualTo(1);
+        JsonNode receipt = module.path("receipts").get(0);
+        assertThat(receipt.path("ruleId").asText()).isEqualTo("D227:0050");
+        assertThat(receipt.path("status").asText()).isEqualTo("PASS");
+        assertThat(receipt.path("reason").asText()).isEqualTo("D227_THRESHOLDS_MET_REGIME_AND_LLM_REQUIRED");
+        assertThat(receipt.path("inputRefs").toString()).isEqualTo("[\"assets\",\"market:台股:0050\",\"policy\"]");
+        assertThat(receipt.path("values").get(0).path("value").asText()).isEqualTo("80.001");
+        assertThat(receipt.path("values").get(1).path("value").asText()).isEqualTo("0.8");
+        stock.put("dValue", "80");
+        assertThat(d227Receipt(base.frozen, input, vector, configured).path("status").asText()).isEqualTo("BLOCK");
+        stock.put("dValue", "80.001").put("week52Position", "0.7999");
+        assertThat(d227Receipt(base.frozen, input, vector, configured).path("status").asText()).isEqualTo("BLOCK");
+        stock.put("week52Position", "0.8").put("stockCode", "00881");
+        receipt = d227Receipt(base.frozen, input, vector, configured);
+        assertThat(receipt.path("status").asText()).isEqualTo("UNAVAILABLE");
+        assertThat(receipt.path("values").isEmpty()).isTrue();
+        execution.remove("bear_high_sell_d227");
+        assertThat(new PureSrppReportCalculations().core(frozen, configured, NullNode.instance, "Codex")
+                .path("receipts").isEmpty()).isTrue();
+    }
+
+    private static JsonNode d227Receipt(DecisionInputCapturePort.Frozen template, ObjectNode input,
+            ObjectNode vector, JsonNode configured) {
+        var frozen = new DecisionInputCapturePort.Frozen(template.facts(), input, vector, 1, template.assetGeneratedAt());
+        return new PureSrppReportCalculations().core(frozen, configured, NullNode.instance, "Codex").path("receipts").get(0);
+    }
+
     @Test void d211ScopeCannotBeBypassedWithMissingOrUnknownMarket() throws Exception {
         JsonNode all=MAPPER.readTree(getClass().getResourceAsStream("/srpp/report-same-input-golden.json"));
         JsonNode c=java.util.stream.StreamSupport.stream(all.path("cases").spliterator(),false)
