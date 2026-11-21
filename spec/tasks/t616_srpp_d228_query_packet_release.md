@@ -16,11 +16,11 @@ root `/Users/steven/Project/SRPP/.claude/worktrees/srpp-schedule-check-42107e`�
 
 ## 要做什麼
 
-- [ ] 616.1 先spec-check及作者以外的唯讀spec審查，記錄通過後才同步backend。來源只用上述root凍結；policy 2.75.0／model 3.25.0維持，model_inputs、formula manifest、Swagger、schema、targets、Java與DB均不變。
-- [ ] 616.2 同步凍結`assumptions/policy_manifest.json`原始bytes至backend決策resource（model同值不改）。原Ruby stdout產受追蹤d201-registration.sql，原Python重產report-same-input與long-short-exit golden（只應變bundle行），並以authority gate驗證。
-- [ ] 616.3 authority gate、golden checks、Ruby registry、focused Java與backend package通過；保存新的source／bytes證據。
-- [ ] 616.4 順序為離線驗收→雙repo各feature commit／main no-ff merge／push及精確remote讀回→已合併SQL insert-only registry；精確核新hash的policy_bundle_sha256／formula_version／policy_document／formula_manifest且舊rows全文不變。
-- [ ] 616.5 由run-stack從乾淨正式asset main與原設定，只build／force-recreate business-services；重建前以唯讀證據確認台股與美股報告均未執行中（無活動報告、守門員未在處理），證明各啟動入口為no-op，並依本輪有效排程與時區確認整段「recreate→JAR bytes讀回→日報工作區`--ff-only`快轉」不跨入台股報告與守門員窗（09:05–13:10）、美股報告窗（22:35–23:45）及各匯出排程分鐘（匯出分鐘另行避讓）；證據不足或時間不夠安全時停止並保留已落地的main與registry row，不強行切換。重建後核對容器／JAR內嵌bytes，並立即快轉日報工作區`/Users/steven/Project/SRPP`（舊hash在新JAR上回409，兩步之間不得留空窗）。從SRPP實測9090連線。
+- [x] 616.1 先spec-check及作者以外的唯讀spec審查，記錄通過後才同步backend。來源只用上述root凍結；policy 2.75.0／model 3.25.0維持，model_inputs、formula manifest、Swagger、schema、targets、Java與DB均不變。
+- [x] 616.2 同步凍結`assumptions/policy_manifest.json`原始bytes至backend決策resource（model同值不改）。原Ruby stdout產受追蹤d201-registration.sql，原Python重產report-same-input與long-short-exit golden（只應變bundle行），並以authority gate驗證。
+- [x] 616.3 authority gate、golden checks、Ruby registry、focused Java與backend package通過；保存新的source／bytes證據。
+- [x] 616.4 順序為離線驗收→雙repo各feature commit／main no-ff merge／push及精確remote讀回→已合併SQL insert-only registry；精確核新hash的policy_bundle_sha256／formula_version／policy_document／formula_manifest且舊rows全文不變。
+- [x] 616.5 由run-stack從乾淨正式asset main與原設定，只build／force-recreate business-services；重建前以唯讀證據確認台股與美股報告均未執行中（無活動報告、守門員未在處理），證明各啟動入口為no-op，並依本輪有效排程與時區確認整段「recreate→JAR bytes讀回→日報工作區`--ff-only`快轉」不跨入台股報告與守門員窗（09:05–13:10）、美股報告窗（22:35–23:45）及各匯出排程分鐘（匯出分鐘另行避讓）；證據不足或時間不夠安全時停止並保留已落地的main與registry row，不強行切換。重建後核對容器／JAR內嵌bytes，並立即快轉日報工作區`/Users/steven/Project/SRPP`（舊hash在新JAR上回409，兩步之間不得留空窗）。從SRPP實測9090連線。
 
 ## 驗證
 
@@ -40,4 +40,13 @@ git diff --check
 
 ## 完成報告
 
-待實作及正式驗收。
+2026-11-21（Asia/Taipei）完成D-228規則包身分發布。**新hash的正式日報採用為 NOT_YET_EXECUTED；台股報價GET週六回200空陣列，連線收據整體FAIL（見下），週一交易日複查。**
+
+- **身分。** policy 2.75.0／model 3.25.0維持，新bundle `565ac5c1de6f402dbfc5d872109fef843a3bdceecafe3defbad3a5291ae7b860`（舊 `8d260b093fa15868ee8b0bea578c0e95a6842f378db6882f39a7e99d0d99bcff`）。Swagger／schema／model_inputs位元組不變。
+- **來源補充。** 發布前實時工作區的未提交變更含兩個未追蹤檔（`scripts/rule_query.py`、`scripts/test_rule_query.py`），單用`git diff`會漏；補入後bundle重建結果與實時工作區manifest一致（565ac5c1）。
+- **審查。** Codex spec審查第1輪CHANGES_REQUESTED（major：616.5缺進行中報告與報告時窗保護）已修，第2輪PASS。
+- **離線驗收。** spec-check BLOCK0／CHECK1；authority gate PASS；report／long-short／state-topup golden `--check` 通過（兩份golden只變bundle行）；Ruby registry與authority／golden測試通過；focused Java 90案中`SrppRadarPolicyCompatibilityTest.topupDecisionAcceptsV2WithEachConservativeOfficialSmaStatus`失敗，於未含本變更的乾淨main同樣失敗且失敗訊息逐字相同，屬既有問題未處理；backend package通過。
+- **Git與registry。** SRPP feature `3d1b9f3`、main／remote `9eb0e04`；資產feature `b2270e89`、main／remote `13c94994`；兩repo `--no-ff` merge、push並以`ls-remote`讀回，合併後manifest位元組與SRPP main相同。19:50由已合併SQL單一交易insert-only登錄（registry 67→68，舊row全文不變，新row四欄與SQL字面一致，formula_version ASSET_MGMT_SRPP_V3）。
+- **部署。** 19:50–19:51從乾淨資產main只build／force-recreate business-services（image `sha256:4f3e4561…`），其他容器清單不變；JAR內嵌`policy_manifest.json`、`model_inputs.json`、`9090-api-swagger.md`、`d201-registration.sql`與來源逐位元相同；啟動日誌僅skip台股備份（非交易日）與美股備份（已有紀錄），無副作用。同一分鐘以`--ff-only`快轉日報工作區`/Users/steven/Project/SRPP`至`9eb0e04`（先驗證其未提交修改與main位元組相同後還原，修改備份在session暫存）。
+- **9090實測。** 日曆200／365列、指數200／21列通過；`/api/quotes?market=台股`回200但0列（週六Redis快取過期的既有現象），連線收據整體FAIL，不作PASS宣稱；收據在SRPP `data/output/diagnostics/2026-11-21-d228-release/9090-connectivity.json`。
+- **未完成。** 本機兩份Claude SKILL部署檔（`/Users/steven/Claude/Scheduled/srpp-*-claude/SKILL.md`）與入口正本不同，`verify_runtime_policy.py`回`RUNTIME_POLICY_MISMATCH: srpp-0905-claude host skill differs`，待使用者決定是否部署；遠端routine不讀此檔。
