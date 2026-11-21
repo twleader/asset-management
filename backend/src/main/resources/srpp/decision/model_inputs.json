@@ -2479,7 +2479,7 @@
       "post_buy_term_deposit_floor_twd_2026_real": 800000,
       "post_buy_total_twd_deposit_floor_twd_2026_real": 3050000,
       "bond_sale_max_share": 0.6666666666666666,
-      "total_bond_floor": 0.03,
+      "total_bond_floor": 0.05,
       "equity_cap": 0.6,
       "deep_drawdown": 0.3,
       "deep_equity_cap": 0.7,
