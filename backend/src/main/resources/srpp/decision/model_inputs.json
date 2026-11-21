@@ -1785,7 +1785,26 @@
         "maximum_rounds": 1,
         "scope": "only executable Tier A rows whose applicable freshness window requires refresh",
         "do_not_wait_for_fixed_minute": true,
-        "reuse_if_d175_freshness_passes": true
+        "reuse_if_d175_freshness_passes": true,
+        "per_symbol_refresh_follows": "api_refetch_d232"
+      },
+      "api_refetch_d232": {
+        "decision": "D-232",
+        "applies_to": "every read-only 9090 GET of the 09:05, 12:00 and US reports",
+        "refetch_on": ["TRANSPORT_FAILURE", "TIMEOUT", "HTTP_202", "HTTP_429", "HTTP_500", "HTTP_502", "HTTP_503", "HTTP_504", "HTTP_200_EMPTY_OR_NOT_JSON", "QUOTE_ROW_STALE_OR_MISSING"],
+        "never_refetch": ["HTTP_400", "HTTP_401", "HTTP_403", "HTTP_404", "HTTP_405", "HTTP_409", "HTTP_410", "HTTP_422", "IDENTITY_OR_HASH_MISMATCH", "VERIFIED_BLOCKED"],
+        "same_entry_path_and_query": true,
+        "max_attempts_per_request": 4,
+        "backoff_seconds": [10, 30, 60],
+        "retry_after_cap_seconds": 60,
+        "single_quote_max_calls_per_symbol": 3,
+        "single_quote_min_interval_seconds": 20,
+        "no_attempt_at_or_after_minute": 35,
+        "extends_deadlines": false,
+        "unblocks_verified_blocked": false,
+        "adopt": "last successful response that passes the original verifier",
+        "record": "report_facts.json.api_calculations.attempts and timing.json",
+        "client": "scripts/fetch_9090.py"
       },
       "structured_report_rendering_d176": {
         "input": "one frozen report_facts.json with shared decision_id and INPUT_SNAPSHOT_SHA256",
