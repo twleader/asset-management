@@ -1103,7 +1103,7 @@
   "originalCalculatorHashes": {
     "bear_ladder.py": "c299f52e4cb8162548b4cc1e768b891e7140ebc3f21c7dfb18656c2b1efa3f84",
     "execution_policy.py": "66a86a9716acaf564fe76c23ac7f1e64964fd84a14f2eee4e748830257cfc4d1",
-    "transition_ledger.py": "5760f96ee5c68e47a15fc44e62ef0c3dbfea6e2b86d9dbb8fb86081a908810d1"
+    "transition_ledger.py": "d77697d00bf8649a0989607f540b626245b239b79fe71784fab3e2ab69567a91"
   },
   "schema": "SRPP_STATE_TOPUP_GOLDEN_V1"
 }
