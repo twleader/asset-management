@@ -314,7 +314,7 @@
       "context": "Steven's view: TAIEX is plausibly about to cross 50,000 points in a primary upward leg. He asked whether under-target positions can be topped up first, deferring the zero-target/legacy exit sales (006208, 00882, 009804, 2330, 2881, 2885, 2891, GOOGL, 00679B, 00751B, 00850) until after that leg completes, rather than treating a buy and a matched sell as required to occur together.",
       "rule": "This requires no gate relaxation; buys and exits already qualify independently. (1) Topping up an under-target holding (VOO's D-141 build cadence, VT's D-183 not-overheated exemption, 009826's D-143 cadence, and the four-fund high-dividend group's D-170 daily pullback top-up tiers, e.g. 00713 buying more on a deeper pullback) is funded from available cash, deposits and STOCK_ROTATION_RESERVE; it never requires a same-round matched sale of a zero-target/legacy holding. (2) Zero-target and over-limit exits remain governed only by their own D-153/D-161 high-point overheat arming and D-174 CORE_SELL_READY confirmation; they must never be sold merely because a matched buyer happens to be available this round, and never forced by a checkpoint date (D-109's priority-checkpoint dates remain management triggers, not deadlines).",
       "priority": "While a broad-market primary upward leg is plausibly still in progress (i.e. before any of the zero-target/legacy holdings individually reach their own confirmed D-153/D-161/D-174 high-overheat exit condition), daily reports should prioritize evaluating and filling under-target gaps over prospecting for a matched zero-target seller. A holding that separately reaches its own qualified high-point exit condition may still exit on its own schedule regardless of buy-side timing; its proceeds park in STOCK_ROTATION_RESERVE, subject to the applicable equity floor, if no buyer is immediately ready.",
-      "no_new_authority": "This does not relax any funding floor, individual/group capacity cap, the strategic equity target (56.53% under D-214), the 50%-60% ordinary rebalancing band, the 40% pre-retirement rotation floor, or any other existing hard gate. A buy that would breach a cap or funding floor is still capped or blocked exactly as before; nothing here authorizes chasing a rally or forcing an unqualified sale."
+      "no_new_authority": "This does not relax any funding floor, individual/group capacity cap, the strategic equity target (59.50% under D-224), the 50%-60% ordinary rebalancing band, the 40% pre-retirement rotation floor, or any other existing hard gate. A buy that would breach a cap or funding floor is still capped or blocked exactly as before; nothing here authorizes chasing a rally or forcing an unqualified sale."
     },
     "us_buy_and_hold_whitelist_d110": [
       "VOO",
@@ -509,7 +509,7 @@
       "SGOV_role": "D-185: raised from 1% to 2%, funded from the 00697B cut, with new purchases allowed through its separate U.S. strategic-buy path. SGOV does not use the D-130 Taiwan-listed daily bond cadence. Its separate age-70-to-80 disposal rule is unaffected.",
       "00697B_target_reduction_note": "00697B (intermediate-duration, rate-sensitive) cut from 8% to 2% under D-185; Steven wants only a small strategic holding there. The freed 6 percentage points split 5pp to 00719B and 1pp to SGOV.",
       "00697B_target": 0.02,
-      "purpose": "Increase spendable distributions while preserving the 26.47% total bond-ETF bucket (D-214; 28% before 2026-11-13); 00865B NAV growth remains noncash until units are sold.",
+      "purpose": "Increase spendable distributions while preserving the 23.50% strategic bond-ETF bucket (D-224; 26.47% under D-214, 28% before 2026-11-13); 00865B NAV growth remains noncash until units are sold.",
       "d214_note": "D-214 (2026-11-13): Steven cut 00865B from 6.333333% to 2.5% and raised 00719B from 17.666667% to 19.97%; SGOV 2% and 00697B 2% are unchanged, so the bond-ETF bucket is 26.47%."
     },
     "retirement_date_d111": "2027-06-30",
@@ -850,7 +850,7 @@
     "annual_projection_source": "data/output/annual_cash_income_projection.csv",
     "annual_asset_basis": "Each retirement plan year's path-wise average opening and closing asset balance.",
     "annual_allocation_basis": "Each P10 or median disclosure uses the asset balance and whole-portfolio equity, bond and cash-like weights from the same empirical spendable-cash-income path. Source accrual includes emergency term-deposit interest and all security distributions for tax. Emergency term-deposit interest is excluded from spendable income; strategic SGOV cash distributions are included because they are spent. Emergency 00865B pays no cash distribution; its separately reconciled TWD market value is checked annually and any target gap is planned outside the baseline model. Accepted detailed holdings remain proportionally mapped within each bucket until a semiannual Accepted target review changes them.",
-    "annual_rate_refresh": "Every model run fetches /api/assets/latest and retrieves ten rolling anniversary periods for every current and final security through /api/quotes/one for historical disclosure and volatility. D-192 stocks use a target-weighted 10-year institutional nominal forecast converted to a 3.480533% real composite (D-220 targets) at 2.25% midpoint inflation, with 1.5%/6.0% real stress sensitivities, then deduct the 009826 target-weighted incremental disclosed wrapper-fee drag; the preceding-eight-period average is diagnostic only. The shared equity factor cannot distinguish VOO from Taiwan or 00881 risk. Bond forward means use current actual-holdings YTM, effective duration and expenses from assumptions/bond_forward_yields.json, with a 45-day freshness gate. U.S. distribution JSON fallback is permitted only when API coverage is incomplete. Refresh again at every semiannual review and Accepted target change.",
+    "annual_rate_refresh": "Every model run fetches /api/assets/latest and retrieves ten rolling anniversary periods for every current and final security through /api/quotes/one for historical disclosure and volatility. D-192 stocks use a target-weighted 10-year institutional nominal forecast converted to a 3.462966% real composite (D-224 targets) at 2.25% midpoint inflation, with 1.5%/6.0% real stress sensitivities, then deduct the 009826 target-weighted incremental disclosed wrapper-fee drag; the preceding-eight-period average is diagnostic only. The shared equity factor cannot distinguish VOO from Taiwan or 00881 risk. Bond forward means use current actual-holdings YTM, effective duration and expenses from assumptions/bond_forward_yields.json, with a 45-day freshness gate. U.S. distribution JSON fallback is permitted only when API coverage is incomplete. Refresh again at every semiannual review and Accepted target change.",
     "regular_cash_yield_exclusions": [
       "00865B",
       "demand_deposits_and_cash"
@@ -873,7 +873,7 @@
     "annual_spending_age_80_to_age_90": 1400000,
     "market_conditioned_spending_adjustment_twd_2026_real": 50000,
     "annual_labor_insurance_from_age_60": 192163.2,
-    "note": "D-194 keeps the path-wise D-139 cashflow method, applies the age-75 and age-80 spending tiers plus confirmed monthly bear/bull spending adjustments, deducts all modeled recurring taxes, reduces distributions in bear states, and books the 2030-10-16 TWD 1.4M car separately once from existing liquidity when it precedes the labor-pension receipt. Labor insurance starts no earlier than age 60 and after withdrawal from insured employment; the permanent age adjustment is prorated by completed claim-age months against age 65 and capped at 20% early or late. The later single receipt enters cash and is allocated only under then-applicable capacity and market rules. Under D-214 VOO is the 21.97% global core, VT is a 2.5% global satellite, and 009826 is a 2.5% accumulating satellite with zero investor cash distribution. All ten periods remain visible as history; stock forward returns use the D-192 target-weighted 10-year institutional forecast (3.480533% real before the 009826 wrapper overlay under D-214 targets; stress cases 1.5%/6.0%), and bonds use current holdings YTM. Nominal income is never compared directly with 2026-08-real spending."
+    "note": "D-194 keeps the path-wise D-139 cashflow method, applies the age-75 and age-80 spending tiers plus confirmed monthly bear/bull spending adjustments, deducts all modeled recurring taxes, reduces distributions in bear states, and books the 2030-10-16 TWD 1.4M car separately once from existing liquidity when it precedes the labor-pension receipt. Labor insurance starts no earlier than age 60 and after withdrawal from insured employment; the permanent age adjustment is prorated by completed claim-age months against age 65 and capped at 20% early or late. The later single receipt enters cash and is allocated only under then-applicable capacity and market rules. Under D-214 VOO is the 21.97% global core, VT is a 2.5% global satellite, and 009826 is a 2.5% accumulating satellite with zero investor cash distribution. All ten periods remain visible as history; stock forward returns use the D-192 target-weighted 10-year institutional forecast (3.462966% real before the 009826 wrapper overlay under D-224 targets; stress cases 1.5%/6.0%), and bonds use current holdings YTM. Nominal income is never compared directly with 2026-08-real spending."
   },
   "asset_assumptions": {
     "equity": {
@@ -923,9 +923,9 @@
       "volatility_floor": null,
       "volatility_source": "data/input/台幣兌美元_1_20260829.json ten-year daily mid-rate log returns (2,495 observations)",
       "volatility": 0.0395823692848601,
-      "equity_exposure": 0.4422430567840085,
+      "equity_exposure": 0.44487394957983193,
       "bond_exposure": 1.0,
-      "equity_exposure_note": "25/56.53 (D-220; 37/55 before 2026-11-13) is the target benchmark exposure for calibration only. Runtime converts each actual security by its verified overseas exposure and then aggregates the resulting holdings; it never applies the final target FX weight to the entire transition portfolio."
+      "equity_exposure_note": "26.47/59.50 (D-224; 25/56.53 under D-220, 37/55 before 2026-11-13) is the target benchmark exposure for calibration only. Runtime converts each actual security by its verified overseas exposure and then aggregates the resulting holdings; it never applies the final target FX weight to the entire transition portfolio."
     }
   },
   "bond_forward_assumptions": {
@@ -1170,22 +1170,22 @@
       "additional_overheat_equity_floor": 0.45,
       "bull_reduced_target_release": "D-156 retains one locked release budget (equity above the 50% floor) but replaces immediate selling into successive highs with profit capture after a high-water reversal. Each of five growing tranches requires its gain-above-anchor rung and its pullback-from-high-water rung; new highs ratchet the watermark and continue to hold. A 10% correction evaluates at most the next eligible tranche, then closes the window without forcing the remainder. See bull_ladder_d156. The 45% additional-overheat floor and no-automatic-below-40% protection remain discretionary extensions beyond this ladder.",
       "total_bond_floor": 0.05,
-      "total_bond_cap": 0.31,
+      "total_bond_cap": 0.28,
       "bond_allocation_band_d143": {
         "strategic_target": 0.235,
-        "normal_rebalance_floor": 0.24,
-        "normal_rebalance_cap": 0.31,
-        "cash_floor_aware_target_formula": "min(26.47%, 100% - protected_cash_weight - 56.53% equity target)",
-        "cash_floor_aware_floor_formula": "min(24%, 100% - protected_cash_weight - 60% equity cap)",
-        "cash_floor_aware_cap_formula": "min(31%, 100% - protected_cash_weight - 50% equity floor)",
+        "normal_rebalance_floor": 0.21,
+        "normal_rebalance_cap": 0.28,
+        "cash_floor_aware_target_formula": "min(23.5%, 100% - protected_cash_weight - 59.5% equity target)",
+        "cash_floor_aware_floor_formula": "min(21%, 100% - protected_cash_weight - 60% equity cap)",
+        "cash_floor_aware_cap_formula": "min(28%, 100% - protected_cash_weight - 50% equity floor)",
         "transition_rotation_cap_formula": "min(42%, 100% - protected_cash_weight - 40% pre-retirement rotation equity floor)",
         "absolute_bear_tactical_floor": 0.05,
-        "rule": "26.47% (D-214; 28% before 2026-11-13) remains the strategic target when the protected cash floor permits it. The 24%–31% normal band is cash-floor aware rather than a forced allocation; the 5% non-emergency bond floor is only a bear-sale safety floor, never a normal target."
+        "rule": "23.5% (D-224; 26.47% under D-214, 28% before 2026-11-13) remains the strategic target when the protected cash floor permits it. The 21%–28% normal band (D-231; 24%–31% before 2026-11-21) is cash-floor aware rather than a forced allocation; the 5% non-emergency bond floor is only a bear-sale safety floor, never a normal target."
       },
       "intermediate_bond_max_share_of_bonds": 0.3,
       "bear_bond_sale_max_share": 1.0,
       "historical_annual_bear_start_probability": 0.10084033613445378,
-      "note": "D-143 base uses only the 56.53% strategic target (D-214; 55% before 2026-11-13) and 50%-60% ordinary rebalancing band, with neither bull nor bear tactical timing. Monthly 3/6/9/12-month tactical results are paired, separately labeled sensitivities.",
+      "note": "D-143 base uses only the 59.50% strategic target (D-224; 56.53% under D-214, 55% before 2026-11-13) and 50%-60% ordinary rebalancing band, with neither bull nor bear tactical timing. Monthly 3/6/9/12-month tactical results are paired, separately labeled sensitivities.",
       "bear_stock_purchase_order_d143": {
         "step_1": {
           "target": "four-fund high-dividend group",
@@ -2577,7 +2577,7 @@
         },
         "deadline_rule": "While the waiver is active the 2330 D-132 management deadline (2027-06-15) and TIMEBOX_EXIT are suspended; when it ends, the deadline is extended by the number of calendar days the waiver was active. 2330 still may not be bought back.",
         "end_of_waiver_rule": "After waiver ends use the current D220 caps (0050 13%,00881 7.53%). Excess is trimmed only in a qualified high-zone reversal, never at lows.",
-        "scope": "Applies to the D-143/D-180 bear and D-212 correction purchase order (VOO:0050 legs) and to 0050/00881 allocation capacity; other caps, the global equity group, the equity target (56.53% under D-214) and the high-dividend 17% cap are unchanged. The static target_allocation_2027.csv upper bounds remain the waiver-inactive values.",
+        "scope": "Applies to the D-143/D-180 bear and D-212 correction purchase order (VOO:0050 legs) and to 0050/00881 allocation capacity; other caps, the global equity group, the equity target (59.50% under D-224) and the high-dividend 17% cap are unchanged. The static target_allocation_2027.csv upper bounds remain the waiver-inactive values.",
         "d214_caps_note": "D220 supersedes D214: targets0050 12% /00881 6.53%; ordinary caps target+1pp =13% /7.53%; active waiver takes the greater of ordinary and old waiver caps, so both remain13% /7.53%."
       },
       "aggregate_equity_hard_cap_enabled": false
