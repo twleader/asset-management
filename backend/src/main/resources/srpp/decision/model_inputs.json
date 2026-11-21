@@ -1806,6 +1806,25 @@
         "record": "report_facts.json.api_calculations.attempts and timing.json",
         "client": "scripts/fetch_9090.py"
       },
+      "rule_pack_agents_d233": {
+        "decision": "D-233",
+        "delegable_packs": ["usd_fx", "deep_drawdown", "voo_bridge", "high_dividend_stabilization", "cash_rotation", "correction_bear"],
+        "max_pack_agents": 2,
+        "counts_toward_max_concurrent_work": true,
+        "agent_inputs": "MAIN's frozen, already verified same-round evidence and that pack's candidate list only",
+        "agent_network_calls": false,
+        "agent_refetch": false,
+        "agent_reads": "daily_authority_packet.py --pack <id>, every batch, plus RULE_PACK_INDEX",
+        "result_verifier": "scripts/verify_pack_agent_result.py",
+        "result_deadline_minute": 35,
+        "fallback": "MAIN_READS_PACK_AND_EVALUATES",
+        "agent_may_raise_lots": false,
+        "agent_may_relax_core_gates": false,
+        "agent_may_unblock_blocked": false,
+        "agent_may_authorize_trade": false,
+        "final_decision_owner": "MAIN",
+        "public_research_and_decision_audit_unchanged": "parallel_execution_d176"
+      },
       "structured_report_rendering_d176": {
         "input": "one frozen report_facts.json with shared decision_id and INPUT_SNAPSHOT_SHA256",
         "renderer": "scripts/render_daily_report.py",
