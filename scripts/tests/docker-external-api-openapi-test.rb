@@ -242,7 +242,7 @@ end
 document = YAML.safe_load(File.read(OPENAPI), aliases: false)
 compose = YAML.safe_load(File.read(COMPOSE), aliases: false)
 assert!(document.fetch('openapi').to_s.match?(/\A3\./), 'OpenAPI 版本必須是 3.x')
-assert!(document.dig('info', 'version') == '1.28.4', 'Task 599 後 OpenAPI info.version 必須為 1.28.4')
+assert!(document.dig('info', 'version') == '1.29.0', 'Task 626 後 OpenAPI info.version 必須為 1.29.0')
 assert!(document['security'] == [], 'OpenAPI global security 必須明確為空陣列')
 
 server_urls = document.fetch('servers').map { |server| server.fetch('url') }
@@ -1013,9 +1013,26 @@ calendar_day = schemas.fetch('TradingCalendarDay')
 end
 
 # Task497: the two public responses are closed components, never a generic object escape hatch.
-assert!(openapi_routes.fetch(['GET', '/api/public/srpp/order-plan']).dig('responses', '200', 'content', 'application/json', 'schema') ==
-          {'$ref' => '#/components/schemas/SrppOrderPlanResponse'},
-        'order-plan 200 必須引用封閉 SrppOrderPlanResponse')
+# Task626: the same exact route answers v1 or v2 by projectionVersion; both roots are closed components.
+order_plan_200 = openapi_routes.fetch(['GET', '/api/public/srpp/order-plan']).dig('responses', '200', 'content', 'application/json', 'schema')
+assert!(order_plan_200.fetch('oneOf').map { |part| part.fetch('$ref') } ==
+          %w[#/components/schemas/SrppOrderPlanResponse #/components/schemas/SrppOrderPlanResponseV2],
+        'order-plan 200 必須 oneOf 封閉 v1 SrppOrderPlanResponse 與 v2 SrppOrderPlanResponseV2')
+order_plan_v2 = schemas.fetch('SrppOrderPlanResponseV2')
+assert!(order_plan_v2['additionalProperties'] == false &&
+        order_plan_v2.fetch('required') == %w[schemaVersion projectionVersion planId identity base asOf runStartedAt queryDeadline normalizedDecisions riskMode fundingCommitments funding refreshCaptures legs coverage executionScope tradeAuthorization placesOrders receiptRefs contentSha256] &&
+        order_plan_v2.dig('properties', 'schemaVersion', 'const') == '2' && !order_plan_v2.fetch('properties').key?('derivedRisk') &&
+        order_plan_v2.dig('properties', 'tradeAuthorization', 'const') == false && order_plan_v2.dig('properties', 'placesOrders', 'const') == false,
+        'Task626 v2 root 必須封閉、schemaVersion 2、無 derivedRisk 且兩旗標固定 false')
+leg_v2 = schemas.fetch('SrppOrderPlanLegV2')
+assert!(leg_v2['additionalProperties'] == false &&
+        leg_v2.fetch('required') == %w[legId market symbol action strategy refreshCandidate redecided verdict riskAffected baseLots baseUnits finalLots finalUnits finalLimitPrice finalAmount fees currency reasonCodes quoteCapture refreshCaptureRefs freshness settlement executable] &&
+        leg_v2.dig('properties', 'executable', 'const') == false && leg_v2.dig('properties', 'reasonCodes', 'items', 'type') == 'string' && !leg_v2.dig('properties', 'reasonCodes', 'items').key?('enum'),
+        'Task626 v2 leg 必須封閉、executable false、reasonCodes 為自由字串')
+v2_parameters = openapi_routes.fetch(['GET', '/api/public/srpp/order-plan']).fetch('parameters').select { |parameter| %w[projectionVersion riskMode riskTotalScore riskAssessedCount riskMaxCategoryScore riskReceiptSha256 runStartedAt fundingCommitments].include?(parameter.fetch('name')) }
+assert!(v2_parameters.length == 8 && v2_parameters.all? { |parameter| parameter.fetch('required') == false && parameter.fetch('in') == 'query' } &&
+        v2_parameters.find { |parameter| parameter.fetch('name') == 'fundingCommitments' }.fetch('description').include?('D-182'),
+        'Task626 八個 v2 query 參數 required:false，fundingCommitments 說明 D-182 台幣扣款')
 assert!(openapi_routes.fetch(['GET', '/api/public/srpp/symbol-rule-facts']).dig('responses', '200', 'content', 'application/json', 'schema') ==
           {'$ref' => '#/components/schemas/SrppSymbolRuleFactsResponse'},
         'symbol-rule-facts 200 必須引用封閉 SrppSymbolRuleFactsResponse')
@@ -1084,8 +1101,8 @@ assert!(facts_example.fetch('contentSha256') == Digest::SHA256.hexdigest(task497
         'Task497 A2 example 的 contentSha256 必須由 sealed body 的 JCS 實際重算')
 
 reachable_schemas = reachable_schema_names(document)
-assert!(reachable_schemas.length == 260,
-        "全量 strict audit 預期 260 個 reachable component schema，實際為 #{reachable_schemas.length}")
+assert!(reachable_schemas.length == 268,
+        "全量 strict audit 預期 268 個 reachable component schema，實際為 #{reachable_schemas.length}")
 reachable_schemas.each do |name|
   assert_schema_descriptions!(schemas.fetch(name), "components.schemas.#{name}")
 end
@@ -1162,9 +1179,12 @@ end
   'SrppReportFactAssetReconciliation' => %w[bankCurrencyBalanceOriginal bankCurrencyBalanceTwd bankCurrencyPayableOriginal bankCurrencyReceivableOriginal],
   'SrppReportFactCashIncome' => %w[spendableSgovGross domesticDividend domesticInterest savingsInterest otherDomesticIncome overseasIncome creditableForeignTax nhiChargeableIncome taxCalculation annualTaxPrepayments],
   'SrppReportFactPayrollCashflow' => %w[paymentCount payrollDetail calendarYearPayroll pensionReceipt],
-  'SrppReportFactGlobalEquityPace' => %w[consecutiveShortfalls],
+  'SrppReportFactGlobalEquityPace' => %w[consecutiveShortfalls ceilingLots remainingDayShares remainingWeekShares minOrderShares ceilingShares],
   'SrppReportFactRotationAndRegimeCapacity' => %w[nextBatch settledReserve overdueReserve]
 }.each { |name, fields| assert!((fields - schemas.fetch(name).dig('properties', 'name', 'enum')).empty?, 'report complete formal fact names') }
+assert!(schemas.fetch('SrppReportLeg').dig('properties', 'market', 'description').include?('SATELLITE_BUILD_D234') &&
+        schemas.fetch('SrppReportLeg').dig('properties', 'market', 'description').include?('FX_CONVERSION'), 'Task 623: the only US individual leg is the D-234 VT build ceiling with FX_CONVERSION')
+assert!(schemas.fetch('SrppReportLeg').dig('properties', 'receipts', 'description').include?('AFTER_CLOSE_INITIALIZATION_NON_EXECUTABLE'), 'Task 623: after-close satellite legs are named non-executable')
 assert!(schemas.fetch('SrppReportLeg').dig('properties', 'units', 'description').include?('SHORT_TERM_D173/BOND_SHORT_TERM_D185') &&
         schemas.fetch('SrppReportLeg').dig('properties', 'units', 'description').include?('9007199254740991'), 'TW short uses positive safe integer units only in exact strategies')
 assert!(schemas.fetch('SrppReportModulePayrollCashflow').fetch('description').include?('projection') &&
@@ -1299,7 +1319,7 @@ assert!(observer_op.dig('security') == [{'AiFlowToken' => []}], '專用觀測tok
 assert!(observation.dig('components','securitySchemes','AiFlowToken','name') == 'X-AI-Flow-Token', 'exact觀測header')
 assert!(frontend_nginx_app.include?('location = /api/srpp/ai-flow/events { return 404; }'), 'frontend exact deny AI ingress')
 assert!(bff_security.include?('"/api/srpp/ai-flow/events"') && bff_security.include?('"/api/bff/ai-flow/**"'), 'BFF producer及ADMIN頁路徑授權')
-assert!(document.dig('info', 'version') == '1.28.4', 'Task599 金融 YAML 必須升為1.28.4')
+assert!(document.dig('info', 'version') == '1.29.0', 'Task626 金融 YAML 必須升為1.29.0')
 unified_markdown = File.read(swagger_copies.first)
 assert!(unified_markdown.include?('| 對外路徑 | 28 條：23 個 `GET`、5 個 `POST` |'), '統一 Swagger 完整28pairs')
 assert!(unified_markdown.include?('`GET /api/public/srpp/order-plan`') && unified_markdown.include?('`GET /api/public/srpp/symbol-rule-facts`'), '統一 Swagger 包含 Task497 兩支唯讀路徑')

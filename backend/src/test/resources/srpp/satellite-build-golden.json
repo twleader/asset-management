@@ -1,0 +1,5117 @@
+{
+  "calculatorSha256": "16fb30de344493be599d89541f0f76ee985bcd64996dada819bf0f701aad4a2d",
+  "cases": [
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.69,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 0.0,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": 0.0014705750107604364,
+          "reference_basis": "ASK1",
+          "reference_price": 10.08,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 0.0,
+          "week_start": "2026-11-02"
+        },
+        "lots": 3,
+        "places_orders": false,
+        "reasons": [
+          "WITHIN_PACE_AND_TARGET"
+        ],
+        "shares": 3000,
+        "status": "BUILD_LOT_CEILING",
+        "stock_code": "009826",
+        "trading_date": "2026-11-02"
+      },
+      "input": {
+        "held_value_twd": 0.0,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2026-11-02"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2026-11-02",
+        "transactions": {
+          "records": [],
+          "selection": {
+            "end": "2026-11-02",
+            "mode": "DATE_RANGE",
+            "start": "2026-09-22",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          32.69
+        ]
+      },
+      "kind": "009826",
+      "name": "first_day_three_lot_ceiling_ask1"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.69,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 0.0,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": 0.0014705750107604364,
+          "reference_basis": "LAST_PRICE",
+          "reference_price": 10.08,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 0.0,
+          "week_start": "2026-11-02"
+        },
+        "lots": 3,
+        "places_orders": false,
+        "reasons": [
+          "WITHIN_PACE_AND_TARGET"
+        ],
+        "shares": 3000,
+        "status": "BUILD_LOT_CEILING",
+        "stock_code": "009826",
+        "trading_date": "2026-11-02"
+      },
+      "input": {
+        "held_value_twd": 0.0,
+        "quote": {
+          "askLevels": [],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2026-11-02"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2026-11-02",
+        "transactions": {
+          "records": [],
+          "selection": {
+            "end": "2026-11-02",
+            "mode": "DATE_RANGE",
+            "start": "2026-09-22",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          32.69
+        ]
+      },
+      "kind": "009826",
+      "name": "last_price_when_no_ask_level"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.69,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 0.0,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": null,
+          "reference_basis": "ASK1",
+          "reference_price": null,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 0.0,
+          "week_start": "2026-11-02"
+        },
+        "lots": 0,
+        "places_orders": false,
+        "reasons": [
+          "QUOTE_UNVERIFIED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "009826",
+        "trading_date": "2026-11-02"
+      },
+      "input": {
+        "held_value_twd": 0.0,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "00881",
+          "tradingDate": "2026-11-02"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2026-11-02",
+        "transactions": {
+          "records": [],
+          "selection": {
+            "end": "2026-11-02",
+            "mode": "DATE_RANGE",
+            "start": "2026-09-22",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          32.69
+        ]
+      },
+      "kind": "009826",
+      "name": "identity_wrong_with_ask_keeps_ask1_basis"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.69,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 0.0,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": null,
+          "reference_basis": "ASK1",
+          "reference_price": null,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 0.0,
+          "week_start": "2026-11-02"
+        },
+        "lots": 0,
+        "places_orders": false,
+        "reasons": [
+          "QUOTE_UNVERIFIED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "009826",
+        "trading_date": "2026-11-02"
+      },
+      "input": {
+        "held_value_twd": 0.0,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2026-10-30"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2026-11-02",
+        "transactions": {
+          "records": [],
+          "selection": {
+            "end": "2026-11-02",
+            "mode": "DATE_RANGE",
+            "start": "2026-09-22",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          32.69
+        ]
+      },
+      "kind": "009826",
+      "name": "identity_wrong_date"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.69,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 0.0,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-10-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": 0.0004901916702534789,
+          "reference_basis": "ASK1",
+          "reference_price": 10.08,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 0.0,
+          "week_start": "2026-10-26"
+        },
+        "lots": 0,
+        "places_orders": false,
+        "reasons": [
+          "BEFORE_EARLIEST_BUY_DATE"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "009826",
+        "trading_date": "2026-10-30"
+      },
+      "input": {
+        "held_value_twd": 0.0,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2026-10-30"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2026-10-30",
+        "transactions": {
+          "records": [],
+          "selection": {
+            "end": "2026-10-30",
+            "mode": "DATE_RANGE",
+            "start": "2026-09-22",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          32.69
+        ]
+      },
+      "kind": "009826",
+      "name": "before_earliest_buy_date"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.69,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 0.0,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 0.0,
+          "month_start": "2027-07-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": 0.0004901916702534789,
+          "reference_basis": "ASK1",
+          "reference_price": 10.08,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 0.0,
+          "week_start": "2027-06-28"
+        },
+        "lots": 0,
+        "places_orders": false,
+        "reasons": [
+          "BUILD_WINDOW_CLOSED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "009826",
+        "trading_date": "2027-07-01"
+      },
+      "input": {
+        "held_value_twd": 0.0,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2027-07-01"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2027-07-01",
+        "transactions": {
+          "records": [],
+          "selection": {
+            "end": "2027-07-01",
+            "mode": "DATE_RANGE",
+            "start": "2027-06-28",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          32.69
+        ]
+      },
+      "kind": "009826",
+      "name": "build_window_closed"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 3.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.69,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 0.0,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 30000.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": 0.0004901916702534789,
+          "reference_basis": "ASK1",
+          "reference_price": 10.08,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 3.0,
+          "week_start": "2026-11-02"
+        },
+        "lots": 0,
+        "places_orders": false,
+        "reasons": [
+          "DAILY_LOT_LIMIT"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "009826",
+        "trading_date": "2026-11-02"
+      },
+      "input": {
+        "held_value_twd": 0.0,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2026-11-02"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2026-11-02",
+        "transactions": {
+          "records": [
+            {
+              "amount": 30000.0,
+              "assetCode": "009826",
+              "market": "台股",
+              "price": 10.0,
+              "shares": 3000.0,
+              "tradeDate": "2026-11-02",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-02",
+            "mode": "DATE_RANGE",
+            "start": "2026-09-22",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          32.69
+        ]
+      },
+      "kind": "009826",
+      "name": "daily_lot_limit_three_today"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.69,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 0.0,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": 0.0014705750107604364,
+          "reference_basis": "ASK1",
+          "reference_price": 10.08,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 0.0,
+          "week_start": "2026-11-02"
+        },
+        "lots": 3,
+        "places_orders": false,
+        "reasons": [
+          "WITHIN_PACE_AND_TARGET"
+        ],
+        "shares": 3000,
+        "status": "BUILD_LOT_CEILING",
+        "stock_code": "009826",
+        "trading_date": "2026-11-02"
+      },
+      "input": {
+        "held_value_twd": 0.0,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2026-11-02"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2026-11-02",
+        "transactions": {
+          "records": [
+            {
+              "amount": 10000.0,
+              "assetCode": "009826",
+              "market": "台股",
+              "price": 10.0,
+              "shares": 1000.0,
+              "tradeDate": "2026-11-02",
+              "transactionType": "賣"
+            },
+            {
+              "amount": 10000.0,
+              "assetCode": "00881",
+              "market": "台股",
+              "price": 10.0,
+              "shares": 1000.0,
+              "tradeDate": "2026-11-02",
+              "transactionType": "買"
+            },
+            {
+              "amount": 10000.0,
+              "assetCode": "009826",
+              "market": "美股",
+              "price": 10.0,
+              "shares": 1000.0,
+              "tradeDate": "2026-11-02",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-02",
+            "mode": "DATE_RANGE",
+            "start": "2026-09-22",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          32.69
+        ]
+      },
+      "kind": "009826",
+      "name": "only_confirmed_buys_of_this_code_count"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.5,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.69,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 0.0,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 5000.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": 0.0009803833405069577,
+          "reference_basis": "ASK1",
+          "reference_price": 10.08,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 0.5,
+          "week_start": "2026-11-02"
+        },
+        "lots": 2,
+        "places_orders": false,
+        "reasons": [
+          "WITHIN_PACE_AND_TARGET"
+        ],
+        "shares": 2000,
+        "status": "BUILD_LOT_CEILING",
+        "stock_code": "009826",
+        "trading_date": "2026-11-02"
+      },
+      "input": {
+        "held_value_twd": 0.0,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2026-11-02"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2026-11-02",
+        "transactions": {
+          "records": [
+            {
+              "amount": 5000.0,
+              "assetCode": "009826",
+              "market": "台股",
+              "price": 10.0,
+              "shares": 500.0,
+              "tradeDate": "2026-11-02",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-02",
+            "mode": "DATE_RANGE",
+            "start": "2026-09-22",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          32.69
+        ]
+      },
+      "kind": "009826",
+      "name": "odd_lot_fill_leaves_whole_lots"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.69,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 0.0,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 60000.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": 0.0004901916702534789,
+          "reference_basis": "ASK1",
+          "reference_price": 10.08,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 6.0,
+          "week_start": "2026-11-02"
+        },
+        "lots": 0,
+        "places_orders": false,
+        "reasons": [
+          "WEEKLY_LOT_LIMIT"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "009826",
+        "trading_date": "2026-11-05"
+      },
+      "input": {
+        "held_value_twd": 0.0,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2026-11-05"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2026-11-05",
+        "transactions": {
+          "records": [
+            {
+              "amount": 20000.0,
+              "assetCode": "009826",
+              "market": "台股",
+              "price": 10.0,
+              "shares": 2000.0,
+              "tradeDate": "2026-11-02",
+              "transactionType": "買"
+            },
+            {
+              "amount": 20000.0,
+              "assetCode": "009826",
+              "market": "台股",
+              "price": 10.0,
+              "shares": 2000.0,
+              "tradeDate": "2026-11-03",
+              "transactionType": "買"
+            },
+            {
+              "amount": 20000.0,
+              "assetCode": "009826",
+              "market": "台股",
+              "price": 10.0,
+              "shares": 2000.0,
+              "tradeDate": "2026-11-04",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-05",
+            "mode": "DATE_RANGE",
+            "start": "2026-09-22",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          32.69
+        ]
+      },
+      "kind": "009826",
+      "name": "weekly_lot_limit_six_this_week"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.69,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 0.0,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 60000.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": 0.0014705750107604364,
+          "reference_basis": "ASK1",
+          "reference_price": 10.08,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 0.0,
+          "week_start": "2026-11-09"
+        },
+        "lots": 3,
+        "places_orders": false,
+        "reasons": [
+          "WITHIN_PACE_AND_TARGET"
+        ],
+        "shares": 3000,
+        "status": "BUILD_LOT_CEILING",
+        "stock_code": "009826",
+        "trading_date": "2026-11-09"
+      },
+      "input": {
+        "held_value_twd": 0.0,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2026-11-09"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2026-11-09",
+        "transactions": {
+          "records": [
+            {
+              "amount": 20000.0,
+              "assetCode": "009826",
+              "market": "台股",
+              "price": 10.0,
+              "shares": 2000.0,
+              "tradeDate": "2026-11-02",
+              "transactionType": "買"
+            },
+            {
+              "amount": 20000.0,
+              "assetCode": "009826",
+              "market": "台股",
+              "price": 10.0,
+              "shares": 2000.0,
+              "tradeDate": "2026-11-03",
+              "transactionType": "買"
+            },
+            {
+              "amount": 20000.0,
+              "assetCode": "009826",
+              "market": "台股",
+              "price": 10.0,
+              "shares": 2000.0,
+              "tradeDate": "2026-11-04",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-09",
+            "mode": "DATE_RANGE",
+            "start": "2026-09-22",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          32.69
+        ]
+      },
+      "kind": "009826",
+      "name": "next_week_reset"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.69,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 0.0,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 200000.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": 0.0004901916702534789,
+          "reference_basis": "ASK1",
+          "reference_price": 10.08,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 0.0,
+          "week_start": "2026-11-09"
+        },
+        "lots": 0,
+        "places_orders": false,
+        "reasons": [
+          "MONTHLY_CAP"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "009826",
+        "trading_date": "2026-11-10"
+      },
+      "input": {
+        "held_value_twd": 0.0,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2026-11-10"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2026-11-10",
+        "transactions": {
+          "records": [
+            {
+              "amount": 200000.0,
+              "assetCode": "009826",
+              "market": "台股",
+              "price": 10.0,
+              "shares": 20000.0,
+              "tradeDate": "2026-11-03",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-10",
+            "mode": "DATE_RANGE",
+            "start": "2026-09-22",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          32.69
+        ]
+      },
+      "kind": "009826",
+      "name": "monthly_cap_under_one_lot_remaining"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.69,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 0.0,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 190000.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": 0.0004901916702534789,
+          "reference_basis": "ASK1",
+          "reference_price": 10.08,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 0.0,
+          "week_start": "2026-11-09"
+        },
+        "lots": 1,
+        "places_orders": false,
+        "reasons": [
+          "WITHIN_PACE_AND_TARGET"
+        ],
+        "shares": 1000,
+        "status": "BUILD_LOT_CEILING",
+        "stock_code": "009826",
+        "trading_date": "2026-11-10"
+      },
+      "input": {
+        "held_value_twd": 0.0,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2026-11-10"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2026-11-10",
+        "transactions": {
+          "records": [
+            {
+              "amount": 190000.0,
+              "assetCode": "009826",
+              "market": "台股",
+              "price": 10.0,
+              "shares": 19000.0,
+              "tradeDate": "2026-11-03",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-10",
+            "mode": "DATE_RANGE",
+            "start": "2026-09-22",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          32.69
+        ]
+      },
+      "kind": "009826",
+      "name": "monthly_cap_boundary_one_lot"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.0,
+          "fx_halved": true,
+          "fx_month_max_mid": 33.01,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 0.0,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 100000.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 70000.0,
+          "monthly_cap_twd_effective": 105000.0,
+          "post_buy_weight": 0.0004901916702534789,
+          "reference_basis": "ASK1",
+          "reference_price": 10.08,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 0.0,
+          "week_start": "2026-11-09"
+        },
+        "lots": 0,
+        "places_orders": false,
+        "reasons": [
+          "MONTHLY_CAP"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "009826",
+        "trading_date": "2026-11-10"
+      },
+      "input": {
+        "held_value_twd": 0.0,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2026-11-10"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2026-11-10",
+        "transactions": {
+          "records": [
+            {
+              "amount": 100000.0,
+              "assetCode": "009826",
+              "market": "台股",
+              "price": 10.0,
+              "shares": 10000.0,
+              "tradeDate": "2026-11-03",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-10",
+            "mode": "DATE_RANGE",
+            "start": "2026-09-22",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          33.01,
+          32.7
+        ]
+      },
+      "kind": "009826",
+      "name": "fx_33_01_halves_cap_to_monthly_cap"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.0,
+          "fx_halved": true,
+          "fx_month_max_mid": null,
+          "fx_status": "UNVERIFIED_ASSUMED_HALVED",
+          "held_value_twd": 0.0,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 70000.0,
+          "monthly_cap_twd_effective": 105000.0,
+          "post_buy_weight": 0.0014705750107604364,
+          "reference_basis": "ASK1",
+          "reference_price": 10.08,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 0.0,
+          "week_start": "2026-11-02"
+        },
+        "lots": 3,
+        "places_orders": false,
+        "reasons": [
+          "WITHIN_PACE_AND_TARGET"
+        ],
+        "shares": 3000,
+        "status": "BUILD_LOT_CEILING",
+        "stock_code": "009826",
+        "trading_date": "2026-11-02"
+      },
+      "input": {
+        "held_value_twd": 0.0,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2026-11-02"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2026-11-02",
+        "transactions": {
+          "records": [],
+          "selection": {
+            "end": "2026-11-02",
+            "mode": "DATE_RANGE",
+            "start": "2026-09-22",
+            "year": null
+          }
+        },
+        "usd_twd_rates": []
+      },
+      "kind": "009826",
+      "name": "fx_unknown_rates_empty_assumed_halved"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 33.0,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 0.0,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 100000.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": 0.0014705750107604364,
+          "reference_basis": "ASK1",
+          "reference_price": 10.08,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 0.0,
+          "week_start": "2026-11-09"
+        },
+        "lots": 3,
+        "places_orders": false,
+        "reasons": [
+          "WITHIN_PACE_AND_TARGET"
+        ],
+        "shares": 3000,
+        "status": "BUILD_LOT_CEILING",
+        "stock_code": "009826",
+        "trading_date": "2026-11-10"
+      },
+      "input": {
+        "held_value_twd": 0.0,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2026-11-10"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2026-11-10",
+        "transactions": {
+          "records": [
+            {
+              "amount": 100000.0,
+              "assetCode": "009826",
+              "market": "台股",
+              "price": 10.0,
+              "shares": 10000.0,
+              "tradeDate": "2026-11-03",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-10",
+            "mode": "DATE_RANGE",
+            "start": "2026-09-22",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          33.0
+        ]
+      },
+      "kind": "009826",
+      "name": "fx_at_threshold_not_halved"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.69,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 411267.69840000005,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": 0.02049019167025348,
+          "reference_basis": "ASK1",
+          "reference_price": 10.08,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 0.0,
+          "week_start": "2026-11-02"
+        },
+        "lots": 0,
+        "places_orders": false,
+        "reasons": [
+          "TARGET_WEIGHT_REACHED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "009826",
+        "trading_date": "2026-11-02"
+      },
+      "input": {
+        "held_value_twd": 411267.69840000005,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2026-11-02"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2026-11-02",
+        "transactions": {
+          "records": [],
+          "selection": {
+            "end": "2026-11-02",
+            "mode": "DATE_RANGE",
+            "start": "2026-09-22",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          32.69
+        ]
+      },
+      "kind": "009826",
+      "name": "target_weight_reached"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.69,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 401167.69840000005,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": 0.019999027397479656,
+          "reference_basis": "ASK1",
+          "reference_price": 10.08,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 0.0,
+          "week_start": "2026-11-02"
+        },
+        "lots": 1,
+        "places_orders": false,
+        "reasons": [
+          "WITHIN_PACE_AND_TARGET"
+        ],
+        "shares": 1000,
+        "status": "BUILD_LOT_CEILING",
+        "stock_code": "009826",
+        "trading_date": "2026-11-02"
+      },
+      "input": {
+        "held_value_twd": 401167.69840000005,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2026-11-02"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2026-11-02",
+        "transactions": {
+          "records": [],
+          "selection": {
+            "end": "2026-11-02",
+            "mode": "DATE_RANGE",
+            "start": "2026-09-22",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          32.69
+        ]
+      },
+      "kind": "009826",
+      "name": "target_weight_fits_one_lot"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.69,
+          "fx_status": "VERIFIED",
+          "held_value_twd": null,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": null,
+          "reference_basis": "ASK1",
+          "reference_price": 10.08,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 0.0,
+          "week_start": "2026-11-02"
+        },
+        "lots": 0,
+        "places_orders": false,
+        "reasons": [
+          "HOLDING_UNVERIFIED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "009826",
+        "trading_date": "2026-11-02"
+      },
+      "input": {
+        "held_value_twd": null,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2026-11-02"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2026-11-02",
+        "transactions": {
+          "records": [],
+          "selection": {
+            "end": "2026-11-02",
+            "mode": "DATE_RANGE",
+            "start": "2026-09-22",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          32.69
+        ]
+      },
+      "kind": "009826",
+      "name": "holding_unverified_none"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.69,
+          "fx_status": "VERIFIED",
+          "held_value_twd": true,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": null,
+          "reference_basis": "ASK1",
+          "reference_price": 10.08,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 0.0,
+          "week_start": "2026-11-02"
+        },
+        "lots": 0,
+        "places_orders": false,
+        "reasons": [
+          "HOLDING_UNVERIFIED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "009826",
+        "trading_date": "2026-11-02"
+      },
+      "input": {
+        "held_value_twd": true,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2026-11-02"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2026-11-02",
+        "transactions": {
+          "records": [],
+          "selection": {
+            "end": "2026-11-02",
+            "mode": "DATE_RANGE",
+            "start": "2026-09-22",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          32.69
+        ]
+      },
+      "kind": "009826",
+      "name": "holding_unverified_boolean"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.69,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 0.0,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": null,
+          "reference_basis": "ASK1",
+          "reference_price": 10.08,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": null,
+          "week_lots": 0.0,
+          "week_start": "2026-11-02"
+        },
+        "lots": 0,
+        "places_orders": false,
+        "reasons": [
+          "TOTAL_ASSETS_UNVERIFIED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "009826",
+        "trading_date": "2026-11-02"
+      },
+      "input": {
+        "held_value_twd": 0.0,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2026-11-02"
+        },
+        "total_assets_twd": null,
+        "trading_date": "2026-11-02",
+        "transactions": {
+          "records": [],
+          "selection": {
+            "end": "2026-11-02",
+            "mode": "DATE_RANGE",
+            "start": "2026-09-22",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          32.69
+        ]
+      },
+      "kind": "009826",
+      "name": "total_assets_unverified"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.69,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 0.0,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": 0.0004901916702534789,
+          "reference_basis": "ASK1",
+          "reference_price": 10.08,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 0.0,
+          "week_start": "2026-11-02"
+        },
+        "lots": 0,
+        "places_orders": false,
+        "reasons": [
+          "PACE_STATE_UNVERIFIED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "009826",
+        "trading_date": "2026-11-02"
+      },
+      "input": {
+        "held_value_twd": 0.0,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2026-11-02"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2026-11-02",
+        "transactions": {
+          "records": [
+            {
+              "amount": 20000.0,
+              "assetCode": "009826",
+              "market": "台股",
+              "price": 10.0,
+              "shares": 2000.0,
+              "tradeDate": "2026-11-02",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-02",
+            "mode": "DATE_RANGE",
+            "start": "2026-11-03",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          32.69
+        ]
+      },
+      "kind": "009826",
+      "name": "pace_unverified_late_start_records_not_walked"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.69,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 0.0,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": 0.0004901916702534789,
+          "reference_basis": "ASK1",
+          "reference_price": 10.08,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 0.0,
+          "week_start": "2026-11-02"
+        },
+        "lots": 0,
+        "places_orders": false,
+        "reasons": [
+          "PACE_STATE_UNVERIFIED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "009826",
+        "trading_date": "2026-11-05"
+      },
+      "input": {
+        "held_value_twd": 0.0,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2026-11-05"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2026-11-05",
+        "transactions": {
+          "records": [],
+          "selection": {
+            "end": "2026-11-04",
+            "mode": "DATE_RANGE",
+            "start": "2026-09-22",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          32.69
+        ]
+      },
+      "kind": "009826",
+      "name": "pace_unverified_early_end"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.69,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 0.0,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": 0.0004901916702534789,
+          "reference_basis": "ASK1",
+          "reference_price": 10.08,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 0.0,
+          "week_start": "2026-11-02"
+        },
+        "lots": 0,
+        "places_orders": false,
+        "reasons": [
+          "PACE_STATE_UNVERIFIED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "009826",
+        "trading_date": "2026-11-02"
+      },
+      "input": {
+        "held_value_twd": 0.0,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2026-11-02"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2026-11-02",
+        "transactions": {
+          "records": [
+            {
+              "amount": null,
+              "assetCode": "009826",
+              "market": "台股",
+              "price": 10.0,
+              "shares": 1000.0,
+              "tradeDate": "2026-11-02",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-02",
+            "mode": "DATE_RANGE",
+            "start": "2026-09-22",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          32.69
+        ]
+      },
+      "kind": "009826",
+      "name": "pace_unverified_amount_null"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.69,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 0.0,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": 0.0004901916702534789,
+          "reference_basis": "ASK1",
+          "reference_price": 10.08,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 0.0,
+          "week_start": "2026-11-02"
+        },
+        "lots": 0,
+        "places_orders": false,
+        "reasons": [
+          "PACE_STATE_UNVERIFIED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "009826",
+        "trading_date": "2026-11-02"
+      },
+      "input": {
+        "held_value_twd": 0.0,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2026-11-02"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2026-11-02",
+        "transactions": {
+          "selection": {
+            "end": "2026-11-02",
+            "mode": "DATE_RANGE",
+            "start": "2026-09-22",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          32.69
+        ]
+      },
+      "kind": "009826",
+      "name": "pace_unverified_records_missing"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 1.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.69,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 0.0,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 10000.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": 0.0004901916702534789,
+          "reference_basis": "ASK1",
+          "reference_price": 10.08,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 1.0,
+          "week_start": "2026-11-02"
+        },
+        "lots": 0,
+        "places_orders": false,
+        "reasons": [
+          "PACE_STATE_UNVERIFIED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "009826",
+        "trading_date": "2026-11-02"
+      },
+      "input": {
+        "held_value_twd": 0.0,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2026-11-02"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2026-11-02",
+        "transactions": {
+          "records": [
+            {
+              "amount": 10000.0,
+              "assetCode": "009826",
+              "market": "台股",
+              "price": 10.0,
+              "shares": 1000.0,
+              "tradeDate": "2026-11-02",
+              "transactionType": "買"
+            },
+            "bad"
+          ],
+          "selection": {
+            "end": "2026-11-02",
+            "mode": "DATE_RANGE",
+            "start": "2026-09-22",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          32.69
+        ]
+      },
+      "kind": "009826",
+      "name": "pace_unverified_non_object_record_still_accumulates"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 2.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.69,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 0.0,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 20000.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": 0.0004901916702534789,
+          "reference_basis": "ASK1",
+          "reference_price": 10.08,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 2.0,
+          "week_start": "2026-11-02"
+        },
+        "lots": 1,
+        "places_orders": false,
+        "reasons": [
+          "WITHIN_PACE_AND_TARGET"
+        ],
+        "shares": 1000,
+        "status": "BUILD_LOT_CEILING",
+        "stock_code": "009826",
+        "trading_date": "2026-11-02"
+      },
+      "input": {
+        "held_value_twd": 0.0,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2026-11-02"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2026-11-02",
+        "transactions": {
+          "records": [
+            {
+              "amount": 20000.0,
+              "assetCode": "009826",
+              "market": "台股",
+              "price": 10.0,
+              "shares": 2000.0,
+              "tradeDate": "2026-11-02",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-02",
+            "mode": "DATE_RANGE",
+            "start": "2026-09-22",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          32.69
+        ]
+      },
+      "kind": "009826",
+      "name": "room_exactly_one_lot"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 2.0000000005,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.69,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 0.0,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 20000.000004999998,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": 0.0004901916702534789,
+          "reference_basis": "ASK1",
+          "reference_price": 10.08,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20563384.92,
+          "week_lots": 2.0000000005,
+          "week_start": "2026-11-02"
+        },
+        "lots": 1,
+        "places_orders": false,
+        "reasons": [
+          "WITHIN_PACE_AND_TARGET"
+        ],
+        "shares": 1000,
+        "status": "BUILD_LOT_CEILING",
+        "stock_code": "009826",
+        "trading_date": "2026-11-02"
+      },
+      "input": {
+        "held_value_twd": 0.0,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "009826",
+          "tradingDate": "2026-11-02"
+        },
+        "total_assets_twd": 20563384.92,
+        "trading_date": "2026-11-02",
+        "transactions": {
+          "records": [
+            {
+              "amount": 20000.000004999998,
+              "assetCode": "009826",
+              "market": "台股",
+              "price": 10.0,
+              "shares": 2000.0000005,
+              "tradeDate": "2026-11-02",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-02",
+            "mode": "DATE_RANGE",
+            "start": "2026-09-22",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          32.69
+        ]
+      },
+      "kind": "009826",
+      "name": "room_0_9999999995_floors_to_one"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.69,
+          "fx_status": "VERIFIED",
+          "held_value_twd": null,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-10-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": null,
+          "reference_basis": "ASK1",
+          "reference_price": null,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": null,
+          "week_lots": 0.0,
+          "week_start": "2026-10-26"
+        },
+        "lots": 0,
+        "places_orders": false,
+        "reasons": [
+          "BEFORE_EARLIEST_BUY_DATE",
+          "QUOTE_UNVERIFIED",
+          "TOTAL_ASSETS_UNVERIFIED",
+          "HOLDING_UNVERIFIED",
+          "PACE_STATE_UNVERIFIED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "009826",
+        "trading_date": "2026-10-30"
+      },
+      "input": {
+        "held_value_twd": null,
+        "quote": {
+          "askLevels": [
+            {
+              "price": 10.08,
+              "size": 1000
+            }
+          ],
+          "market": "台股",
+          "price": 10.08,
+          "stockCode": "00881",
+          "tradingDate": "2026-11-02"
+        },
+        "total_assets_twd": null,
+        "trading_date": "2026-10-30",
+        "transactions": {
+          "records": [],
+          "selection": {
+            "end": "2026-10-30",
+            "mode": "DATE_RANGE",
+            "start": "2026-10-28",
+            "year": null
+          }
+        },
+        "usd_twd_rates": [
+          32.69
+        ]
+      },
+      "kind": "009826",
+      "name": "multiple_codes_in_formula_order"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.4,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": 0.015408279202482868,
+          "reference_basis": "ASK1",
+          "reference_price_usd": 150.0,
+          "share_value_twd": 4875.0,
+          "spot_selling_rate": 32.5,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2026-11-20",
+          "week_shares": 0.0,
+          "week_start": "2026-11-23"
+        },
+        "places_orders": false,
+        "reasons": [
+          "WITHIN_PACE_AND_TARGET"
+        ],
+        "shares": 5,
+        "status": "BUILD_SHARE_CEILING",
+        "stock_code": "VT",
+        "trading_date": "2026-11-23"
+      },
+      "input": {
+        "held_value_twd": 298308.0,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VT",
+          "tradingDate": "2026-11-20"
+        },
+        "spot_selling_rate": 32.5,
+        "total_assets_twd": 20942182.82,
+        "trading_date": "2026-11-23",
+        "transactions": {
+          "records": [],
+          "selection": {
+            "end": "2026-11-23",
+            "mode": "DATE_RANGE",
+            "start": "2026-10-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-20",
+        "usd_twd_rates": [
+          32.4
+        ]
+      },
+      "kind": "VT",
+      "name": "first_day_five_share_ceiling"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.4,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": 0.015407503256625663,
+          "reference_basis": "LAST_PRICE",
+          "reference_price_usd": 149.9,
+          "share_value_twd": 4871.75,
+          "spot_selling_rate": 32.5,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2026-11-20",
+          "week_shares": 0.0,
+          "week_start": "2026-11-23"
+        },
+        "places_orders": false,
+        "reasons": [
+          "WITHIN_PACE_AND_TARGET"
+        ],
+        "shares": 5,
+        "status": "BUILD_SHARE_CEILING",
+        "stock_code": "VT",
+        "trading_date": "2026-11-23"
+      },
+      "input": {
+        "held_value_twd": 298308.0,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": null,
+          "stockCode": "VT",
+          "tradingDate": "2026-11-20"
+        },
+        "spot_selling_rate": 32.5,
+        "total_assets_twd": 20942182.82,
+        "trading_date": "2026-11-23",
+        "transactions": {
+          "records": [],
+          "selection": {
+            "end": "2026-11-23",
+            "mode": "DATE_RANGE",
+            "start": "2026-10-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-20",
+        "usd_twd_rates": [
+          32.4
+        ]
+      },
+      "kind": "VT",
+      "name": "last_price_when_no_ask"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.4,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": null,
+          "reference_basis": "LAST_PRICE",
+          "reference_price_usd": null,
+          "share_value_twd": null,
+          "spot_selling_rate": 32.5,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2026-11-20",
+          "week_shares": 0.0,
+          "week_start": "2026-11-23"
+        },
+        "places_orders": false,
+        "reasons": [
+          "QUOTE_UNVERIFIED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "VT",
+        "trading_date": "2026-11-23"
+      },
+      "input": {
+        "held_value_twd": 298308.0,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VT",
+          "tradingDate": "2026-11-19"
+        },
+        "spot_selling_rate": 32.5,
+        "total_assets_twd": 20942182.82,
+        "trading_date": "2026-11-23",
+        "transactions": {
+          "records": [],
+          "selection": {
+            "end": "2026-11-23",
+            "mode": "DATE_RANGE",
+            "start": "2026-10-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-20",
+        "usd_twd_rates": [
+          32.4
+        ]
+      },
+      "kind": "VT",
+      "name": "quote_date_not_us_session"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.4,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": null,
+          "reference_basis": "LAST_PRICE",
+          "reference_price_usd": null,
+          "share_value_twd": null,
+          "spot_selling_rate": 32.5,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2026-11-20",
+          "week_shares": 0.0,
+          "week_start": "2026-11-23"
+        },
+        "places_orders": false,
+        "reasons": [
+          "QUOTE_UNVERIFIED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "VT",
+        "trading_date": "2026-11-23"
+      },
+      "input": {
+        "held_value_twd": 298308.0,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VOO",
+          "tradingDate": "2026-11-20"
+        },
+        "spot_selling_rate": 32.5,
+        "total_assets_twd": 20942182.82,
+        "trading_date": "2026-11-23",
+        "transactions": {
+          "records": [],
+          "selection": {
+            "end": "2026-11-23",
+            "mode": "DATE_RANGE",
+            "start": "2026-10-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-20",
+        "usd_twd_rates": [
+          32.4
+        ]
+      },
+      "kind": "VT",
+      "name": "quote_code_wrong"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.4,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": 0.014244360416675992,
+          "reference_basis": "ASK1",
+          "reference_price_usd": 150.0,
+          "share_value_twd": 4875.0,
+          "spot_selling_rate": 32.5,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2026-11-20",
+          "week_shares": 0.0,
+          "week_start": "2026-11-16"
+        },
+        "places_orders": false,
+        "reasons": [
+          "BEFORE_EARLIEST_BUY_DATE"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "VT",
+        "trading_date": "2026-11-20"
+      },
+      "input": {
+        "held_value_twd": 298308.0,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VT",
+          "tradingDate": "2026-11-20"
+        },
+        "spot_selling_rate": 32.5,
+        "total_assets_twd": 20942182.82,
+        "trading_date": "2026-11-20",
+        "transactions": {
+          "records": [],
+          "selection": {
+            "end": "2026-11-20",
+            "mode": "DATE_RANGE",
+            "start": "2026-10-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-20",
+        "usd_twd_rates": [
+          32.4
+        ]
+      },
+      "kind": "VT",
+      "name": "before_earliest_buy_date"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.4,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 0.0,
+          "month_start": "2027-07-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": 0.014244360416675992,
+          "reference_basis": "ASK1",
+          "reference_price_usd": 150.0,
+          "share_value_twd": 4875.0,
+          "spot_selling_rate": 32.5,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2026-11-20",
+          "week_shares": 0.0,
+          "week_start": "2027-06-28"
+        },
+        "places_orders": false,
+        "reasons": [
+          "BUILD_WINDOW_CLOSED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "VT",
+        "trading_date": "2027-07-01"
+      },
+      "input": {
+        "held_value_twd": 298308.0,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VT",
+          "tradingDate": "2026-11-20"
+        },
+        "spot_selling_rate": 32.5,
+        "total_assets_twd": 20942182.82,
+        "trading_date": "2027-07-01",
+        "transactions": {
+          "records": [],
+          "selection": {
+            "end": "2027-07-01",
+            "mode": "DATE_RANGE",
+            "start": "2027-06-28",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-20",
+        "usd_twd_rates": [
+          32.4
+        ]
+      },
+      "kind": "VT",
+      "name": "build_window_closed"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 1.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.4,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 4875.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": 0.014244360416675992,
+          "reference_basis": "ASK1",
+          "reference_price_usd": 150.0,
+          "share_value_twd": 4875.0,
+          "spot_selling_rate": 32.5,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2026-11-20",
+          "week_shares": 1.0,
+          "week_start": "2026-11-23"
+        },
+        "places_orders": false,
+        "reasons": [
+          "DAILY_SHARE_LIMIT"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "VT",
+        "trading_date": "2026-11-23"
+      },
+      "input": {
+        "held_value_twd": 298308.0,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VT",
+          "tradingDate": "2026-11-20"
+        },
+        "spot_selling_rate": 32.5,
+        "total_assets_twd": 20942182.82,
+        "trading_date": "2026-11-23",
+        "transactions": {
+          "records": [
+            {
+              "amountTwd": 4875.0,
+              "assetCode": "VT",
+              "currency": "USD",
+              "exchangeRate": 32.5,
+              "market": "美股",
+              "shares": 1.0,
+              "tradeDate": "2026-11-23",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-23",
+            "mode": "DATE_RANGE",
+            "start": "2026-10-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-20",
+        "usd_twd_rates": [
+          32.4
+        ]
+      },
+      "kind": "VT",
+      "name": "daily_share_limit_one_today"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.4,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 30000.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": 0.014244360416675992,
+          "reference_basis": "ASK1",
+          "reference_price_usd": 150.0,
+          "share_value_twd": 4875.0,
+          "spot_selling_rate": 32.5,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2026-11-20",
+          "week_shares": 15.0,
+          "week_start": "2026-11-23"
+        },
+        "places_orders": false,
+        "reasons": [
+          "WEEKLY_SHARE_LIMIT"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "VT",
+        "trading_date": "2026-11-26"
+      },
+      "input": {
+        "held_value_twd": 298308.0,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VT",
+          "tradingDate": "2026-11-20"
+        },
+        "spot_selling_rate": 32.5,
+        "total_assets_twd": 20942182.82,
+        "trading_date": "2026-11-26",
+        "transactions": {
+          "records": [
+            {
+              "amountTwd": 10000.0,
+              "assetCode": "VT",
+              "currency": "USD",
+              "exchangeRate": 32.5,
+              "market": "美股",
+              "shares": 5.0,
+              "tradeDate": "2026-11-23",
+              "transactionType": "買"
+            },
+            {
+              "amountTwd": 10000.0,
+              "assetCode": "VT",
+              "currency": "USD",
+              "exchangeRate": 32.5,
+              "market": "美股",
+              "shares": 5.0,
+              "tradeDate": "2026-11-24",
+              "transactionType": "買"
+            },
+            {
+              "amountTwd": 10000.0,
+              "assetCode": "VT",
+              "currency": "USD",
+              "exchangeRate": 32.5,
+              "market": "美股",
+              "shares": 5.0,
+              "tradeDate": "2026-11-25",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-26",
+            "mode": "DATE_RANGE",
+            "start": "2026-10-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-20",
+        "usd_twd_rates": [
+          32.4
+        ]
+      },
+      "kind": "VT",
+      "name": "weekly_share_limit"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.4,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 30000.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": 0.015408279202482868,
+          "reference_basis": "ASK1",
+          "reference_price_usd": 150.0,
+          "share_value_twd": 4875.0,
+          "spot_selling_rate": 32.5,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2026-11-20",
+          "week_shares": 0.0,
+          "week_start": "2026-11-30"
+        },
+        "places_orders": false,
+        "reasons": [
+          "WITHIN_PACE_AND_TARGET"
+        ],
+        "shares": 5,
+        "status": "BUILD_SHARE_CEILING",
+        "stock_code": "VT",
+        "trading_date": "2026-11-30"
+      },
+      "input": {
+        "held_value_twd": 298308.0,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VT",
+          "tradingDate": "2026-11-20"
+        },
+        "spot_selling_rate": 32.5,
+        "total_assets_twd": 20942182.82,
+        "trading_date": "2026-11-30",
+        "transactions": {
+          "records": [
+            {
+              "amountTwd": 10000.0,
+              "assetCode": "VT",
+              "currency": "USD",
+              "exchangeRate": 32.5,
+              "market": "美股",
+              "shares": 5.0,
+              "tradeDate": "2026-11-23",
+              "transactionType": "買"
+            },
+            {
+              "amountTwd": 10000.0,
+              "assetCode": "VT",
+              "currency": "USD",
+              "exchangeRate": 32.5,
+              "market": "美股",
+              "shares": 5.0,
+              "tradeDate": "2026-11-24",
+              "transactionType": "買"
+            },
+            {
+              "amountTwd": 10000.0,
+              "assetCode": "VT",
+              "currency": "USD",
+              "exchangeRate": 32.5,
+              "market": "美股",
+              "shares": 5.0,
+              "tradeDate": "2026-11-25",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-30",
+            "mode": "DATE_RANGE",
+            "start": "2026-10-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-20",
+        "usd_twd_rates": [
+          32.4
+        ]
+      },
+      "kind": "VT",
+      "name": "weekly_reset_next_week"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.4,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 11504.5,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": 0.015408279202482868,
+          "reference_basis": "ASK1",
+          "reference_price_usd": 150.0,
+          "share_value_twd": 4875.0,
+          "spot_selling_rate": 32.5,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2026-11-20",
+          "week_shares": 2.22533,
+          "week_start": "2026-11-23"
+        },
+        "places_orders": false,
+        "reasons": [
+          "WITHIN_PACE_AND_TARGET"
+        ],
+        "shares": 5,
+        "status": "BUILD_SHARE_CEILING",
+        "stock_code": "VT",
+        "trading_date": "2026-11-24"
+      },
+      "input": {
+        "held_value_twd": 298308.0,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VT",
+          "tradingDate": "2026-11-20"
+        },
+        "spot_selling_rate": 32.5,
+        "total_assets_twd": 20942182.82,
+        "trading_date": "2026-11-24",
+        "transactions": {
+          "records": [
+            {
+              "amountTwd": 11504.5,
+              "assetCode": "VT",
+              "currency": "USD",
+              "exchangeRate": 32.5,
+              "market": "美股",
+              "shares": 2.22533,
+              "tradeDate": "2026-11-23",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-24",
+            "mode": "DATE_RANGE",
+            "start": "2026-10-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-20",
+        "usd_twd_rates": [
+          32.4
+        ]
+      },
+      "kind": "VT",
+      "name": "dca_fill_consumes_month_and_week"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.4,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 31504.5,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": 0.014244360416675992,
+          "reference_basis": "ASK1",
+          "reference_price_usd": 150.0,
+          "share_value_twd": 4875.0,
+          "spot_selling_rate": 32.5,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2026-11-20",
+          "week_shares": 12.22533,
+          "week_start": "2026-11-23"
+        },
+        "places_orders": false,
+        "reasons": [
+          "WEEKLY_SHARE_LIMIT"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "VT",
+        "trading_date": "2026-11-24"
+      },
+      "input": {
+        "held_value_twd": 298308.0,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VT",
+          "tradingDate": "2026-11-20"
+        },
+        "spot_selling_rate": 32.5,
+        "total_assets_twd": 20942182.82,
+        "trading_date": "2026-11-24",
+        "transactions": {
+          "records": [
+            {
+              "amountTwd": 11504.5,
+              "assetCode": "VT",
+              "currency": "USD",
+              "exchangeRate": 32.5,
+              "market": "美股",
+              "shares": 2.22533,
+              "tradeDate": "2026-11-23",
+              "transactionType": "買"
+            },
+            {
+              "amountTwd": 20000.0,
+              "assetCode": "VT",
+              "currency": "USD",
+              "exchangeRate": 32.5,
+              "market": "美股",
+              "shares": 10.0,
+              "tradeDate": "2026-11-23",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-24",
+            "mode": "DATE_RANGE",
+            "start": "2026-10-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-20",
+        "usd_twd_rates": [
+          32.4
+        ]
+      },
+      "kind": "VT",
+      "name": "weekly_share_limit_with_fractional_dca"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.4,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 60000.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": 0.014244360416675992,
+          "reference_basis": "ASK1",
+          "reference_price_usd": 150.0,
+          "share_value_twd": 4875.0,
+          "spot_selling_rate": 32.5,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2026-11-20",
+          "week_shares": 0.0,
+          "week_start": "2026-11-23"
+        },
+        "places_orders": false,
+        "reasons": [
+          "MONTHLY_CAP"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "VT",
+        "trading_date": "2026-11-23"
+      },
+      "input": {
+        "held_value_twd": 298308.0,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VT",
+          "tradingDate": "2026-11-20"
+        },
+        "spot_selling_rate": 32.5,
+        "total_assets_twd": 20942182.82,
+        "trading_date": "2026-11-23",
+        "transactions": {
+          "records": [
+            {
+              "amountTwd": 60000.0,
+              "assetCode": "VT",
+              "currency": "USD",
+              "exchangeRate": 32.5,
+              "market": "美股",
+              "shares": 12.0,
+              "tradeDate": "2026-11-02",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-23",
+            "mode": "DATE_RANGE",
+            "start": "2026-10-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-20",
+        "usd_twd_rates": [
+          32.4
+        ]
+      },
+      "kind": "VT",
+      "name": "monthly_cap_below_minimum"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": true,
+          "fx_month_max_mid": 33.1,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 20000.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 26666.5,
+          "monthly_cap_twd_effective": 40000.0,
+          "post_buy_weight": 0.014244360416675992,
+          "reference_basis": "ASK1",
+          "reference_price_usd": 150.0,
+          "share_value_twd": 4875.0,
+          "spot_selling_rate": 32.5,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2026-11-20",
+          "week_shares": 0.0,
+          "week_start": "2026-11-23"
+        },
+        "places_orders": false,
+        "reasons": [
+          "MONTHLY_CAP"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "VT",
+        "trading_date": "2026-11-23"
+      },
+      "input": {
+        "held_value_twd": 298308.0,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VT",
+          "tradingDate": "2026-11-20"
+        },
+        "spot_selling_rate": 32.5,
+        "total_assets_twd": 20942182.82,
+        "trading_date": "2026-11-23",
+        "transactions": {
+          "records": [
+            {
+              "amountTwd": 20000.0,
+              "assetCode": "VT",
+              "currency": "USD",
+              "exchangeRate": 32.5,
+              "market": "美股",
+              "shares": 4.0,
+              "tradeDate": "2026-11-02",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-23",
+            "mode": "DATE_RANGE",
+            "start": "2026-10-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-20",
+        "usd_twd_rates": [
+          33.1
+        ]
+      },
+      "kind": "VT",
+      "name": "fx_halved_monthly_cap"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": true,
+          "fx_month_max_mid": null,
+          "fx_status": "UNVERIFIED_ASSUMED_HALVED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 26666.5,
+          "monthly_cap_twd_effective": 40000.0,
+          "post_buy_weight": 0.015408279202482868,
+          "reference_basis": "ASK1",
+          "reference_price_usd": 150.0,
+          "share_value_twd": 4875.0,
+          "spot_selling_rate": 32.5,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2026-11-20",
+          "week_shares": 0.0,
+          "week_start": "2026-11-23"
+        },
+        "places_orders": false,
+        "reasons": [
+          "WITHIN_PACE_AND_TARGET"
+        ],
+        "shares": 5,
+        "status": "BUILD_SHARE_CEILING",
+        "stock_code": "VT",
+        "trading_date": "2026-11-23"
+      },
+      "input": {
+        "held_value_twd": 298308.0,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VT",
+          "tradingDate": "2026-11-20"
+        },
+        "spot_selling_rate": 32.5,
+        "total_assets_twd": 20942182.82,
+        "trading_date": "2026-11-23",
+        "transactions": {
+          "records": [],
+          "selection": {
+            "end": "2026-11-23",
+            "mode": "DATE_RANGE",
+            "start": "2026-10-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-20",
+        "usd_twd_rates": []
+      },
+      "kind": "VT",
+      "name": "fx_unknown_assumed_halved"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.4,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": null,
+          "reference_basis": "ASK1",
+          "reference_price_usd": 150.0,
+          "share_value_twd": null,
+          "spot_selling_rate": null,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2026-11-20",
+          "week_shares": 0.0,
+          "week_start": "2026-11-23"
+        },
+        "places_orders": false,
+        "reasons": [
+          "FX_CONVERSION_UNVERIFIED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "VT",
+        "trading_date": "2026-11-23"
+      },
+      "input": {
+        "held_value_twd": 298308.0,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VT",
+          "tradingDate": "2026-11-20"
+        },
+        "spot_selling_rate": null,
+        "total_assets_twd": 20942182.82,
+        "trading_date": "2026-11-23",
+        "transactions": {
+          "records": [],
+          "selection": {
+            "end": "2026-11-23",
+            "mode": "DATE_RANGE",
+            "start": "2026-10-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-20",
+        "usd_twd_rates": [
+          32.4
+        ]
+      },
+      "kind": "VT",
+      "name": "fx_conversion_unverified"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.4,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 504054.57050000003,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": 0.024068864971354503,
+          "reference_basis": "ASK1",
+          "reference_price_usd": 150.0,
+          "share_value_twd": 4875.0,
+          "spot_selling_rate": 32.5,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2026-11-20",
+          "week_shares": 0.0,
+          "week_start": "2026-11-23"
+        },
+        "places_orders": false,
+        "reasons": [
+          "TARGET_WEIGHT_REACHED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "VT",
+        "trading_date": "2026-11-23"
+      },
+      "input": {
+        "held_value_twd": 504054.57050000003,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VT",
+          "tradingDate": "2026-11-20"
+        },
+        "spot_selling_rate": 32.5,
+        "total_assets_twd": 20942182.82,
+        "trading_date": "2026-11-23",
+        "transactions": {
+          "records": [],
+          "selection": {
+            "end": "2026-11-23",
+            "mode": "DATE_RANGE",
+            "start": "2026-10-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-20",
+        "usd_twd_rates": [
+          32.4
+        ]
+      },
+      "kind": "VT",
+      "name": "target_weight_reached_four_shares"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.4,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 10,
+          "max_shares_per_week": 30,
+          "min_shares_per_order": 5.5,
+          "month_amount_twd": 51725.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": 0.014244360416675992,
+          "reference_basis": "ASK1",
+          "reference_price_usd": 150.0,
+          "share_value_twd": 4875.0,
+          "spot_selling_rate": 32.5,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2026-11-20",
+          "week_shares": 0.0,
+          "week_start": "2026-11-23"
+        },
+        "places_orders": false,
+        "reasons": [
+          "BELOW_MIN_ORDER_SHARES"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "VT",
+        "trading_date": "2026-11-23"
+      },
+      "input": {
+        "held_value_twd": 298308.0,
+        "policy": {
+          "baseline_note": "Steven 2026-11-22: about NT$225,000 gap to the 2.5% target; monthly cap raised to NT$80,000 so one 5-share order fits after the US$350 debit, baseline NT$53,333 keeps cap = 1.5 x baseline as for 009826.",
+          "ceiling_is_default_fill": true,
+          "decision": "D-234",
+          "earliest_buy_date": "2026-11-23",
+          "funding": "Cathay TWD sub-brokerage only. The TWD debit (shares x reference price x spot selling rate + US$3 fee at the same rate) must pass the D-152 all-bank TWD post-buy floors; USD deposits are not used for this leg.",
+          "fx_halving": "Same as 009826: a month whose verified USD/TWD mid ever exceeded fx_halving_threshold halves that month's baseline and cap; unknown month FX assumes halved.",
+          "fx_halving_threshold": 33.0,
+          "gates_retained": "D-188/D-205 high-point gate, D-215 USD FX preference, radar/quote/depth/dedup hard gates, 009826+VT pair 4.5% and global-equity group cap stay unchanged.",
+          "max_shares_per_day": 10,
+          "max_shares_per_week": 30,
+          "min_order_note": "Steven 2026-11-22: Cathay sub-brokerage charges US$3 per trade, so a ceiling below 5 whole shares is 0 shares (BELOW_MIN_ORDER_SHARES), never a 1- to 4-share order.",
+          "min_shares_per_order": 5.5,
+          "monthly_baseline_twd": 53333,
+          "monthly_cap_includes_scheduled_dca": true,
+          "monthly_cap_twd": 80000,
+          "pace_consumed_only_by_confirmed_fills": true,
+          "pace_state_unverified_shares": 0,
+          "role": "Global all-cap satellite paired with 009826 (D-139/D-141 fund-family pair); built to its 2.5% target with the same confirmed-fill pace mechanics as 009826, in whole US shares.",
+          "scheduled_dca_note": "Every confirmed VT buy fill, including the 5th-of-month US$350 D-182 instruction, consumes the monthly TWD amount (amountTwd) and the daily/weekly share counts. Fees are separately funded and excluded, as for VOO.",
+          "share_conversion": "shares = floor(remaining room TWD / (reference price USD x same-round verified LIVE bank spot selling USD/TWD)); reference price is ask1 when present, else the same-day last price. Missing or non-LIVE spot selling rate gives 0 shares (FX_CONVERSION_UNVERIFIED).",
+          "stop_at_weight": 0.025,
+          "tool": "execution_policy.py --global-build-vt",
+          "whole_shares_only": true,
+          "window": "2026-11-23 to 2027-06-30"
+        },
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VT",
+          "tradingDate": "2026-11-20"
+        },
+        "spot_selling_rate": 32.5,
+        "total_assets_twd": 20942182.82,
+        "trading_date": "2026-11-23",
+        "transactions": {
+          "records": [
+            {
+              "amountTwd": 51725.0,
+              "assetCode": "VT",
+              "currency": "USD",
+              "exchangeRate": 32.5,
+              "market": "美股",
+              "shares": 10.0,
+              "tradeDate": "2026-11-02",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-23",
+            "mode": "DATE_RANGE",
+            "start": "2026-10-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-20",
+        "usd_twd_rates": [
+          32.4
+        ]
+      },
+      "kind": "VT",
+      "name": "below_min_order_shares_dedicated_policy"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.4,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": 0.014244360416675992,
+          "reference_basis": "ASK1",
+          "reference_price_usd": 150.0,
+          "share_value_twd": 4875.0,
+          "spot_selling_rate": 32.5,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2026-11-20",
+          "week_shares": 0.0,
+          "week_start": "2026-11-23"
+        },
+        "places_orders": false,
+        "reasons": [
+          "PACE_STATE_UNVERIFIED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "VT",
+        "trading_date": "2026-11-23"
+      },
+      "input": {
+        "held_value_twd": 298308.0,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VT",
+          "tradingDate": "2026-11-20"
+        },
+        "spot_selling_rate": 32.5,
+        "total_assets_twd": 20942182.82,
+        "trading_date": "2026-11-23",
+        "transactions": {
+          "records": [
+            {
+              "amountTwd": 24375.0,
+              "assetCode": "VT",
+              "currency": "USD",
+              "exchangeRate": 32.5,
+              "market": "美股",
+              "shares": 1.0,
+              "tradeDate": "2026-11-23",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-23",
+            "mode": "DATE_RANGE",
+            "start": "2026-11-10",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-20",
+        "usd_twd_rates": [
+          32.4
+        ]
+      },
+      "kind": "VT",
+      "name": "pace_unverified_late_start_records_not_walked"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.4,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": 0.014244360416675992,
+          "reference_basis": "ASK1",
+          "reference_price_usd": 150.0,
+          "share_value_twd": 4875.0,
+          "spot_selling_rate": 32.5,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2026-11-20",
+          "week_shares": 0.0,
+          "week_start": "2026-11-23"
+        },
+        "places_orders": false,
+        "reasons": [
+          "PACE_STATE_UNVERIFIED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "VT",
+        "trading_date": "2026-11-23"
+      },
+      "input": {
+        "held_value_twd": 298308.0,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VT",
+          "tradingDate": "2026-11-20"
+        },
+        "spot_selling_rate": 32.5,
+        "total_assets_twd": 20942182.82,
+        "trading_date": "2026-11-23",
+        "transactions": {
+          "records": [
+            {
+              "amountTwd": null,
+              "assetCode": "VT",
+              "currency": "USD",
+              "exchangeRate": 32.5,
+              "market": "美股",
+              "shares": 1.0,
+              "tradeDate": "2026-11-23",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-23",
+            "mode": "DATE_RANGE",
+            "start": "2026-10-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-20",
+        "usd_twd_rates": [
+          32.4
+        ]
+      },
+      "kind": "VT",
+      "name": "pace_unverified_amount_twd_null"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.4,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": 0.014244360416675992,
+          "reference_basis": "ASK1",
+          "reference_price_usd": 150.0,
+          "share_value_twd": 4875.0,
+          "spot_selling_rate": 32.5,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2026-11-20",
+          "week_shares": 0.0,
+          "week_start": "2026-11-23"
+        },
+        "places_orders": false,
+        "reasons": [
+          "PACE_STATE_UNVERIFIED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "VT",
+        "trading_date": "2026-11-23"
+      },
+      "input": {
+        "held_value_twd": 298308.0,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VT",
+          "tradingDate": "2026-11-20"
+        },
+        "spot_selling_rate": 32.5,
+        "total_assets_twd": 20942182.82,
+        "trading_date": "2026-11-23",
+        "transactions": {
+          "records": [
+            {
+              "amountTwd": 24375.0,
+              "assetCode": "VT",
+              "currency": "USD",
+              "exchangeRate": null,
+              "market": "美股",
+              "shares": 5.0,
+              "tradeDate": "2026-11-23",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-23",
+            "mode": "DATE_RANGE",
+            "start": "2026-10-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-20",
+        "usd_twd_rates": [
+          32.4
+        ]
+      },
+      "kind": "VT",
+      "name": "pace_unverified_usd_exchange_rate_null"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.4,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": 0.014244360416675992,
+          "reference_basis": "ASK1",
+          "reference_price_usd": 150.0,
+          "share_value_twd": 4875.0,
+          "spot_selling_rate": 32.5,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2026-11-20",
+          "week_shares": 0.0,
+          "week_start": "2026-11-23"
+        },
+        "places_orders": false,
+        "reasons": [
+          "PACE_STATE_UNVERIFIED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "VT",
+        "trading_date": "2026-11-23"
+      },
+      "input": {
+        "held_value_twd": 298308.0,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VT",
+          "tradingDate": "2026-11-20"
+        },
+        "spot_selling_rate": 32.5,
+        "total_assets_twd": 20942182.82,
+        "trading_date": "2026-11-23",
+        "transactions": {
+          "records": [
+            {
+              "amountTwd": 24375.0,
+              "assetCode": "VT",
+              "currency": "USD",
+              "exchangeRate": 0,
+              "market": "美股",
+              "shares": 5.0,
+              "tradeDate": "2026-11-23",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-23",
+            "mode": "DATE_RANGE",
+            "start": "2026-10-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-20",
+        "usd_twd_rates": [
+          32.4
+        ]
+      },
+      "kind": "VT",
+      "name": "pace_unverified_usd_exchange_rate_zero"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.4,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 9000.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": 0.015408279202482868,
+          "reference_basis": "ASK1",
+          "reference_price_usd": 150.0,
+          "share_value_twd": 4875.0,
+          "spot_selling_rate": 32.5,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2026-11-20",
+          "week_shares": 0.0,
+          "week_start": "2026-11-23"
+        },
+        "places_orders": false,
+        "reasons": [
+          "WITHIN_PACE_AND_TARGET"
+        ],
+        "shares": 5,
+        "status": "BUILD_SHARE_CEILING",
+        "stock_code": "VT",
+        "trading_date": "2026-11-23"
+      },
+      "input": {
+        "held_value_twd": 298308.0,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VT",
+          "tradingDate": "2026-11-20"
+        },
+        "spot_selling_rate": 32.5,
+        "total_assets_twd": 20942182.82,
+        "trading_date": "2026-11-23",
+        "transactions": {
+          "records": [
+            {
+              "amountTwd": 9000.0,
+              "assetCode": "VT",
+              "currency": "TWD",
+              "exchangeRate": null,
+              "market": "美股",
+              "shares": 2.0,
+              "tradeDate": "2026-11-02",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-23",
+            "mode": "DATE_RANGE",
+            "start": "2026-10-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-20",
+        "usd_twd_rates": [
+          32.4
+        ]
+      },
+      "kind": "VT",
+      "name": "twd_row_without_exchange_rate_is_verified"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.4,
+          "fx_status": "VERIFIED",
+          "held_value_twd": null,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": null,
+          "reference_basis": "ASK1",
+          "reference_price_usd": 150.0,
+          "share_value_twd": 4875.0,
+          "spot_selling_rate": 32.5,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2026-11-20",
+          "week_shares": 0.0,
+          "week_start": "2026-11-23"
+        },
+        "places_orders": false,
+        "reasons": [
+          "HOLDING_UNVERIFIED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "VT",
+        "trading_date": "2026-11-23"
+      },
+      "input": {
+        "held_value_twd": null,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VT",
+          "tradingDate": "2026-11-20"
+        },
+        "spot_selling_rate": 32.5,
+        "total_assets_twd": 20942182.82,
+        "trading_date": "2026-11-23",
+        "transactions": {
+          "records": [],
+          "selection": {
+            "end": "2026-11-23",
+            "mode": "DATE_RANGE",
+            "start": "2026-10-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-20",
+        "usd_twd_rates": [
+          32.4
+        ]
+      },
+      "kind": "VT",
+      "name": "holding_unverified"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.4,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": null,
+          "reference_basis": "ASK1",
+          "reference_price_usd": 150.0,
+          "share_value_twd": 4875.0,
+          "spot_selling_rate": 32.5,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": null,
+          "us_session_date": "2026-11-20",
+          "week_shares": 0.0,
+          "week_start": "2026-11-23"
+        },
+        "places_orders": false,
+        "reasons": [
+          "TOTAL_ASSETS_UNVERIFIED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "VT",
+        "trading_date": "2026-11-23"
+      },
+      "input": {
+        "held_value_twd": 298308.0,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VT",
+          "tradingDate": "2026-11-20"
+        },
+        "spot_selling_rate": 32.5,
+        "total_assets_twd": null,
+        "trading_date": "2026-11-23",
+        "transactions": {
+          "records": [],
+          "selection": {
+            "end": "2026-11-23",
+            "mode": "DATE_RANGE",
+            "start": "2026-10-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-20",
+        "usd_twd_rates": [
+          32.4
+        ]
+      },
+      "kind": "VT",
+      "name": "total_assets_unverified"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.4,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 20000.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": 0.015408279202482868,
+          "reference_basis": "ASK1",
+          "reference_price_usd": 150.0,
+          "share_value_twd": 4875.0,
+          "spot_selling_rate": 32.5,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2026-11-20",
+          "week_shares": 10.0,
+          "week_start": "2026-11-23"
+        },
+        "places_orders": false,
+        "reasons": [
+          "WITHIN_PACE_AND_TARGET"
+        ],
+        "shares": 5,
+        "status": "BUILD_SHARE_CEILING",
+        "stock_code": "VT",
+        "trading_date": "2026-11-24"
+      },
+      "input": {
+        "held_value_twd": 298308.0,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VT",
+          "tradingDate": "2026-11-20"
+        },
+        "spot_selling_rate": 32.5,
+        "total_assets_twd": 20942182.82,
+        "trading_date": "2026-11-24",
+        "transactions": {
+          "records": [
+            {
+              "amountTwd": 20000.0,
+              "assetCode": "VT",
+              "currency": "USD",
+              "exchangeRate": 32.5,
+              "market": "美股",
+              "shares": 10.0,
+              "tradeDate": "2026-11-23",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-24",
+            "mode": "DATE_RANGE",
+            "start": "2026-10-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-20",
+        "usd_twd_rates": [
+          32.4
+        ]
+      },
+      "kind": "VT",
+      "name": "room_exactly_five_week"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.4,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 11375.0,
+          "month_start": "2027-01-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": 0.015408279202482868,
+          "reference_basis": "ASK1",
+          "reference_price_usd": 150.0,
+          "share_value_twd": 4875.0,
+          "spot_selling_rate": 32.5,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2027-01-05",
+          "week_shares": 2.22533,
+          "week_start": "2027-01-04"
+        },
+        "places_orders": false,
+        "reasons": [
+          "WITHIN_PACE_AND_TARGET"
+        ],
+        "shares": 5,
+        "status": "BUILD_SHARE_CEILING",
+        "stock_code": "VT",
+        "trading_date": "2027-01-06"
+      },
+      "input": {
+        "held_value_twd": 298308.0,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VT",
+          "tradingDate": "2027-01-05"
+        },
+        "spot_selling_rate": 32.5,
+        "total_assets_twd": 20942182.82,
+        "trading_date": "2027-01-06",
+        "transactions": {
+          "records": [
+            {
+              "amountTwd": 11375.0,
+              "assetCode": "VT",
+              "currency": "USD",
+              "exchangeRate": 32.5,
+              "market": "美股",
+              "shares": 2.22533,
+              "tradeDate": "2027-01-05",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2027-01-06",
+            "mode": "DATE_RANGE",
+            "start": "2027-01-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2027-01-05",
+        "usd_twd_rates": [
+          32.4
+        ]
+      },
+      "kind": "VT",
+      "name": "d182_dca_usd_ledger_row"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.4,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 11375.0,
+          "month_start": "2027-01-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": 0.015408279202482868,
+          "reference_basis": "ASK1",
+          "reference_price_usd": 150.0,
+          "share_value_twd": 4875.0,
+          "spot_selling_rate": 32.5,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2027-01-05",
+          "week_shares": 2.22533,
+          "week_start": "2027-01-04"
+        },
+        "places_orders": false,
+        "reasons": [
+          "WITHIN_PACE_AND_TARGET"
+        ],
+        "shares": 5,
+        "status": "BUILD_SHARE_CEILING",
+        "stock_code": "VT",
+        "trading_date": "2027-01-06"
+      },
+      "input": {
+        "held_value_twd": 298308.0,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VT",
+          "tradingDate": "2027-01-05"
+        },
+        "spot_selling_rate": 32.5,
+        "total_assets_twd": 20942182.82,
+        "trading_date": "2027-01-06",
+        "transactions": {
+          "records": [
+            {
+              "amountTwd": 11375.0,
+              "assetCode": "VT",
+              "currency": "TWD",
+              "exchangeRate": null,
+              "market": "美股",
+              "shares": 2.22533,
+              "tradeDate": "2027-01-05",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2027-01-06",
+            "mode": "DATE_RANGE",
+            "start": "2027-01-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2027-01-05",
+        "usd_twd_rates": [
+          32.4
+        ]
+      },
+      "kind": "VT",
+      "name": "d182_dca_twd_ledger_row_same_consumption"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.4,
+          "fx_status": "VERIFIED",
+          "held_value_twd": null,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 0.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": null,
+          "reference_basis": "LAST_PRICE",
+          "reference_price_usd": null,
+          "share_value_twd": null,
+          "spot_selling_rate": null,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": null,
+          "us_session_date": "2026-11-20",
+          "week_shares": 0.0,
+          "week_start": "2026-11-16"
+        },
+        "places_orders": false,
+        "reasons": [
+          "BEFORE_EARLIEST_BUY_DATE",
+          "QUOTE_UNVERIFIED",
+          "FX_CONVERSION_UNVERIFIED",
+          "TOTAL_ASSETS_UNVERIFIED",
+          "HOLDING_UNVERIFIED",
+          "PACE_STATE_UNVERIFIED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "VT",
+        "trading_date": "2026-11-20"
+      },
+      "input": {
+        "held_value_twd": null,
+        "quote": {
+          "market": "美股",
+          "price": 149.9,
+          "sellPrice": 150.0,
+          "stockCode": "VOO",
+          "tradingDate": "2026-11-20"
+        },
+        "spot_selling_rate": null,
+        "total_assets_twd": null,
+        "trading_date": "2026-11-20",
+        "transactions": {
+          "records": [],
+          "selection": {
+            "end": "2026-11-20",
+            "mode": "DATE_RANGE",
+            "start": "2026-11-16",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-20",
+        "usd_twd_rates": [
+          32.4
+        ]
+      },
+      "kind": "VT",
+      "name": "multiple_codes_in_formula_order"
+    },
+    {
+      "expected": {
+        "held_value_twd": 30240.0,
+        "total_assets_twd": 20563384.92,
+        "usd_twd_rates": [
+          32.47,
+          32.69
+        ]
+      },
+      "input": {
+        "assets": {
+          "liveAssets": {
+            "liveTotalAssets": 20563384.92,
+            "stocks": [
+              {
+                "liveValue": 20160,
+                "market": "台股",
+                "stockCode": "009826"
+              },
+              {
+                "liveValue": 10080,
+                "market": "台股",
+                "stockCode": "009826"
+              },
+              {
+                "liveValue": 0,
+                "market": "台股",
+                "stockCode": "009826"
+              },
+              {
+                "liveValue": 723354,
+                "market": "台股",
+                "stockCode": "0050"
+              }
+            ]
+          }
+        },
+        "fx": {
+          "history": [
+            {
+              "date": "2026-10-30",
+              "midRate": 33.4
+            },
+            {
+              "date": "2026-11-01",
+              "midRate": 32.47
+            },
+            {
+              "date": "2026-11-03",
+              "midRate": 33.5
+            }
+          ],
+          "spot": {
+            "date": "2026-11-02",
+            "midRate": 32.69,
+            "quoteStatus": "LIVE",
+            "sellRate": 32.74
+          }
+        },
+        "trading_date": "2026-11-02"
+      },
+      "kind": "api009826",
+      "name": "multi_account_sum_with_zero_and_month_history_filter"
+    },
+    {
+      "expected": {
+        "held_value_twd": null,
+        "total_assets_twd": null,
+        "usd_twd_rates": []
+      },
+      "input": {
+        "assets": {},
+        "fx": {},
+        "trading_date": "2026-11-02"
+      },
+      "kind": "api009826",
+      "name": "empty_inputs"
+    },
+    {
+      "expected": {
+        "held_value_twd": 30240.0,
+        "total_assets_twd": 20563384.92,
+        "usd_twd_rates": []
+      },
+      "input": {
+        "assets": {
+          "liveAssets": {
+            "liveTotalAssets": 20563384.92,
+            "stocks": [
+              {
+                "liveValue": 20160,
+                "market": "台股",
+                "stockCode": "009826"
+              },
+              {
+                "liveValue": 10080,
+                "market": "台股",
+                "stockCode": "009826"
+              },
+              {
+                "liveValue": 0,
+                "market": "台股",
+                "stockCode": "009826"
+              },
+              {
+                "liveValue": 723354,
+                "market": "台股",
+                "stockCode": "0050"
+              }
+            ]
+          }
+        },
+        "fx": {
+          "history": [],
+          "spot": {
+            "date": "2026-11-02",
+            "midRate": 32.69,
+            "quoteStatus": "DELAYED",
+            "sellRate": 32.74
+          }
+        },
+        "trading_date": "2026-11-02"
+      },
+      "kind": "api009826",
+      "name": "spot_not_live_excluded"
+    },
+    {
+      "expected": {
+        "held_value_twd": 30240.0,
+        "total_assets_twd": 20563384.92,
+        "usd_twd_rates": []
+      },
+      "input": {
+        "assets": {
+          "liveAssets": {
+            "liveTotalAssets": 20563384.92,
+            "stocks": [
+              {
+                "liveValue": 20160,
+                "market": "台股",
+                "stockCode": "009826"
+              },
+              {
+                "liveValue": 10080,
+                "market": "台股",
+                "stockCode": "009826"
+              },
+              {
+                "liveValue": 0,
+                "market": "台股",
+                "stockCode": "009826"
+              },
+              {
+                "liveValue": 723354,
+                "market": "台股",
+                "stockCode": "0050"
+              }
+            ]
+          }
+        },
+        "fx": {
+          "history": [],
+          "spot": {
+            "date": "2026-10-30",
+            "midRate": 32.69,
+            "quoteStatus": "LIVE",
+            "sellRate": 32.74
+          }
+        },
+        "trading_date": "2026-11-02"
+      },
+      "kind": "api009826",
+      "name": "spot_date_mismatch_excluded"
+    },
+    {
+      "expected": {
+        "held_value_twd": null,
+        "total_assets_twd": 20563384.92,
+        "usd_twd_rates": [
+          32.47,
+          32.69
+        ]
+      },
+      "input": {
+        "assets": {
+          "liveAssets": {
+            "liveTotalAssets": 20563384.92,
+            "stocks": [
+              {
+                "liveValue": true,
+                "market": "台股",
+                "stockCode": "009826"
+              }
+            ]
+          }
+        },
+        "fx": {
+          "history": [
+            {
+              "date": "2026-10-30",
+              "midRate": 33.4
+            },
+            {
+              "date": "2026-11-01",
+              "midRate": 32.47
+            },
+            {
+              "date": "2026-11-03",
+              "midRate": 33.5
+            }
+          ],
+          "spot": {
+            "date": "2026-11-02",
+            "midRate": 32.69,
+            "quoteStatus": "LIVE",
+            "sellRate": 32.74
+          }
+        },
+        "trading_date": "2026-11-02"
+      },
+      "kind": "api009826",
+      "name": "boolean_holding_value_is_none"
+    },
+    {
+      "expected": {
+        "held_value_twd": 0.0,
+        "total_assets_twd": null,
+        "usd_twd_rates": [
+          32.47,
+          32.69
+        ]
+      },
+      "input": {
+        "assets": {
+          "liveAssets": {
+            "liveTotalAssets": 0,
+            "stocks": []
+          }
+        },
+        "fx": {
+          "history": [
+            {
+              "date": "2026-10-30",
+              "midRate": 33.4
+            },
+            {
+              "date": "2026-11-01",
+              "midRate": 32.47
+            },
+            {
+              "date": "2026-11-03",
+              "midRate": 33.5
+            }
+          ],
+          "spot": {
+            "date": "2026-11-02",
+            "midRate": 32.69,
+            "quoteStatus": "LIVE",
+            "sellRate": 32.74
+          }
+        },
+        "trading_date": "2026-11-02"
+      },
+      "kind": "api009826",
+      "name": "no_holding_rows_is_zero_and_bad_total_none"
+    },
+    {
+      "expected": {
+        "held_value_twd": 265689.0,
+        "spot_selling_rate": 32.45,
+        "total_assets_twd": 20942182.82,
+        "usd_twd_rates": [
+          32.35,
+          32.4
+        ]
+      },
+      "input": {
+        "assets": {
+          "liveAssets": {
+            "liveTotalAssets": 20942182.82,
+            "stocks": [
+              {
+                "liveValue": 46598,
+                "market": "美股",
+                "stockCode": "VT"
+              },
+              {
+                "liveValue": 219091,
+                "market": "美股",
+                "stockCode": "VT"
+              },
+              {
+                "liveValue": 0,
+                "market": "美股",
+                "stockCode": "VT"
+              },
+              {
+                "liveValue": 86670,
+                "market": "台股",
+                "stockCode": "009826"
+              }
+            ]
+          }
+        },
+        "fx": {
+          "history": [
+            {
+              "date": "2026-10-31",
+              "midRate": 33.2
+            },
+            {
+              "date": "2026-11-20",
+              "midRate": 32.35
+            }
+          ],
+          "spot": {
+            "date": "2026-11-23",
+            "midRate": 32.4,
+            "quoteStatus": "LIVE",
+            "sellRate": 32.45
+          }
+        },
+        "trading_date": "2026-11-23"
+      },
+      "kind": "apiVt",
+      "name": "all_vt_accounts_live_selling_rate"
+    },
+    {
+      "expected": {
+        "held_value_twd": 265689.0,
+        "spot_selling_rate": null,
+        "total_assets_twd": 20942182.82,
+        "usd_twd_rates": []
+      },
+      "input": {
+        "assets": {
+          "liveAssets": {
+            "liveTotalAssets": 20942182.82,
+            "stocks": [
+              {
+                "liveValue": 46598,
+                "market": "美股",
+                "stockCode": "VT"
+              },
+              {
+                "liveValue": 219091,
+                "market": "美股",
+                "stockCode": "VT"
+              },
+              {
+                "liveValue": 0,
+                "market": "美股",
+                "stockCode": "VT"
+              },
+              {
+                "liveValue": 86670,
+                "market": "台股",
+                "stockCode": "009826"
+              }
+            ]
+          }
+        },
+        "fx": {
+          "spot": {
+            "date": "2026-11-20",
+            "midRate": 32.4,
+            "quoteStatus": "LIVE",
+            "sellRate": 32.45
+          }
+        },
+        "trading_date": "2026-11-23"
+      },
+      "kind": "apiVt",
+      "name": "spot_date_mismatch_selling_none"
+    },
+    {
+      "expected": {
+        "held_value_twd": 265689.0,
+        "spot_selling_rate": null,
+        "total_assets_twd": 20942182.82,
+        "usd_twd_rates": [
+          32.35
+        ]
+      },
+      "input": {
+        "assets": {
+          "liveAssets": {
+            "liveTotalAssets": 20942182.82,
+            "stocks": [
+              {
+                "liveValue": 46598,
+                "market": "美股",
+                "stockCode": "VT"
+              },
+              {
+                "liveValue": 219091,
+                "market": "美股",
+                "stockCode": "VT"
+              },
+              {
+                "liveValue": 0,
+                "market": "美股",
+                "stockCode": "VT"
+              },
+              {
+                "liveValue": 86670,
+                "market": "台股",
+                "stockCode": "009826"
+              }
+            ]
+          }
+        },
+        "fx": {
+          "history": [
+            {
+              "date": "2026-10-31",
+              "midRate": 33.2
+            },
+            {
+              "date": "2026-11-20",
+              "midRate": 32.35
+            }
+          ],
+          "spot": {
+            "date": "2026-11-23",
+            "midRate": 32.4,
+            "quoteStatus": "INDICATIVE",
+            "sellRate": 32.45
+          }
+        },
+        "trading_date": "2026-11-23"
+      },
+      "kind": "apiVt",
+      "name": "spot_not_live_selling_none"
+    },
+    {
+      "expected": {
+        "held_value_twd": null,
+        "spot_selling_rate": 32.45,
+        "total_assets_twd": 20942182.82,
+        "usd_twd_rates": [
+          32.35,
+          32.4
+        ]
+      },
+      "input": {
+        "assets": {
+          "liveAssets": {
+            "liveTotalAssets": 20942182.82,
+            "stocks": [
+              {
+                "liveValue": false,
+                "market": "美股",
+                "stockCode": "VT"
+              }
+            ]
+          }
+        },
+        "fx": {
+          "history": [
+            {
+              "date": "2026-10-31",
+              "midRate": 33.2
+            },
+            {
+              "date": "2026-11-20",
+              "midRate": 32.35
+            }
+          ],
+          "spot": {
+            "date": "2026-11-23",
+            "midRate": 32.4,
+            "quoteStatus": "LIVE",
+            "sellRate": 32.45
+          }
+        },
+        "trading_date": "2026-11-23"
+      },
+      "kind": "apiVt",
+      "name": "boolean_vt_holding_is_none"
+    },
+    {
+      "expected": {
+        "held_value_twd": null,
+        "spot_selling_rate": null,
+        "total_assets_twd": null,
+        "usd_twd_rates": []
+      },
+      "input": {
+        "assets": {},
+        "fx": null,
+        "trading_date": "2026-11-23"
+      },
+      "kind": "apiVt",
+      "name": "empty_inputs"
+    },
+    {
+      "expected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.0,
+          "fx_halved": true,
+          "fx_month_max_mid": null,
+          "fx_status": "UNVERIFIED_ASSUMED_HALVED",
+          "held_value_twd": 0.0,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 10000.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 70000.0,
+          "monthly_cap_twd_effective": 105000.0,
+          "post_buy_weight": 0.001441110521257497,
+          "reference_basis": "ASK1",
+          "reference_price": 10.06,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20942182.82,
+          "week_lots": 0.0,
+          "week_start": "2026-11-23"
+        },
+        "lots": 3,
+        "places_orders": false,
+        "reasons": [
+          "WITHIN_PACE_AND_TARGET"
+        ],
+        "shares": 3000,
+        "status": "BUILD_LOT_CEILING",
+        "stock_code": "009826",
+        "trading_date": "2026-11-24"
+      },
+      "input": {
+        "assets": {
+          "liveAssets": {
+            "liveTotalAssets": 20942182.82,
+            "stocks": [
+              {
+                "liveValue": 298308,
+                "market": "美股",
+                "stockCode": "VT"
+              }
+            ]
+          }
+        },
+        "captured_at": "2026-11-24T01:35:00Z",
+        "fx": {
+          "buyRate": 32.45,
+          "date": "2026-11-24",
+          "quoteStatus": "INDICATIVE",
+          "sellRate": 32.55
+        },
+        "fx_rows": [
+          {
+            "buyRate": 33.5,
+            "date": "2026-10-30",
+            "sellRate": 33.4
+          },
+          {
+            "buyRate": 32.3,
+            "date": "2026-11-02",
+            "sellRate": 32.4
+          },
+          {
+            "buyRate": 32.4,
+            "date": "2026-11-23",
+            "sellRate": 32.5
+          }
+        ],
+        "market_009826": {
+          "book": {
+            "available": true,
+            "levels": [
+              {
+                "askPrice": 10.06,
+                "askVolumeLots": 10,
+                "bidPrice": 10.04,
+                "bidVolumeLots": 10,
+                "level": 1
+              },
+              {
+                "askPrice": 10.07,
+                "askVolumeLots": 10,
+                "bidPrice": 10.03,
+                "bidVolumeLots": 10,
+                "level": 2
+              },
+              {
+                "askPrice": 10.08,
+                "askVolumeLots": 10,
+                "bidPrice": 10.02,
+                "bidVolumeLots": 10,
+                "level": 3
+              },
+              {
+                "askPrice": 10.09,
+                "askVolumeLots": 10,
+                "bidPrice": 10.01,
+                "bidVolumeLots": 10,
+                "level": 4
+              },
+              {
+                "askPrice": 10.1,
+                "askVolumeLots": 10,
+                "bidPrice": 10.0,
+                "bidVolumeLots": 10,
+                "level": 5
+              }
+            ],
+            "marketStatus": "OPEN",
+            "previousClose": 10.0,
+            "price": 10.05,
+            "source": "FUBON_BOOKS",
+            "sourceTime": "2026-11-24T01:30:00Z",
+            "supported": true
+          },
+          "quote": {
+            "market": "台股",
+            "price": 10.05,
+            "stockCode": "009826",
+            "tradingDate": "2026-11-24"
+          }
+        },
+        "market_vt": {
+          "calendarVerified": true,
+          "completedSessions": [
+            "2026-11-20",
+            "2026-11-23"
+          ],
+          "quote": {
+            "market": "美股",
+            "price": 149.9,
+            "sellPrice": 150.0,
+            "stockCode": "VT",
+            "tradingDate": "2026-11-23"
+          }
+        },
+        "trading_date": "2026-11-24",
+        "transactions": {
+          "records": [
+            {
+              "amountTwd": 9000.0,
+              "assetCode": "VT",
+              "currency": "USD",
+              "exchangeRate": 32.5,
+              "market": "美股",
+              "shares": 2.0,
+              "tradeDate": "2026-11-02",
+              "transactionType": "買"
+            },
+            {
+              "amount": 10000.0,
+              "assetCode": "009826",
+              "market": "台股",
+              "price": 10.0,
+              "shares": 1000.0,
+              "tradeDate": "2026-11-03",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-24",
+            "mode": "DATE_RANGE",
+            "start": "2026-11-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-23"
+      },
+      "javaExpected": {
+        "decision": "D-222",
+        "evidence": {
+          "day_lots": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.45,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 0.0,
+          "max_lots_per_day": 3,
+          "max_lots_per_week": 6,
+          "month_amount_twd": 10000.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 140000.0,
+          "monthly_cap_twd_effective": 210000.0,
+          "post_buy_weight": 0.001441110521257497,
+          "reference_basis": "ASK1",
+          "reference_price": 10.06,
+          "stop_at_weight": 0.02,
+          "total_assets_twd": 20942182.82,
+          "week_lots": 0.0,
+          "week_start": "2026-11-23"
+        },
+        "lots": 3,
+        "places_orders": false,
+        "reasons": [
+          "WITHIN_PACE_AND_TARGET"
+        ],
+        "shares": 3000,
+        "status": "BUILD_LOT_CEILING",
+        "stock_code": "009826",
+        "trading_date": "2026-11-24"
+      },
+      "kind": "api009826",
+      "knownDifference": "KNOWN_DIFFERENCE_MIDS_WINDOW",
+      "name": "api009826_mids_out_of_month_bad_row_known_difference"
+    },
+    {
+      "expected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": true,
+          "fx_month_max_mid": null,
+          "fx_status": "UNVERIFIED_ASSUMED_HALVED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 9000.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 26666.5,
+          "monthly_cap_twd_effective": 40000.0,
+          "post_buy_weight": null,
+          "reference_basis": "ASK1",
+          "reference_price_usd": 150.0,
+          "share_value_twd": null,
+          "spot_selling_rate": null,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2026-11-23",
+          "week_shares": 0.0,
+          "week_start": "2026-11-23"
+        },
+        "places_orders": false,
+        "reasons": [
+          "FX_CONVERSION_UNVERIFIED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "VT",
+        "trading_date": "2026-11-24"
+      },
+      "input": {
+        "assets": {
+          "liveAssets": {
+            "liveTotalAssets": 20942182.82,
+            "stocks": [
+              {
+                "liveValue": 298308,
+                "market": "美股",
+                "stockCode": "VT"
+              }
+            ]
+          }
+        },
+        "captured_at": "2026-11-24T01:35:00Z",
+        "fx": {
+          "buyRate": 32.45,
+          "date": "2026-11-24",
+          "quoteStatus": "INDICATIVE",
+          "sellRate": 32.55
+        },
+        "fx_rows": [
+          {
+            "buyRate": 33.5,
+            "date": "2026-10-30",
+            "sellRate": 33.4
+          },
+          {
+            "buyRate": 32.3,
+            "date": "2026-11-02",
+            "sellRate": 32.4
+          },
+          {
+            "buyRate": 32.4,
+            "date": "2026-11-23",
+            "sellRate": 32.5
+          }
+        ],
+        "market_009826": {
+          "book": {
+            "available": true,
+            "levels": [
+              {
+                "askPrice": 10.06,
+                "askVolumeLots": 10,
+                "bidPrice": 10.04,
+                "bidVolumeLots": 10,
+                "level": 1
+              },
+              {
+                "askPrice": 10.07,
+                "askVolumeLots": 10,
+                "bidPrice": 10.03,
+                "bidVolumeLots": 10,
+                "level": 2
+              },
+              {
+                "askPrice": 10.08,
+                "askVolumeLots": 10,
+                "bidPrice": 10.02,
+                "bidVolumeLots": 10,
+                "level": 3
+              },
+              {
+                "askPrice": 10.09,
+                "askVolumeLots": 10,
+                "bidPrice": 10.01,
+                "bidVolumeLots": 10,
+                "level": 4
+              },
+              {
+                "askPrice": 10.1,
+                "askVolumeLots": 10,
+                "bidPrice": 10.0,
+                "bidVolumeLots": 10,
+                "level": 5
+              }
+            ],
+            "marketStatus": "OPEN",
+            "previousClose": 10.0,
+            "price": 10.05,
+            "source": "FUBON_BOOKS",
+            "sourceTime": "2026-11-24T01:30:00Z",
+            "supported": true
+          },
+          "quote": {
+            "market": "台股",
+            "price": 10.05,
+            "stockCode": "009826",
+            "tradingDate": "2026-11-24"
+          }
+        },
+        "market_vt": {
+          "calendarVerified": true,
+          "completedSessions": [
+            "2026-11-20",
+            "2026-11-23"
+          ],
+          "quote": {
+            "market": "美股",
+            "price": 149.9,
+            "sellPrice": 150.0,
+            "stockCode": "VT",
+            "tradingDate": "2026-11-23"
+          }
+        },
+        "trading_date": "2026-11-24",
+        "transactions": {
+          "records": [
+            {
+              "amountTwd": 9000.0,
+              "assetCode": "VT",
+              "currency": "USD",
+              "exchangeRate": 32.5,
+              "market": "美股",
+              "shares": 2.0,
+              "tradeDate": "2026-11-02",
+              "transactionType": "買"
+            },
+            {
+              "amount": 10000.0,
+              "assetCode": "009826",
+              "market": "台股",
+              "price": 10.0,
+              "shares": 1000.0,
+              "tradeDate": "2026-11-03",
+              "transactionType": "買"
+            }
+          ],
+          "selection": {
+            "end": "2026-11-24",
+            "mode": "DATE_RANGE",
+            "start": "2026-11-01",
+            "year": null
+          }
+        },
+        "us_session_date": "2026-11-23"
+      },
+      "javaExpected": {
+        "decision": "D-234",
+        "evidence": {
+          "day_shares": 0.0,
+          "fx_halved": false,
+          "fx_month_max_mid": 32.45,
+          "fx_status": "VERIFIED",
+          "held_value_twd": 298308.0,
+          "max_shares_per_day": 5,
+          "max_shares_per_week": 15,
+          "min_shares_per_order": 5,
+          "month_amount_twd": 9000.0,
+          "month_start": "2026-11-01",
+          "monthly_baseline_twd_effective": 53333.0,
+          "monthly_cap_twd_effective": 80000.0,
+          "post_buy_weight": null,
+          "reference_basis": "ASK1",
+          "reference_price_usd": 150.0,
+          "share_value_twd": null,
+          "spot_selling_rate": null,
+          "stop_at_weight": 0.025,
+          "total_assets_twd": 20942182.82,
+          "us_session_date": "2026-11-23",
+          "week_shares": 0.0,
+          "week_start": "2026-11-23"
+        },
+        "places_orders": false,
+        "reasons": [
+          "FX_CONVERSION_UNVERIFIED"
+        ],
+        "shares": 0,
+        "status": "BUILD_ZERO",
+        "stock_code": "VT",
+        "trading_date": "2026-11-24"
+      },
+      "kind": "apiVt",
+      "knownDifference": "KNOWN_DIFFERENCE_MIDS_WINDOW",
+      "name": "apiVt_mids_out_of_month_bad_row_known_difference"
+    }
+  ],
+  "policy": {
+    "009826": {
+      "build_clarification": "2026-11-02 clarification of D-143; no cadence number changed.",
+      "ceiling_is_default_fill": true,
+      "earliest_buy_date": "2026-11-02",
+      "earliest_buy_date_requires_tw_true": true,
+      "fx_halving_threshold": 33.0,
+      "lot_note": "Whichever binds first under D-222: 6 lots per verified Taiwan trading week, 3 lots per day, and the 210,000 TWD monthly cap. Lot count depends on the prevailing price, the TWD cap governs.",
+      "max_lots_per_day": 3,
+      "max_lots_per_week": 6,
+      "monthly_baseline_twd": 140000,
+      "monthly_cap_twd": 210000,
+      "pace_consumed_only_by_confirmed_fills": true,
+      "pace_state_unverified_lots": 0,
+      "stop_at_weight": 0.02,
+      "tool": "execution_policy.py --global-build-009826",
+      "window": "2026-11-02 to 2027-06-30"
+    },
+    "VT": {
+      "baseline_note": "Steven 2026-11-22: about NT$225,000 gap to the 2.5% target; monthly cap raised to NT$80,000 so one 5-share order fits after the US$350 debit, baseline NT$53,333 keeps cap = 1.5 x baseline as for 009826.",
+      "ceiling_is_default_fill": true,
+      "decision": "D-234",
+      "earliest_buy_date": "2026-11-23",
+      "funding": "Cathay TWD sub-brokerage only. The TWD debit (shares x reference price x spot selling rate + US$3 fee at the same rate) must pass the D-152 all-bank TWD post-buy floors; USD deposits are not used for this leg.",
+      "fx_halving": "Same as 009826: a month whose verified USD/TWD mid ever exceeded fx_halving_threshold halves that month's baseline and cap; unknown month FX assumes halved.",
+      "fx_halving_threshold": 33.0,
+      "gates_retained": "D-188/D-205 high-point gate, D-215 USD FX preference, radar/quote/depth/dedup hard gates, 009826+VT pair 4.5% and global-equity group cap stay unchanged.",
+      "max_shares_per_day": 5,
+      "max_shares_per_week": 15,
+      "min_order_note": "Steven 2026-11-22: Cathay sub-brokerage charges US$3 per trade, so a ceiling below 5 whole shares is 0 shares (BELOW_MIN_ORDER_SHARES), never a 1- to 4-share order.",
+      "min_shares_per_order": 5,
+      "monthly_baseline_twd": 53333,
+      "monthly_cap_includes_scheduled_dca": true,
+      "monthly_cap_twd": 80000,
+      "pace_consumed_only_by_confirmed_fills": true,
+      "pace_state_unverified_shares": 0,
+      "role": "Global all-cap satellite paired with 009826 (D-139/D-141 fund-family pair); built to its 2.5% target with the same confirmed-fill pace mechanics as 009826, in whole US shares.",
+      "scheduled_dca_note": "Every confirmed VT buy fill, including the 5th-of-month US$350 D-182 instruction, consumes the monthly TWD amount (amountTwd) and the daily/weekly share counts. Fees are separately funded and excluded, as for VOO.",
+      "share_conversion": "shares = floor(remaining room TWD / (reference price USD x same-round verified LIVE bank spot selling USD/TWD)); reference price is ask1 when present, else the same-day last price. Missing or non-LIVE spot selling rate gives 0 shares (FX_CONVERSION_UNVERIFIED).",
+      "stop_at_weight": 0.025,
+      "tool": "execution_policy.py --global-build-vt",
+      "whole_shares_only": true,
+      "window": "2026-11-23 to 2027-06-30"
+    }
+  },
+  "schema": "SATELLITE_BUILD_ORIGINAL_SRPP_GOLDEN_V1"
+}

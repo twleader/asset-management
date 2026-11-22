@@ -7281,3 +7281,50 @@ D223買方以精確ADD_CANDIDATE及consumer同輪LLM採納獨立評估；不套D
 
 - 台股正式報告計算對同 owner 的實際正持倉列出精確同輪雷達數值與 D-227 門檻證據。D 等於 80 未達標，區間位置等於 0.80 達標。無可驗證雷達或數值時回傳缺口。
 - 門檻證據只供報告引用。SRPP 仍須逐標的核對台股熊市、市場狀態、既有減碼方向及交易檢核，並由 LLM 綜合技術線形與外部環境裁決。資產端不產生金額、數量、委託或部位變更。
+
+## Requirement 220：SRPP 衛星建倉腿 009826（張）與 VT（股）通用節奏計算（Task 623）
+
+**User Story：** 身為 SRPP 日報使用者，我希望 9090 台股報告的 GLOBAL_EQUITY_PACE 直接以我已成交的買進紀錄算出 009826 張數與 VT 股數的建倉上限並輸出買進腿，兩軌（Codex／Claude）不再各自本機計算而產生分歧。
+
+**Acceptance Criteria：**
+1. 只在正式 bundle 的 `global_equity_build_cadence_d141.VT.decision` 為 D-234 時啟用；舊 bundle 的 GLOBAL_EQUITY_PACE 輸出逐位元不變。全部節奏數值（期間、日／週上限、月基準／上限、停止比重、每筆最少 5 股、匯率減半門檻 33.00）一律讀設定。
+2. 日／週／月消耗由同 owner `asset_transaction` 中同代號、同市場、`買`、交易日不晚於當日的紀錄直接計算，凍結為新的 owner-bound 來源 `satellite-build-fills`（選取區間為當月 1 日與當週週一較早者至交易日），不使用從未產生的 `global-pace` stateBefore。009826 計 `amount` 與 `shares/1000`；VT 計 `amountTwd`（含每月 5 日 US$350 定期定額；美元存款不足改由國泰台幣扣款的定期定額同樣以 `amountTwd` 計入）與 `shares`，任一 USD 成交的 `exchangeRate` 為 null 或 ≤0 即節奏無法核實（PACE_STATE_UNVERIFIED、0 股）。當月 USD/TWD 中價另凍結為 `usd-twd-month-mids`。
+3. 計算結果與 SRPP `global_build_009826`／`global_build_vt`（含 API 輸入轉接）逐欄等價：整數張／股與狀態碼、原因順序完全相同，其餘數值容差 1e-9；以 SRPP 原始碼產生的 golden 每檔至少 10 組並涵蓋每個阻擋碼與邊界。
+4. 阻擋碼與 0 量規則與參考實作相同：共通 BEFORE_EARLIEST_BUY_DATE、BUILD_WINDOW_CLOSED、QUOTE_UNVERIFIED、TOTAL_ASSETS_UNVERIFIED、HOLDING_UNVERIFIED、PACE_STATE_UNVERIFIED；009826 另有 DAILY_LOT_LIMIT、WEEKLY_LOT_LIMIT、MONTHLY_CAP、TARGET_WEIGHT_REACHED；VT 另有 FX_CONVERSION_UNVERIFIED、DAILY_SHARE_LIMIT、WEEKLY_SHARE_LIMIT、MONTHLY_CAP、TARGET_WEIGHT_REACHED、BELOW_MIN_ORDER_SHARES。VT 報價日期必須等於快取美股日曆上最近完成的美股交易日；VT 股數以同輪 LIVE 銀行即期賣出匯率換算。月內匯率未知（含 `usd-twd-month-mids` 或 `fx` 來源未驗證）時視為減半，上限仍可為正，收據不引用未驗證的匯率來源並揭露匯率狀態。當月中價來源只驗當月列（含買價高於賣價即無效），與 SRPP 端驗整個兩年窗的差異列為已知差異並以 golden 斷言。
+5. GLOBAL_EQUITY_PACE 每輪輸出兩條 BUY 腿：009826（台股、TWD、lots、units=null、富邦證券、子帳 CORE_D143）與 VT（美股、USD、國泰證券台幣複委託、子帳 CORE_D234、lots=null、units 整數字串、limitPrice 為參考美元價、附 FX_CONVERSION 收據 spotSellingRate／twdAmount／twdFee=3×匯率）。0 量為 BLOCKED 並列原因。計算結果為正時，腿收據只有在其引用來源全部已驗證時才可 PASS；否則收據具名 `SOURCE_NOT_VERIFIED:<來源>`、腿 BLOCKED 0，避免 BFF 拒絕整份報告。VT 腿以台幣資金池扣款。台股報告「只允台股 individual leg」僅對這條 VT 建倉腿放寬，Swagger、business 與 BFF 驗證同步更新，其他模組與策略不放寬。
+6. 收盤後初始化包（`publication-context` 的 mode 為 AFTER_CLOSE_INITIALIZATION）中，009826 與 VT 兩條腿一律 BLOCKED 0，原因 `AFTER_CLOSE_INITIALIZATION_NON_EXECUTABLE`；facts 與模組收據保留純計算結果，整包仍通過收盤後不可執行驗證。D-234／D-143 節奏只由已確認成交消耗：先前報告中未成交的 009826／VT 建倉腿不列入跨報告的預留（report-reservations），不逐日累積扣用資金，VT 也不進入 USD 池，缺 VT 分類時不使高股息補買的預留驗證失敗；同一報告內兩腿仍與其他腿共用台幣資金池。
+7. VOO 節奏 facts 與行為不變。腿只是容量上限：D-188／D-205 高點、D-215 匯率偏好、雷達、深度、去重、D-152 資金仍在各自既有位置；LLM 只可具名 WAIT／VETO。不新增路由、不下單、不刷新、不寄信，券商只讀。
+8. 公式身分 V3 manifest 新增衛星建倉計算的來源指紋並重產；Swagger 文字變動依既有 renderer／identity sync／registry 鏈發布，發布鏈在公式 V3 之前以同一 D-234 SRPP root 重產 bundle 綁定的報告 golden（report-same-input、long-short-exit、state-topup）並 `--check`，並記錄新的 policy bundle SHA-256。
+
+## Requirement 221：FUNDING_CAPACITY 不扣預留的 D-152 全行合併買後剩餘額度（Task 624）
+
+使用者需要即使預留或官方掛單來源暫缺，日報仍能以 9090 判定 D-152 全部銀行合併存款的買後底線，不必回退本機公式。
+
+- FUNDING_CAPACITY 對 TWD、USD 各固定輸出一筆 `pooledPostBuyHeadroom`（subject 與 unit 皆為幣別）。只依同輪 assets 與 policy：已交割存款（TWD 用 amount、USD 用 originalAmount，只認 currency 精確為該幣別）加上負數在途（currency 為 TRANSIT_<幣別>，正數在途排除），減去 max(總存款底線, 定存底線)。TWD 底線為 800,000／1,550,000 乘 2026-08-31 起依經過日數的 2.25% 通膨指數；USD 底線 0。可為負。
+- 定存只認 depositType 精確等於「定存」或「美元定存」；定存低於定存底線時值為 null，原因 POOLED_TERM_BELOW_FLOOR，並以收據 D152_POOLED:<幣別> 的 BLOCK 表示已驗證阻擋，不是缺資料。assets 非同輪（generatedAt 的台北日期不等於交易日）或金額缺時為 UNAVAILABLE。
+- 等價：任何本輪擬採納買進合計 cashRequired ≥ 0，cashRequired ≤ headroom 當且僅當 SRPP 本機 pooled_funding 為 PASS。以 SRPP 參考實作產生至少 15 組 golden（含底線相等、定存差一元、負在途、正在途排除、USD、無列幣別、非精確定存類型、台北日界線），Java 逐欄精確相等。
+- VT 建倉腿（國泰台幣複委託）的 cashRequired 計入 TWD（twdAmount＋twdFee），不計入 USD；美元存款不足而改由國泰台幣扣款的 D-182 定期定額，其台幣等值在扣款日是 TWD 資金承諾，由 consumer 計入 TWD cashRequired，同樣受 D-152 台幣底線約束。
+- 新值與收據不受預留、掛單來源影響，既有 deployableCapacity、CURRENCY_POOL 與其他欄位語意不變。只是報告計算，不下單、不寫狀態、不新增路由或資料表。
+
+## Requirement 222：D-215 美元匯率偏好接到 D-130／00865B 債券腿與 VT 建倉腿（Task 625）
+
+使用者要求買美元資產時注意匯率，且以台幣交易的債券 ETF 也視為美元資產。D-130 策略債券、國泰緊急 00865B 及 VT 建倉，在匯率偏高時應優先等待，除非該標的本身已跌得夠深。
+
+- 台股正式報告計算對 BOND_D130_D195 四條債券腿及 GLOBAL_EQUITY_PACE 的 VT 建倉腿，逐腿以同一 D-215 公式評估：
+  - 同輪 LIVE 銀行即期美元賣出價大於 32.8，或位於兩個日曆年賣出價區間 90% 以上（含等於），即為偏高。
+  - 兩年高低相同或證據不足時為未知，不得視為正常。
+- 偏高時若沒有已核實的自身 52 週跌深例外，該腿不得列為可執行買進，並以具名等待原因標示；原容量上限保留在收據供揭露。證據未知時同樣不得列為可執行，並具名缺證。ETF 例外須回跌超過 10%（等於 10% 不算），個股須至少 30%。
+- 每腿揭露即期賣出價、兩年區間低高與位置、是否偏高、自身 52 週高點與回跌、例外是否成立。結果須與 SRPP 參考實作逐欄一致。
+- 收據只有在其引用來源（匯率、政策、該標的市場來源）全部已驗證時才可為通過；任一未驗證時具名 `SOURCE_NOT_VERIFIED:<來源>`，該腿不得列為可執行。
+- 本項只是軟偏好，不放大任何數量，不重新選檔，不解除其他閘門。原 USD/TWD>33 停買照舊。資產端不下單、換匯、寄信或改變定期定額。
+
+## Requirement 223：order-plan v2：LLM 判斷後由程式補報價重算、扣共用容量並產出最終張數與限價（Task 626）
+
+SRPP 兩軌完成逐腿判斷後，需要 9090 直接算出最終張數、限價與金額，不再於本機重跑 D-230 補價、D-152 合併資金與限價公式。
+
+- 同一 `GET /api/public/srpp/order-plan` 以 `projectionVersion=SRPP_ORDER_PLAN_PROJECTION_V2` 選新版；缺省仍是 v1，位元組與行為不變，route 數不變。
+- v2 必帶 consumer 本機確定性分類器的 `riskMode`（NORMAL／CAUTIOUS／DEFENSIVE）、`riskTotalScore`、`riskAssessedCount`、`riskMaxCategoryScore` 與 `riskReceiptSha256`；未知模式或與 bundle `risk_score_decision_policy` 門檻不一致回 400。DEFENSIVE 只把增加股票風險的買進歸 0（`RISK_MODE_DEFENSIVE`），債券型買進（代號 B 結尾或 SGOV）與所有賣出不受影響；CAUTIOUS 只揭露。v2 不再輸出 v1 固定的 DEFENSIVE／UNAVAILABLE。
+- v2 另帶 `runStartedAt`（35 分鐘查詢截止自此起算，且不晚於時段起點後 60 分鐘）與 consumer 宣告的 `fundingCommitments`（TWD、USD 各一；伺服器取宣告值與 package 預留的較大者）。扣款日為交易日、因美元存款不足改由國泰台幣扣款的 D-182 定期定額，其台幣等值（USD 金額 × 同輪已核實即期賣出匯率＋手續費）必須含在 TWD 承諾內。
+- 處理依 package 順序：判斷（WAIT／VETO→0、REDUCE→min、ADOPT→原量）→ 風險模式 → D-230 補價（僅策略債券、國泰緊急債券、GLOBAL_EQUITY_PACE 009826 建倉（t623，原因恰為 QUOTE_UNVERIFIED）的純報價缺口零張腿；國泰緊急 00865B 腿在報價缺口為唯一原因時改輸出具體報價缺口碼（`LIVE_PRICE_UNVERIFIED`／`BEST_FIVE_UNVERIFIED`／`PREMIUM_OR_PRICE_UNVERIFIED`），但在子帳來源被驗證前，正式包的 00865B 兩腿恆含 `SUBACCOUNT_UNVERIFIED`，不是補價候選，且緊急子帳市值在正式資料上也恆無來源，須子帳來源與緊急子帳市值兩者皆有來源才會生效；此變更在正式資料上尚未生效、只以合成已驗證子帳且帶緊急子帳市值的輸入測試證明；以呼叫當下快取新報價重跑原計算器，刷新後的該標的市場來源重新驗證，不超過原計算器上限、不遞補；收盤後初始化包不補價、不重判、零讀取，所有買進為 0）→ 最終報價時效 → 依序扣每幣別 `pooledPostBuyHeadroom` 與原計算器日／週上限，降到可容最大整數單位（VT 不足 5 股為 0，記 `SHARED_CAPACITY_REDUCED`）；跨 module 配置群組上限不在 v2 重做（各腿原計算器已套用、v2 只縮不放），列為已知差異並由 SRPP consumer 保留為採納硬閘門；package 預留不含先前報告的 009826／VT 建倉腿；降量腿手續費以該腿原計算器的費用規則對縮後金額重算（台股費率含原計算器的最低手續費，VT 每筆固定 US$3 以同一即期賣出匯率換算），不按比例。package 階段只因共用資金缺口歸 0 的腿重新判定，對外 base 為取回的原量並標 `redecided:true`，final 不得超過該 base。
+- 只讀既有行情快取與已持久化快照；不寫入、不觸發 vendor／producer、不呼叫券商。新報價以 sha256 封存並納入 planId；回應仍為 `REPORT_RECOMMENDATION_ONLY`，三個 false 旗標不變。
+- 與 SRPP 參考實作同輸入 golden 逐欄比對，含兩項已知差異斷言：容量降量（參考實作只判全有／全無），以及 009826 建倉腿 `QUOTE_UNVERIFIED` 補價候選（SRPP `QUOTE_REFRESH_GAPS` 不含此碼，SRPP 判 ZERO；需 SRPP 另立待辦納入）。回應 `reasonCodes` 維持自由字串。每腿 `riskAffected` 為布林，凡增加股票風險的買進即為 true（與是否被歸 0 無關），債券型買進與賣出為 false；`coverage` 依逐腿 outcome（WAIT／VETO／NOT_DECIDED 或缺 base 單位為 NOT_EVALUATED、final 為 0 且因缺證為 UNAVAILABLE、其餘為 COMPLETE）統計，BFF 以同規則閉合重驗。SRPP consumer 改採 v2 另立任務。

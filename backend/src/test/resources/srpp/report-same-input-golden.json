@@ -39272,12 +39272,12 @@
   "originalCalculatorHashes": {
     "bear_ladder.py": "c299f52e4cb8162548b4cc1e768b891e7140ebc3f21c7dfb18656c2b1efa3f84",
     "core_sell_guard.py": "4000302480f786874a9944653704a42a08437ecf6a20a454e4e5dd692b33bb77",
-    "execution_policy.py": "66a86a9716acaf564fe76c23ac7f1e64964fd84a14f2eee4e748830257cfc4d1",
+    "execution_policy.py": "16fb30de344493be599d89541f0f76ee985bcd64996dada819bf0f701aad4a2d",
     "pre_retirement_cashflow.py": "b0de2efe12db72587e48c430d0e463987615ce361da435a82528a66547e6df13",
     "short_term_opportunities.py": "c828bd7244a19749620686ce07b4c60c2e71045896ac88def93146fe353f5294",
     "strategic_buy_gate.py": "e2312e870d97ceccbe547a334e721bbfecc1624f818998b2efbb704577954b69",
     "us_tactical_order_check.py": "931aedbef8b7970a7996af1af80dfd70448a4c24e64c16fd5b3b495a801fb86d"
   },
-  "policyBundleSha256": "bef329db726ee948c0608ef5f2674f9f9471b6c94ae5b175f7a81a74dca29049",
+  "policyBundleSha256": "a64154457d4f325b193b25aa429bcad672126aa3345fb5d26a766af928c3d2a9",
   "schema": "SRPP_REPORT_SAME_INPUT_GOLDEN_V1"
 }

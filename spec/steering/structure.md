@@ -675,6 +675,8 @@ Task504 將 observer 契約升至 1.3.0，僅讓 `consumer=Codex`、`sourceKind=
 
 兩GET精確綁ACTIVE owner、consumer、tradingDate、reportSlot、policyBundleSha256、swaggerSha256與calculationRunId，只讀既有immutable schemaVersion1 FINAL package；禁止新計算、外呼、refresh、DB/Redis/error-ingestion寫、producer、notification/mail/reservation/交易，也不改package output、consumer schema、manifest、registry或SRPP runtime。eligible leg只為module data.legs BUY/SELL、台股→TW/美股→US，NONE排除；legId=`moduleId.index`，未知market/action上游502。A2 universe是eligible TW legs投影，非input field，只由content hash保護；input hash只identity-bind且不含/保護universe。v1無capacity evidence所以零capacity reflow/遞補；A1 root無quoteCapture，每leg只有`inputBundleJcs.sources[sourceId].quote`、sourceVector `validation=VERIFIED`、market/symbol、price/amount精確同源且sourceRevision=vector revision才有typed QUOTE receipt quoteCapture，否則全null；A1 fixed defensive（BUY zero/null、SELL frozen-only、REDUCE唯一base unit）。A2 facts恰12筆無重名固定順序；七個exact radar/quote mapping僅在`validation=VERIFIED` vector+SHA/capturedAt matching SOURCE receipt可AVAILABLE，overheat只在五項AVAILABLE時依frozen pure rule產出BOOLEAN/NONE/AVAILABLE，否則null NOT_EVALUATED，四筆固定null NOT_EVALUATED；不推斷action/policy。P2/revision、client risk、SRPP adoption均不在本輪；不改prompts/schedules/validators，另立任務才可採納API。
 
+Task 626（order-plan v2）例外：僅在 query 明帶 `projectionVersion=SRPP_ORDER_PLAN_PROJECTION_V2` 時，`order-plan` 可做請求時重算（套用 consumer 申報且經門檻重放核對的風險模式、D-230 報價缺口腿以 `recalculateModuleForRefresh` 重跑原計算器、依序扣 `pooledPostBuyHeadroom`、重算限價），並只限 `PriceQueryService.getLiveBatch`／`getEtfNav`、`MarketDataService.getQuoteDetail` 與既有富邦凍結擷取的唯讀快取讀取，每次最多 25 讀、35 分鐘截止後零讀；仍禁止 vendor refresh、crawler、券商、任何 DB／Redis 寫入、producer、notification、reservation 與交易，回應仍為 `REPORT_RECOMMENDATION_ONLY`。未帶該參數時維持上段 v1 規則。
+
 
 ### Requirement 197／Task 526 最新成交展示例外
 

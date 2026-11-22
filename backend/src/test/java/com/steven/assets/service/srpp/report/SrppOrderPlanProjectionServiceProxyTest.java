@@ -38,10 +38,14 @@ class SrppOrderPlanProjectionServiceProxyTest {
         @Bean SrppReportAuthority srppReportAuthority() { return mock(SrppReportAuthority.class); }
         @Bean SrppReportRepository srppReportRepository() { return mock(SrppReportRepository.class); }
         @Bean PlatformTransactionManager transactionManager() { return new NoOpTransactionManager(); }
+        @Bean com.steven.assets.service.PriceQueryService priceQueryService() { return mock(com.steven.assets.service.PriceQueryService.class); }
+        @Bean SrppReportFubonCapturePort srppReportFubonCapturePort() { return mock(SrppReportFubonCapturePort.class); }
+        /** Task 626: the v2 read-only constructor (cached quote reads, persisted Fubon capture, JSON mapper) stays a CGLIB proxy. */
         @Bean SrppProjectionService srppProjectionService(CurrentUserContext owner, MarketDataService calendar,
                                                            SrppPolicyRegistryService registry, PublishedSwaggerIdentity swagger,
-                                                           SrppReportAuthority authority, SrppReportRepository repository) {
-            return new SrppProjectionService(owner, calendar, registry, swagger, authority, repository);
+                                                           SrppReportAuthority authority, SrppReportRepository repository,
+                                                           com.steven.assets.service.PriceQueryService prices, SrppReportFubonCapturePort fubon) {
+            return new SrppProjectionService(owner, calendar, registry, swagger, authority, repository, prices, fubon, new com.fasterxml.jackson.databind.ObjectMapper());
         }
     }
 

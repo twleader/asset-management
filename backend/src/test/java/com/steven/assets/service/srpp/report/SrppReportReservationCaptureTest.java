@@ -22,6 +22,22 @@ class SrppReportReservationCaptureTest {
         var legacy=mock(SrppDecisionRepository.class);when(legacy.unlinkedReservations(7,DATE,"12:00")).thenReturn(List.of(legacyRun(false)));var source=new SrppReportReservationCapture(legacy,mock(SrppReportRepository.class)).readReportSource(7,DATE,"12:00","b".repeat(64));
         assertThat(source.path("status").asText()).isEqualTo("UNAVAILABLE");assertThat(source.path("rows")).hasSize(1);assertThat(source.path("rows").get(0).path("amount").asText()).isEqualTo("10000");assertThat(source.path("rows").get(0).path("fees").isNull()).isTrue();assertThat(source.path("missing")).hasSize(1);
     }
+    @Test void satelliteBuildLegsNeverBecomeCrossPackageReservationsAndOtherLegIdsAreUnchanged()throws Exception{
+        var frame=SrppSatelliteBuildFixtures.withSatellite(SrppReportFixtures.qualified("09:05",SrppReportFixtures.AT,true),SrppReportFixtures.AT);
+        String content=SrppSatelliteBuildFixtures.content(frame,"09:05",SrppSatelliteBuildFixtures.enabledModel());var report=SrppJcs.parseStrict(content);
+        var pace=SrppSatelliteBuildFixtures.module(report,"GLOBAL_EQUITY_PACE");
+        for(String code:List.of("009826","VT"))assertThat(SrppSatelliteBuildFixtures.leg(pace,code).path("status").asText()).isEqualTo("ACTIONABLE_FOR_REPORT");
+        Set<String> expected=new TreeSet<>();
+        for(var module:report.path("modules")){int index=0;for(var leg:module.path("data").path("legs")){int legIndex=index++;if(!"ACTIONABLE_FOR_REPORT".equals(leg.path("status").asText())||leg.path("strategy").asText().startsWith("SATELLITE_BUILD_"))continue;expected.add(SrppJcs.sha256Hex("REPORT/"+report.path("sharedCalculationId").asText()+"/"+module.path("moduleId").asText()+"/"+legIndex));}}
+        assertThat(expected).isNotEmpty();
+        var reports=mock(SrppReportRepository.class);
+        doAnswer(call->{java.util.function.Consumer<String> visitor=call.getArgument(3);visitor.accept(content);return null;}).when(reports).visitUnlinkedReportReservations(eq(7L),any(),any(),any());
+        var source=new SrppReportReservationCapture(mock(SrppDecisionRepository.class),reports).readReportSource(7,SrppReportFixtures.DATE.plusDays(1),"09:05",SrppReportFixtures.supported().bundleHash());
+        assertThat(source.path("status").asText()).isEqualTo("VERIFIED");Set<String> actual=new TreeSet<>();
+        for(var row:source.path("rows")){assertThat(row.path("strategy").asText()).doesNotStartWith("SATELLITE_BUILD_");assertThat(row.path("moduleId").asText()).isNotEqualTo("GLOBAL_EQUITY_PACE");actual.add(row.path("reservationId").asText());}
+        assertThat(actual).isEqualTo(expected);
+        assertThat(source.path("rows")).anySatisfy(row->assertThat(row.path("moduleId").asText()).isEqualTo("BOND_D130_D195"));
+    }
     static SrppDecisionRepository.Run legacyRun(boolean feeAvailable){
         UUID id=UUID.randomUUID();LocalDate date=DATE.minusWeeks(2);ObjectNode input=JsonNodeFactory.instance.objectNode().put("ownerUserId",7).put("tradingDate",date.toString()).put("slot","09:05");ObjectNode policy=input.putObject("sources").putObject("policy").put("bundleHash","a".repeat(64));if(feeAvailable)policy.putObject("typedPolicy").put("feeRate","0.001425");String inputJcs=SrppJcs.canonicalize(input),inputHash=SrppJcs.sha256Hex(inputJcs);
         ObjectNode content=JsonNodeFactory.instance.objectNode().put("status","FINAL").put("decisionRunId",id.toString());content.putObject("identity").put("ownerUserId",7).put("tradingDate",date.toString()).put("slot","09:05").put("policyBundleSha256","a".repeat(64)).put("swaggerSha256","c".repeat(64));content.putObject("inputSnapshot").put("inputBundleJcs",inputJcs).put("inputSnapshotSha256",inputHash);content.putObject("decision").putArray("candidates").addObject().put("status","ACTIONABLE_FOR_REPORT").put("symbol","00719B").put("strategy","STRATEGIC_FUBON").put("action","BUY").put("lots",1).put("amountTwd","10000");String contentHash=SrppJcs.hash(content);content.put("decisionContentSha256",contentHash);

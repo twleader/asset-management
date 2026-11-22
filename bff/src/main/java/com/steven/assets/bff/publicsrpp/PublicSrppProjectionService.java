@@ -118,7 +118,8 @@ final class PublicSrppProjectionService {
         JsonNode parsed = SrppDailyContextResponseValidator.parseStrict(bytes);
         require(parsed instanceof ObjectNode);
         ObjectNode root = (ObjectNode) parsed;
-        if (SrppProjectionQuery.ORDER.equals(query.path())) validateOrder(query, owner, root); else validateFacts(query, owner, root);
+        if (SrppProjectionQuery.ORDER.equals(query.path()) && query.orderV2()) validateOrderV2(query, owner, root);
+        else if (SrppProjectionQuery.ORDER.equals(query.path())) validateOrder(query, owner, root); else validateFacts(query, owner, root);
         String contentHash = text(root, "contentSha256");
         requireSha(contentHash);
         ObjectNode hashable = root.deepCopy();
@@ -164,6 +165,148 @@ final class PublicSrppProjectionService {
         execution(root);
         receiptRefs(root.path("receiptRefs"));
     }
+
+    // ---- Task 626 order-plan v2: closed root/leg keys, false flags, re-derived outcomes and invariants; anything else is 502 ----
+    private static final Set<String> V2_ROOT = Set.of("schemaVersion", "projectionVersion", "planId", "identity", "base", "asOf", "runStartedAt", "queryDeadline", "normalizedDecisions", "riskMode", "fundingCommitments", "funding", "refreshCaptures", "legs", "coverage", "executionScope", "tradeAuthorization", "placesOrders", "receiptRefs", "contentSha256");
+    private static final Set<String> V2_LEG = Set.of("legId", "market", "symbol", "action", "strategy", "refreshCandidate", "redecided", "verdict", "riskAffected", "baseLots", "baseUnits", "finalLots", "finalUnits", "finalLimitPrice", "finalAmount", "fees", "currency", "reasonCodes", "quoteCapture", "refreshCaptureRefs", "freshness", "settlement", "executable");
+    private static final Set<String> V2_EVIDENCE_GAPS = Set.of("D230_FRESH_QUOTE_REQUIRED", "QUERY_DEADLINE_PASSED", "LIVE_QUOTE_STALE", "POOLED_HEADROOM_UNAVAILABLE");
+
+    private static void validateOrderV2(SrppProjectionQuery query, long owner, ObjectNode root) {
+        fields(root, V2_ROOT);
+        Map<String, String> v2 = query.v2();
+        require("2".equals(text(root, "schemaVersion")) && SrppProjectionQuery.V2.equals(text(root, "projectionVersion")) && text(root, "planId").matches("[a-f0-9]{64}"));
+        Instant captured = identityAndBase(query, owner, root);
+        Instant asOf = instant(root.path("asOf")), run = instant(root.path("runStartedAt")), deadline = instant(root.path("queryDeadline"));
+        require(asOf.equals(Instant.parse(query.asOf())) && run.equals(Instant.parse(v2.get("runStartedAt"))) && !captured.isAfter(asOf) && !run.isAfter(asOf) && deadline.equals(run.plus(Duration.ofMinutes(35))));
+        List<Decision> requested = decisions(query.decisions());
+        JsonNode normalized = root.path("normalizedDecisions");
+        require(normalized.isArray() && normalized.size() == requested.size());
+        for (int i = 0; i < requested.size(); i++) validateDecision(normalized.get(i), requested.get(i));
+        JsonNode risk = root.path("riskMode");
+        fields(risk, Set.of("mode", "status", "totalScore", "assessedCount", "maxCategoryScore", "receiptSha256", "rubricSchema", "thresholds"));
+        String mode = text(risk, "mode");
+        require(mode.equals(v2.get("riskMode")) && "CONSUMER_DECLARED".equals(text(risk, "status")) && text(risk, "receiptSha256").equals(v2.get("riskReceiptSha256")) && !text(risk, "rubricSchema").isBlank());
+        int total = count(risk, "totalScore"), assessed = count(risk, "assessedCount"), max = count(risk, "maxCategoryScore");
+        require(total == Integer.parseInt(v2.get("riskTotalScore")) && assessed == Integer.parseInt(v2.get("riskAssessedCount")) && max == Integer.parseInt(v2.get("riskMaxCategoryScore")) && max <= total);
+        JsonNode t = risk.path("thresholds");
+        fields(t, Set.of("defensiveCategoryScore", "defensiveTotalScore", "minimumEvaluatedCategories", "cautiousTotalScore"));
+        String expectedMode = max >= count(t, "defensiveCategoryScore") || total >= count(t, "defensiveTotalScore") || assessed < count(t, "minimumEvaluatedCategories") ? "DEFENSIVE" : total >= count(t, "cautiousTotalScore") ? "CAUTIOUS" : "NORMAL";
+        require(expectedMode.equals(mode));
+        String[] commitments = v2.get("fundingCommitments").split(",", -1);
+        JsonNode declared = root.path("fundingCommitments");
+        fields(declared, Set.of("TWD", "USD"));
+        require(commitments[0].substring(4).equals(text(declared, "TWD")) && commitments[1].substring(4).equals(text(declared, "USD")));
+        JsonNode funding = root.path("funding");
+        fields(funding, Set.of("TWD", "USD"));
+        for (String currency : List.of("TWD", "USD")) validateFundingV2(funding.path(currency));
+        Map<String, JsonNode> captures = new HashMap<>();
+        String previousSource = null;
+        require(root.path("refreshCaptures").isArray());
+        for (JsonNode capture : root.path("refreshCaptures")) {
+            fields(capture, Set.of("captureId", "sourceId", "capturedAt", "sha256", "body"));
+            String source = text(capture, "sourceId"), sha = text(capture, "sha256");
+            requireSha(sha);
+            require(capture.path("body").isObject() && sha.equals(SrppJcs.sha256Hex(SrppJcs.canonicalize(capture.path("body")))) && ("refresh:" + source + ":" + sha).equals(text(capture, "captureId")));
+            require(!instant(capture.path("capturedAt")).isAfter(deadline) && (previousSource == null || previousSource.compareTo(source) < 0));
+            previousSource = source;
+            captures.put(text(capture, "captureId"), capture);
+        }
+        ObjectNode address = JsonNodeFactory.instance.objectNode();
+        for (String key : List.of("projectionVersion", "identity", "base", "asOf", "runStartedAt", "normalizedDecisions", "riskMode", "fundingCommitments")) address.set(key, root.path(key).deepCopy());
+        var refs = address.putArray("refreshCaptures");
+        for (JsonNode capture : root.path("refreshCaptures")) { ObjectNode ref = refs.addObject(); ref.set("sourceId", capture.path("sourceId").deepCopy()); ref.set("sha256", capture.path("sha256").deepCopy()); ref.set("capturedAt", capture.path("capturedAt").deepCopy()); }
+        require(text(root, "planId").equals(SrppJcs.sha256Hex(SrppJcs.canonicalize(address))));
+        require(root.path("legs").isArray());
+        Map<String, Decision> selected = new HashMap<>();
+        for (Decision decision : requested) selected.put(decision.legId(), decision);
+        Set<String> ids = new HashSet<>();
+        int complete = 0, unavailable = 0, notEvaluated = 0, previousSelected = -1;
+        for (int i = 0; i < root.path("legs").size(); i++) {
+            JsonNode leg = root.path("legs").get(i);
+            String id = text(leg, "legId");
+            LegOutcome outcome = validateLegV2(leg, selected.getOrDefault(id, Decision.notDecided(id)), mode, captures, asOf);
+            require(ids.add(id));
+            if (selected.containsKey(id)) { require(i > previousSelected); previousSelected = i; }
+            if (outcome == LegOutcome.COMPLETE) complete++; else if (outcome == LegOutcome.UNAVAILABLE) unavailable++; else notEvaluated++;
+        }
+        require(ids.containsAll(selected.keySet()));
+        coverage(root.path("coverage"), root.path("legs").size(), complete, 0, unavailable, notEvaluated);
+        execution(root);
+        receiptRefs(root.path("receiptRefs"));
+    }
+
+    private static void validateFundingV2(JsonNode funding) {
+        fields(funding, Set.of("startHeadroom", "fundingUsed", "fundingHeadroomAfter", "reasonCodes"));
+        List<String> reasons = freeReasons(funding.path("reasonCodes"));
+        if (funding.path("startHeadroom").isNull()) {
+            require(funding.path("fundingUsed").isNull() && funding.path("fundingHeadroomAfter").isNull() && !reasons.isEmpty());
+            return;
+        }
+        BigDecimal start = signedDecimal(funding.path("startHeadroom")), used = signedDecimal(funding.path("fundingUsed")), after = signedDecimal(funding.path("fundingHeadroomAfter"));
+        require(reasons.isEmpty() && used.signum() >= 0 && after.compareTo(start.subtract(used)) == 0 && (used.signum() == 0 || after.signum() >= 0));
+    }
+
+    private static LegOutcome validateLegV2(JsonNode leg, Decision expected, String mode, Map<String, JsonNode> captures, Instant asOf) {
+        fields(leg, V2_LEG);
+        String id = text(leg, "legId"), action = text(leg, "action"), verdict = text(leg, "verdict"), market = text(leg, "market"), symbol = text(leg, "symbol");
+        require(id.matches("[A-Z][A-Z0-9_]{0,127}\\.[0-9]{1,6}") && Set.of("TW", "US").contains(market) && Set.of("BUY", "SELL").contains(action) && expected.legId().equals(id) && expected.verdict().equals(verdict));
+        require(leg.path("strategy").isNull() || leg.path("strategy").isTextual() && !leg.path("strategy").textValue().isBlank());
+        for (String flag : List.of("refreshCandidate", "redecided", "riskAffected", "executable")) require(leg.path(flag).isBoolean());
+        require(!leg.path("executable").booleanValue() && leg.path("settlement").isNull() && Set.of("TWD", "USD").contains(text(leg, "currency")));
+        boolean candidate = leg.path("refreshCandidate").booleanValue(), redecided = leg.path("redecided").booleanValue(), affected = leg.path("riskAffected").booleanValue();
+        List<String> reasons = freeReasons(leg.path("reasonCodes"));
+        JsonNode baseLots = lots(leg.path("baseLots")), baseUnits = wholeUnits(leg.path("baseUnits")), finalLots = lots(leg.path("finalLots")), finalUnits = wholeUnits(leg.path("finalUnits"));
+        Long base = baseLots.isNull() ? baseUnits.isNull() ? null : Long.valueOf(baseUnits.textValue()) : baseLots.longValue();
+        Long fin = finalLots.isNull() ? finalUnits.isNull() ? null : Long.valueOf(finalUnits.textValue()) : finalLots.longValue();
+        require(finalLots.isNull() || finalUnits.isNull());
+        if (fin != null) require(!finalLots.isNull() ? !baseLots.isNull() || candidate : !baseUnits.isNull());
+        // the instrument class and the risk-mode effect are re-derived, never trusted
+        boolean bond = "SGOV".equals(symbol) || "TW".equals(market) && symbol.endsWith("B");
+        require(affected == ("BUY".equals(action) && !bond));
+        if (!affected) require(!reasons.contains("RISK_MODE_DEFENSIVE") && !reasons.contains("RISK_MODE_CAUTIOUS_DISCLOSED"));
+        if (affected && "DEFENSIVE".equals(mode)) require(fin != null && fin == 0 && reasons.contains("RISK_MODE_DEFENSIVE"));
+        if (affected && "CAUTIOUS".equals(mode) && fin != null && fin > 0) require(reasons.contains("RISK_MODE_CAUTIOUS_DISCLOSED"));
+        if ("SELL".equals(action)) require(!candidate && !redecided && (fin == null || fin == 0 || fin.equals(base) || "REDUCE".equals(verdict) && fin < base));
+        if (candidate) require("BUY".equals(action) && !redecided && baseLots.isIntegralNumber() && baseLots.longValue() == 0 && baseUnits.isNull());
+        else if (fin != null) require(base != null && fin <= base);
+        if ("NOT_DECIDED".equals(verdict)) require(reasons.contains("LLM_DECISION_MISSING"));
+        JsonNode limit = leg.path("finalLimitPrice"), amount = leg.path("finalAmount"), fees = leg.path("fees");
+        require((limit.isNull() || positiveDecimal(limit)) && (amount.isNull() || positiveDecimal(amount)) && (fees.isNull() || canonicalDecimal(fees)));
+        if (fin == null || fin == 0) require(limit.isNull() && amount.isNull() && fees.isNull());
+        else if ("BUY".equals(action)) {
+            BigDecimal unit = finalLots.isNull() ? BigDecimal.ONE : new BigDecimal("1000");
+            require(!limit.isNull() && !amount.isNull() && !fees.isNull() && decimalValue(amount).compareTo(BigDecimal.valueOf(fin).multiply(unit).multiply(decimalValue(limit))) == 0);
+        } else if (!limit.isNull()) {
+            BigDecimal unit = finalLots.isNull() ? BigDecimal.ONE : new BigDecimal("1000");
+            require(!amount.isNull() && decimalValue(amount).compareTo(BigDecimal.valueOf(fin).multiply(unit).multiply(decimalValue(limit))) == 0);
+        }
+        JsonNode capture = leg.path("quoteCapture");
+        if (!capture.isNull()) {
+            fields(capture, Set.of("sourceId", "sourceRevision", "sourceSha256", "capturedAt", "receiptRef"));
+            require(("TW".equals(market) ? "market:台股:" : "market:美股:").concat(symbol).equals(text(capture, "sourceId")) && text(capture, "sourceRevision").length() <= 128);
+            requireSha(text(capture, "sourceSha256")); require(!instant(capture.path("capturedAt")).isAfter(asOf));
+            receipt(capture.path("receiptRef"), "QUOTE", text(capture, "sourceSha256"), text(capture, "capturedAt"));
+        }
+        require(leg.path("refreshCaptureRefs").isArray());
+        for (JsonNode ref : leg.path("refreshCaptureRefs")) {
+            fields(ref, Set.of("kind", "captureId", "sha256", "capturedAt"));
+            JsonNode sealed = captures.get(text(ref, "captureId"));
+            require("REFRESH_QUOTE".equals(text(ref, "kind")) && sealed != null && text(sealed, "sha256").equals(text(ref, "sha256")) && text(sealed, "capturedAt").equals(text(ref, "capturedAt")));
+        }
+        JsonNode freshness = leg.path("freshness");
+        if (!freshness.isNull()) {
+            fields(freshness, Set.of("status", "stage", "ageMinutes", "maxAgeMinutes", "source"));
+            require(!text(freshness, "status").isBlank() && "final".equals(text(freshness, "stage")) && Set.of("PACKAGE", "REFRESH").contains(text(freshness, "source")));
+            for (String key : List.of("ageMinutes", "maxAgeMinutes")) require(freshness.path(key).isNull() || freshness.path(key).isIntegralNumber() && freshness.path(key).longValue() >= 0);
+        }
+        if (Set.of("WAIT", "VETO", "NOT_DECIDED").contains(verdict) || reasons.contains("REDUCE_BASE_UNIT_UNAVAILABLE")) return LegOutcome.NOT_EVALUATED;
+        if (fin != null && fin == 0 && reasons.stream().anyMatch(V2_EVIDENCE_GAPS::contains)) return LegOutcome.UNAVAILABLE;
+        return LegOutcome.COMPLETE;
+    }
+
+    private static List<String> freeReasons(JsonNode node) { require(node.isArray()); Set<String> seen = new HashSet<>(); List<String> all = new ArrayList<>(); for (JsonNode reason : node) { String value = text(reason); require(seen.add(value)); all.add(value); } return List.copyOf(all); }
+    private static JsonNode wholeUnits(JsonNode node) { require(node.isNull() || node.isTextual() && node.textValue().matches("0|[1-9][0-9]{0,17}")); return node; }
+    private static BigDecimal signedDecimal(JsonNode node) { require(node.isTextual() && node.textValue().matches("-?(?:0|[1-9][0-9]*)(?:\\.[0-9]*[1-9])?") && !"-0".equals(node.textValue())); return new BigDecimal(node.textValue()); }
 
     private static void validateFacts(SrppProjectionQuery query, long owner, ObjectNode root) {
         fields(root, Set.of("schemaVersion", "identity", "base", "symbols", "coverage", "executionScope", "tradeAuthorization", "placesOrders", "receiptRefs", "contentSha256"));

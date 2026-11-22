@@ -48,7 +48,7 @@ class SrppReportMediumDipCalculatorTest {
         BigDecimal capturedBonds=BigDecimal.ZERO;for(JsonNode h:live.path("stocks"))if("BOND".equals(sources.path("classifications").path("resolvedStockClasses").path(h.path("stockCode").asText()+":"+h.path("market").asText()).asText()))capturedBonds=capturedBonds.add(n(h.path("liveValue").asText()));
         var facts=new DecisionFacts.Input(DAY,"12:00",AT,List.of(),total,n("10000000"),n("3000000"),capturedBonds,n("33"),yes,no,Map.of(),new DecisionFacts.Budget(0,0,0,true,BigDecimal.ZERO,Map.of(),BigDecimal.ZERO,BigDecimal.ZERO,BigDecimal.ZERO),yes,n("800000"));
         input.put("schemaVersion",1);input.set("facts",SrppReportModuleCalculator.normalize(SrppReportFixtures.MAPPER.valueToTree(facts)));
-        return new DecisionInputCapturePort.Frozen(facts,input,vector,1,AT.toString());
+        return SrppSatelliteBuildFixtures.producerSatelliteSources(new DecisionInputCapturePort.Frozen(facts,input,vector,1,AT.toString()),model);
     }
     private static JsonNode run(ObjectNode model,DecisionInputCapturePort.Frozen f){ArrayNode modules=SrppReportModuleCalculator.calculateShared(f,SrppReportFixtures.AUTHORITY.decision().policy(),model,SrppReportFixtures.supported(),f.input().path("sources"));for(JsonNode m:modules)if(m.path("moduleId").asText().equals("STRATEGIC_BUY_GATES"))return m;throw new AssertionError();}
     private static JsonNode leg(JsonNode module,String code){for(JsonNode l:module.path("data").path("legs"))if(code.equals(l.path("symbol").asText()))return l;throw new AssertionError();}

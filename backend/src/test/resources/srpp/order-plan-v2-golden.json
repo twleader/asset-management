@@ -1,0 +1,329 @@
+{
+  "cases": [
+    {
+      "expected": {
+        "candidate": true,
+        "finalLots": 2,
+        "symbol": "00719B"
+      },
+      "id": 1,
+      "name": "strategic_bond_quote_gap_refreshed",
+      "reference": {
+        "quoteRefreshPassed": true,
+        "quoteRefreshable": true,
+        "refreshGates": [
+          "quote",
+          "quote_freshness",
+          "opposing_depth",
+          "premium_discount"
+        ],
+        "refreshLotCap": 2,
+        "selected": "00719B",
+        "selectedLots": 2
+      }
+    },
+    {
+      "expected": {
+        "candidate": false
+      },
+      "id": 2,
+      "name": "mixed_reason_not_candidate",
+      "reference": {
+        "quoteRefreshable": false
+      }
+    },
+    {
+      "expected": {
+        "finalLots": 0,
+        "reason": "D230_FRESH_QUOTE_REQUIRED"
+      },
+      "id": 3,
+      "name": "refreshed_quote_still_stale",
+      "reference": {
+        "quoteRefreshPassed": false
+      }
+    },
+    {
+      "expected": {
+        "otherFinalLots": 0,
+        "reason": "REFRESH_NOT_SELECTED",
+        "selectedFinalLots": 2
+      },
+      "id": 4,
+      "name": "rerun_selects_other_bond",
+      "reference": {
+        "selected": "00865B",
+        "selectedLots": 2,
+        "sleeveSharesWithinCap": true
+      }
+    },
+    {
+      "expected": {
+        "candidate": true,
+        "finalLots": 3,
+        "limitPrice": "10.06",
+        "mixedWithPaceStateCandidate": false
+      },
+      "id": 5,
+      "name": "satellite_009826_quote_unverified",
+      "reference": {
+        "lots": 3,
+        "maxLotsPerDay": 3,
+        "maxLotsPerWeek": 6,
+        "quoteRefreshableKnownDifference": false,
+        "referencePrice": "10.06"
+      }
+    },
+    {
+      "expected": {
+        "candidate": false
+      },
+      "id": 6,
+      "name": "dividend_topup_not_refreshable",
+      "reference": {
+        "quoteRefreshable": true,
+        "refreshLotCap": null
+      }
+    },
+    {
+      "expected": {
+        "declared": "DEFENSIVE",
+        "status": 200
+      },
+      "id": 7,
+      "name": "defensive_total_8",
+      "reference": {
+        "assessed": 6,
+        "max": 2,
+        "mode": "DEFENSIVE",
+        "total": 8
+      }
+    },
+    {
+      "expected": {
+        "declared": "CAUTIOUS",
+        "status": 400
+      },
+      "id": 8,
+      "name": "declared_cautious_but_total_8",
+      "reference": {
+        "assessed": 4,
+        "max": 2,
+        "mode": "DEFENSIVE",
+        "total": 8
+      }
+    },
+    {
+      "expected": {
+        "declared": "CAUTIOUS",
+        "status": 200
+      },
+      "id": 9,
+      "name": "cautious_total_5",
+      "reference": {
+        "assessed": 4,
+        "max": 2,
+        "mode": "CAUTIOUS",
+        "total": 5
+      }
+    },
+    {
+      "expected": {
+        "declared": "NORMAL",
+        "status": 400
+      },
+      "id": 10,
+      "name": "assessed_3_declared_normal",
+      "reference": {
+        "assessed": 3,
+        "max": 1,
+        "mode": "DEFENSIVE",
+        "total": 3
+      }
+    },
+    {
+      "expected": {
+        "bothFull": true
+      },
+      "id": 11,
+      "name": "two_twd_buys_fit",
+      "reference": {
+        "deposits": {
+          "demand": 4000000,
+          "term": 1000000
+        },
+        "headroom": "3446407.723595515625",
+        "headroomAfter": "3407111.803595515625",
+        "pass": "PASS",
+        "postTotal": "4960704.08",
+        "termFloor": "801854.0781442500000000",
+        "totalFloor": "1553592.2764044843750000"
+      }
+    },
+    {
+      "expected": {
+        "fees": "13.98",
+        "reason": "SHARED_CAPACITY_REDUCED",
+        "secondFinalLots": 1
+      },
+      "id": 12,
+      "name": "second_buy_reduced",
+      "reference": {
+        "commitment": "3416934.78",
+        "costOneLot": "9823.98",
+        "costTwoLots": "19647.96",
+        "fullStatus": "BLOCKED",
+        "reducedStatus": "PASS"
+      }
+    },
+    {
+      "expected": {
+        "finalUnits": "0",
+        "reducedTo": 4
+      },
+      "id": 13,
+      "name": "vt_reduced_below_minimum",
+      "reference": {
+        "minSharesPerOrder": 5
+      }
+    },
+    {
+      "expected": {
+        "finalLots": 0,
+        "reason": "POOLED_TERM_BELOW_FLOOR"
+      },
+      "id": 14,
+      "name": "term_below_floor",
+      "reference": {
+        "status": "BLOCKED"
+      }
+    },
+    {
+      "expected": {
+        "finalLots": 2,
+        "freshnessSource": "REFRESH",
+        "limitFromPackage": true
+      },
+      "id": 15,
+      "name": "frozen_quote_stale_refreshed_passes",
+      "reference": {
+        "frozen": "LIVE_SELL_PRICE_UNVERIFIED",
+        "refreshedMaxAgeMinutes": 10,
+        "refreshedStatus": "DEFAULT_FINAL_LIMIT_10M"
+      }
+    },
+    {
+      "expected": {
+        "candidateReason": "QUERY_DEADLINE_PASSED",
+        "reads": 0,
+        "staleReason": "LIVE_QUOTE_STALE"
+      },
+      "id": 16,
+      "name": "query_deadline_passed",
+      "reference": {
+        "queryWindowMinutes": 35
+      }
+    },
+    {
+      "expected": {
+        "finalLots": 0,
+        "reason": "REDUCE_AMOUNT_NOT_WHOLE_UNIT"
+      },
+      "id": 17,
+      "name": "reduce_not_whole_unit",
+      "reference": {}
+    },
+    {
+      "expected": {
+        "baseLots": 3,
+        "finalLots": 3,
+        "redecided": true
+      },
+      "id": 18,
+      "name": "redecided_shared_funds_gap",
+      "reference": {
+        "status": "PASS"
+      }
+    },
+    {
+      "expected": {
+        "feeAtLeastMinimum": true,
+        "limit": "50",
+        "shares": 100
+      },
+      "id": 19,
+      "name": "short_term_minimum_fee",
+      "reference": {
+        "brokerageEachSide": "0.001425",
+        "minimumFeeTwd": 20,
+        "slippageEachSide": "0.001"
+      }
+    },
+    {
+      "expected": {
+        "fees": "3",
+        "finalUnits": "7",
+        "limitUsd": "150",
+        "spot": "32.5"
+      },
+      "id": 20,
+      "name": "vt_seven_shares_twd_debit",
+      "reference": {
+        "currency": "TWD",
+        "total": "34222.5"
+      }
+    },
+    {
+      "expected": {
+        "startHeadroomRule": "pooled - max(commitment, reservedFunds)"
+      },
+      "id": 21,
+      "name": "d182_twd_commitment",
+      "reference": {
+        "TWD": "1000",
+        "USD": null
+      }
+    },
+    {
+      "expected": {
+        "candidate": true,
+        "finalLotsAtMost": 2
+      },
+      "id": 22,
+      "name": "synthetic_emergency_quote_gap_candidate",
+      "reference": {
+        "emergencyLots": 2,
+        "refreshLotCap": 2
+      }
+    }
+  ],
+  "schema": "ORDER_PLAN_V2_ORIGINAL_SRPP_GOLDEN_V1",
+  "sessions": [
+    "2026-09-18",
+    "2026-09-19",
+    "2026-09-20",
+    "2026-09-21",
+    "2026-09-22",
+    "2026-09-23",
+    "2026-09-24",
+    "2026-09-25",
+    "2026-09-26",
+    "2026-09-27",
+    "2026-09-28",
+    "2026-09-29",
+    "2026-09-30",
+    "2026-10-01",
+    "2026-10-02",
+    "2026-10-03",
+    "2026-10-04",
+    "2026-10-05",
+    "2026-10-06",
+    "2026-10-07"
+  ],
+  "srppSources": {
+    "execution_policy.py": "16fb30de344493be599d89541f0f76ee985bcd64996dada819bf0f701aad4a2d",
+    "risk_evidence_evaluator.py": "bb8f3e765480706e575814a5f8c30a9d0d4074a97ebdc3e2a15bb37fecaa9d5e",
+    "trade_blocker_policy.py": "c4c51f95f06604d5bd690472324e5b01dcd49812439c8d6d5ef76f205097d80a"
+  },
+  "tradingDate": "2026-10-08"
+}

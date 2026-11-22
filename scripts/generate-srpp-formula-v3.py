@@ -67,6 +67,17 @@ def expected(srpp_root: Path) -> str:
     named_hashes["SRPP/scripts/named_cash_rotation.py"] = hashlib.sha256((srpp_root / "scripts/named_cash_rotation.py").read_bytes()).hexdigest()
     named_hashes["SRPP/scripts/execution_policy.py"] = hashlib.sha256((srpp_root / "scripts/execution_policy.py").read_bytes()).hexdigest()
     legacy["calculations"]["namedCashRotation"] = {"calculationId": "NAMED_CASH_ROTATION_D223", "sourceSha256": named_hashes}
+    # Task 623: D-143 009826 lots and D-234 VT shares; VERSION and formulaVersion stay unchanged.
+    satellite_java = (
+        "backend/src/main/java/com/steven/assets/service/srpp/report/SrppSatelliteBuildCalculator.java",
+        "backend/src/main/java/com/steven/assets/service/srpp/report/SrppSatelliteBuildPolicy.java",
+        "backend/src/main/java/com/steven/assets/service/srpp/report/SrppSatelliteBuildCapture.java",
+        "backend/src/main/java/com/steven/assets/service/srpp/report/SrppReportModuleCalculator.java",
+        "backend/src/main/java/com/steven/assets/service/srpp/report/SrppReportProducerScheduler.java",
+    )
+    satellite_hashes = {"asset-management/" + p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest() for p in satellite_java}
+    satellite_hashes["SRPP/scripts/execution_policy.py"] = hashlib.sha256((srpp_root / "scripts/execution_policy.py").read_bytes()).hexdigest()
+    legacy["calculations"]["satelliteBuild"] = {"calculationId": "GLOBAL_EQUITY_SATELLITE_BUILD_D143_D234", "sourceSha256": satellite_hashes}
     return canonical(legacy)
 
 

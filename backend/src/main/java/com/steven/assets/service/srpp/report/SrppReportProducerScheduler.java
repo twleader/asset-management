@@ -31,14 +31,22 @@ public class SrppReportProducerScheduler {
     private final DecisionInputCapturePort capture;private final SrppReportExtraCapturePort extras;private final SrppReportConsumerStatePort states;
     private final SrppReportReservationCapture reservations;private final SrppReportPublisher publisher;private final Clock clock;private final SrppReportRepository reportRepository;private final TransactionTemplate transaction;
     private SrppReportFubonCapturePort fubon;
+    private SrppSatelliteBuildCapture satellite;
     private final Map<Scope,Integer> afterCloseAttempts=new HashMap<>();
     private static final int MAX_AFTER_CLOSE_ATTEMPTS=3;
     @Autowired
     public SrppReportProducerScheduler(MarketDataService calendar,SrppPolicyRegistryService registry,PublishedSwaggerIdentity swagger,
             SrppReportAuthority authority,AppUserRepository users,AssetSnapshotRepository snapshots,DecisionInputCapturePort capture,
+            SrppReportExtraCapturePort extras,SrppReportConsumerStatePort states,SrppReportReservationCapture reservations,SrppReportPublisher publisher,SrppReportRepository reportRepository,PlatformTransactionManager manager,SrppReportFubonCapturePort fubon,SrppSatelliteBuildCapture satellite){
+        this(calendar,registry,swagger,authority,users,snapshots,capture,extras,states,reservations,publisher,reportRepository,manager,fubon);this.satellite=satellite;
+    }
+    public SrppReportProducerScheduler(MarketDataService calendar,SrppPolicyRegistryService registry,PublishedSwaggerIdentity swagger,
+            SrppReportAuthority authority,AppUserRepository users,AssetSnapshotRepository snapshots,DecisionInputCapturePort capture,
             SrppReportExtraCapturePort extras,SrppReportConsumerStatePort states,SrppReportReservationCapture reservations,SrppReportPublisher publisher,SrppReportRepository reportRepository,PlatformTransactionManager manager,SrppReportFubonCapturePort fubon){
         this(calendar,registry,swagger,authority,users,snapshots,capture,extras,states,reservations,publisher,reportRepository,manager,Clock.system(SrppTime.TW_ZONE));this.fubon=fubon;
     }
+    /** Test seam: the clock-injected constructor plus the Task 623 satellite capture. */
+    SrppReportProducerScheduler withSatelliteCapture(SrppSatelliteBuildCapture satellite){this.satellite=satellite;return this;}
     SrppReportProducerScheduler(MarketDataService calendar,SrppPolicyRegistryService registry,PublishedSwaggerIdentity swagger,
             SrppReportAuthority authority,AppUserRepository users,AssetSnapshotRepository snapshots,DecisionInputCapturePort capture,
             SrppReportExtraCapturePort extras,SrppReportConsumerStatePort states,SrppReportReservationCapture reservations,SrppReportPublisher publisher,SrppReportRepository reportRepository,PlatformTransactionManager manager,Clock clock){
@@ -68,6 +76,8 @@ public class SrppReportProducerScheduler {
                 ObjectNode reportReservations=reservations.readReportSource(owner,now.toLocalDate(),slot,supported.get().bundleHash());
                 Frozen original=capture.capture(owner,new DecisionRequest(null,now.toLocalDate(),slot,supported.get().bundleHash(),swaggerHash.get()),reservations.read(owner,now.toLocalDate(),slot));
                 original=withReportReservations(original,reportReservations);
+                // Task 623: only the D-234 bundle freezes the satellite sources; older bundles stay byte-identical.
+                if(satellite!=null&&SrppSatelliteBuildPolicy.enabled(authority.model())){var built=satellite.capture(owner,now.toLocalDate(),supported.get().bundleHash());original=withSatelliteBuildSources(original,built.fills(),built.mids());}
                 if(fubon!=null)original=SrppReportFubonOverlay.apply(original,fubon.capture(owner,now.toLocalDate(),original.facts().capturedAt()));
                 JsonNode model=authority.model();var extra=extras.capture(owner,now.toLocalDate(),slot,original.facts().capturedAt(),model,original.input().path("sources").path("assets"),original.input().path("sources"));
                 Frozen completed=finishCapture(original,extra.sources(),extra.sourceVector(),clock.instant());
@@ -96,6 +106,17 @@ public class SrppReportProducerScheduler {
         if(!reservations.path("ownerUserId").equals(input.path("ownerUserId"))||!reservations.path("tradingDate").equals(input.path("tradingDate"))||!reservations.path("policyBundleSha256").equals(input.path("sources").path("policy").path("bundleHash")))throw new SrppReportProblem("UPSTREAM_INVALID");
         input.withObject("sources").set("report-reservations",reservations);
         String hash=SrppJcs.hash(reservations);ObjectNode receipt=vector.putObject("report-reservations");receipt.put("sourceId","report-reservations");receipt.put("revision",hash);receipt.put("capturedAt",original.facts().capturedAt().toString());receipt.put("sha256",hash);receipt.put("coverage",reservations.path("coverage").asText());receipt.put("validation","VERIFIED".equals(reservations.path("status").asText())?"VERIFIED":"UNAVAILABLE");
+        return new Frozen(original.facts(),input,vector,original.assetSnapshotId(),original.assetGeneratedAt());
+    }
+    static Frozen withSatelliteBuildSources(Frozen original,ObjectNode fills,ObjectNode mids){
+        if(fills==null||mids==null)throw new SrppReportProblem("UPSTREAM_INVALID");ObjectNode input=original.input(),vector=original.sourceVector();
+        if(!fills.path("ownerUserId").isIntegralNumber()||!input.path("ownerUserId").isIntegralNumber()||fills.path("ownerUserId").asLong()!=input.path("ownerUserId").asLong()||!fills.path("tradingDate").equals(input.path("tradingDate"))||!fills.path("policyBundleSha256").equals(input.path("sources").path("policy").path("bundleHash")))throw new SrppReportProblem("UPSTREAM_INVALID");
+        ObjectNode sources=input.withObject("sources");String at=original.facts().capturedAt().toString();
+        for(var entry:List.of(Map.entry(SrppSatelliteBuildCapture.FILLS,fills),Map.entry(SrppSatelliteBuildCapture.MIDS,mids))){
+            ObjectNode body=entry.getValue();boolean verified="VERIFIED".equals(body.path("status").asText());String hash=SrppJcs.hash(body);
+            sources.set(entry.getKey(),body);ObjectNode receipt=vector.putObject(entry.getKey());receipt.put("sourceId",entry.getKey());receipt.put("revision",hash);receipt.put("capturedAt",at);receipt.put("sha256",hash);
+            receipt.put("coverage",entry.getKey().equals(SrppSatelliteBuildCapture.FILLS)?body.path("coverage").asText():verified?"COMPLETE":"NONE");receipt.put("validation",verified?"VERIFIED":"UNAVAILABLE");
+        }
         return new Frozen(original.facts(),input,vector,original.assetSnapshotId(),original.assetGeneratedAt());
     }
     static Frozen finishCapture(Frozen original,ObjectNode extra,ObjectNode extraVector,Instant at){

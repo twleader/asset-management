@@ -19,17 +19,26 @@ final class SrppReportResponseValidator {
     private static final java.util.Map<String, Set<String>> FACT_NAMES=java.util.Map.ofEntries(
             java.util.Map.entry("ASSET_RECONCILIATION", Set.of("snapshotDeposit","liveDeposit","snapshotFund","liveFund","snapshotStock","liveStock","snapshotTotal","liveTotal","holdingShares","holdingStaticValue","holdingLiveValue","depositAmount","depositOriginalAmount","depositInterest","fundValue","fundIncome","bankCurrencyBalanceOriginal","bankCurrencyBalanceTwd","bankCurrencyPayableOriginal","bankCurrencyReceivableOriginal")),
             java.util.Map.entry("ALLOCATION_GAP", Set.of("targetWeight","currentValue","currentWeight","targetValue","gapValue","normalizedGap","protectedCashWeight","bondTarget","bondFloor","bondCap","emergencyTarget","emergencyGap","protectedReserveTarget","referenceCashDelta","equityTarget","reserveSelectionLow52","reserveSelectionHigh52","reserveSelectionPosition52","marketAdjustmentReviewAmount","marketAdjustmentUnallocated")),
-            java.util.Map.entry("FUNDING_CAPACITY", Set.of("settledBalance","payable","excludedReceivable","termBalance","inflationFactor","termFloor","totalFloor","reservedFunds","reservedFees","deployableCapacity")),
+            java.util.Map.entry("FUNDING_CAPACITY", Set.of("settledBalance","payable","excludedReceivable","termBalance","inflationFactor","termFloor","totalFloor","reservedFunds","reservedFees","deployableCapacity","pooledPostBuyHeadroom")),
             java.util.Map.entry("CASH_INCOME", Set.of("stockGross","fundGross","depositGross","totalGross","nonSpendableInterest","spendableGross","taiwanIncomeTax","usWithholding","additionalBasicTax","supplementaryNhi","afterTaxCash","annualSettlement","spendableSgovGross","domesticDividend","domesticInterest","savingsInterest","otherDomesticIncome","overseasIncome","creditableForeignTax","nhiChargeableIncome","taxCalculation","annualTaxPrepayments")),
             java.util.Map.entry("PAYROLL_CASHFLOW", Set.of("grossSalary","withholding","voluntaryPension","takeHome","investableContribution","annualSettlement","paymentCount","payrollDetail","calendarYearPayroll","pensionReceipt")),
             java.util.Map.entry("BOND_D130_D195", Set.of()),
             java.util.Map.entry("DIVIDEND_TOPUP", Set.of("referenceHigh","drawdownPct","tierLots","targetGap","normalizedGap","remainingDailyLots","remainingWeeklyLots","d218ObservedNoNewLowSessions","d218Stabilized","d218AnchorLow","d218UsedBudget","d218CumulativeFraction","d218BudgetCeiling")),
             java.util.Map.entry("CORE_SELL_GUARD", Set.of("highWater","pullbackPct","overheatHits","trendReversal","timingPass")),
             java.util.Map.entry("STRATEGIC_BUY_GATES", Set.of("position52w","high52w","low52w","overheatHits","averageExDividendClose","eligible","dcaExempt")),
-            java.util.Map.entry("GLOBAL_EQUITY_PACE", Set.of("monthlyBaseline","monthlyCap","spent","remaining","previousShortfall","discretionaryBudget","remainingDayLots","remainingWeekLots","consecutiveShortfalls")),
+            java.util.Map.entry("GLOBAL_EQUITY_PACE", Set.of("monthlyBaseline","monthlyCap","spent","remaining","previousShortfall","discretionaryBudget","remainingDayLots","remainingWeekLots","consecutiveShortfalls","ceilingLots","remainingDayShares","remainingWeekShares","minOrderShares","ceilingShares")),
             java.util.Map.entry("ROTATION_AND_REGIME_CAPACITY", Set.of("age","equityFloor","bondFloor","livingRefill","deployableLiving","rotationCapacity","bearBondCapacity","ladderAmount","gainAboveAnchor","pullback","drawdown","nextBatch","settledReserve","overdueReserve")),
             java.util.Map.entry("SHORT_TERM_AND_US_TACTICAL", Set.of("support","pressure","reboundPct","netUpsidePct","netDownsidePct","rewardRisk","positionCapacity","netProfitSpacePct","referencePrice","maximumNotional")));
     private static final Set<String> TOPUP_RECEIPTS=Set.of("QUOTE","RADAR","STRATEGIC_PRICE","TIER","STOP","REGIME","TRADABILITY","QUOTAS","PENDING","RESERVATIONS","SCHEDULED_DCA","FUNDING","DEPTH","ALLOCATION","CLASSIFICATION","EXECUTION_ACCOUNT","SHARED_CURRENCY_CAPACITY");
+    /** Task 623 satellite build legs; Task 625 adds D215_FX to the VT set only. */
+    static final Set<String> SATELLITE_009826_RECEIPTS=Set.of("SATELLITE_BUILD","SHARED_CURRENCY_CAPACITY");
+    static final Set<String> SATELLITE_VT_RECEIPTS=Set.of("SATELLITE_BUILD","FX_CONVERSION","SHARED_CURRENCY_CAPACITY");
+    static final Set<String> SATELLITE_VT_D215_RECEIPTS=Set.of("SATELLITE_BUILD","FX_CONVERSION","D215_FX","SHARED_CURRENCY_CAPACITY");
+    static final String D215_RULE="D215_FX";
+    /** Task 625 D215_FX receipt values: exact names and units (assetHigh52w / ceiling amount follow the leg currency). */
+    private static final java.util.Map<String,String> D215_UNITS=java.util.Map.of("fxSpotSelling","TWD","fxRangeLow","TWD","fxRangeHigh","TWD",
+            "fxRangePosition","RATIO","fxAbsoluteHigh","BOOLEAN","fxHigh","BOOLEAN","assetDrawdown52w","PERCENT","cheapAssetException","BOOLEAN",
+            "d215WaitCeilingLots","LOTS","d215WaitCeilingUnits","SHARES");
     private static final Set<String> SHORT_STRATEGIES=Set.of("SHORT_TERM_D173","BOND_SHORT_TERM_D185");
     private static final Set<String> SHORT_BUY_RECEIPTS=Set.of("SHORT_RECONCILE","SHORT_SIZING","SHORT_FUNDS","SHORT_PORTFOLIO","SHORT_GROUP","SHORT_PROTECTION","SHORT_DEDUP","SHORT_INTRADAY","SHORT_QUOTE","SHORT_BOOK","SHORT_ACCOUNT","SHARED_CURRENCY_CAPACITY");
     private static final Set<String> SHORT_SELL_RECEIPTS=Set.of("SHORT_RECONCILE","SHORT_EXIT","SHORT_FLOORS","SHORT_DEDUP","SHORT_QUOTE","SHORT_BOOK","SHORT_ACCOUNT");
@@ -188,14 +197,18 @@ final class SrppReportResponseValidator {
         text(leg,"symbol");text(leg,"market");text(leg,"strategy");text(leg,"currency");
         for(String key:Set.of("broker","subaccount","rankingReason"))nullableText(leg,key);
         String status=text(leg,"status"),action=text(leg,"action"),strategy=text(leg,"strategy");
-        // These 09:05/12:00 Taiwan report slots never expose individual US legs.
-        if(!"台股".equals(text(leg,"market")))fail();
+        String symbol=text(leg,"symbol"),market=text(leg,"market"),currency=text(leg,"currency");
+        boolean satelliteLots="GLOBAL_EQUITY_PACE".equals(moduleId)&&"SATELLITE_BUILD_D143".equals(strategy)&&"009826".equals(symbol)&&"台股".equals(market)&&"TWD".equals(currency);
+        boolean satelliteVt="GLOBAL_EQUITY_PACE".equals(moduleId)&&"SATELLITE_BUILD_D234".equals(strategy)&&"VT".equals(symbol)&&"美股".equals(market)&&"USD".equals(currency);
+        // These 09:05/12:00 Taiwan report slots expose no individual US leg except the D-234 VT build ceiling (TWD-funded sub-brokerage).
+        if(!"台股".equals(market)&&!satelliteVt)fail();
         boolean planBuy="NAMED_CASH_BUY_D226".equals(strategy),shortStrategy=SHORT_STRATEGIES.contains(strategy),namedSell="NAMED_RADAR_ROTATION_D226".equals(strategy);
         boolean boundStrategy=switch(moduleId){
             case "BOND_D130_D195" -> Set.of("STRATEGIC_FUBON","EMERGENCY_CATHAY").contains(strategy);
             case "DIVIDEND_TOPUP" -> "DIVIDEND_TOPUP".equals(strategy);
             case "STRATEGIC_BUY_GATES" -> "NAMED_DEEP_DRAWDOWN_D215".equals(strategy)&&Set.of("0050","00881").contains(text(leg,"symbol"))||planBuy&&"00881".equals(text(leg,"symbol"))||namedSell&&"2881".equals(text(leg,"symbol"));
             case "SHORT_TERM_AND_US_TACTICAL" -> shortStrategy;
+            case "GLOBAL_EQUITY_PACE" -> satelliteLots||satelliteVt;
             default -> false;
         };
         if(!boundStrategy)fail();
@@ -204,6 +217,8 @@ final class SrppReportResponseValidator {
         for(String key:Set.of("units","limitPrice","amount","fees","netProfitSpace"))decimal(leg.get(key));
         texts(leg.get("blockingReasons"),1000);receipts(leg.get("receipts"),sources);
         boolean active="ACTIONABLE_FOR_REPORT".equals(status);
+        boolean d215=d215(model);
+        d215Receipt(leg,"BOND_D130_D195".equals(moduleId)||satelliteVt,d215,satelliteVt,active);
         if(active){
             boolean positiveLots=!lots.isNull() && lots.longValue()>0;
             boolean positiveUnits=positive(leg.get("units"));
@@ -229,6 +244,7 @@ final class SrppReportResponseValidator {
                 else required.add("EMERGENCY_CAPACITY");
                 if("00865B".equals(text(leg,"symbol")))required.add("SUBACCOUNTS");
                 required.add("SHARED_CURRENCY_CAPACITY");
+                if(d215)required.add(D215_RULE);
                 if(!gates.containsAll(required))fail();
             }
             if("DIVIDEND_TOPUP".equals(strategy)){
@@ -275,6 +291,7 @@ final class SrppReportResponseValidator {
                     Set<String> actual=new HashSet<>();receipt.get("inputRefs").forEach(r->actual.add(r.asText()));if(!actual.equals(expected))fail();
                 }
             }
+            if(satelliteLots||satelliteVt)satellite(leg,gates,satelliteVt,positiveLots,positiveUnits,verifiedSources,d215);
             if(shortStrategy){
                 if(!lots.isNull() || !positiveUnits || !leg.get("units").textValue().matches("[1-9][0-9]*")
                         || new BigDecimal(leg.get("units").textValue()).compareTo(BigDecimal.valueOf(9007199254740991L))>0)fail();
@@ -289,14 +306,78 @@ final class SrppReportResponseValidator {
             }
             BigDecimal quantity=positiveLots ? BigDecimal.valueOf(lots.longValue()).multiply(BigDecimal.valueOf(1000)) : new BigDecimal(leg.get("units").textValue());
             if(new BigDecimal(leg.get("limitPrice").textValue()).multiply(quantity).compareTo(new BigDecimal(leg.get("amount").textValue()))!=0)fail();
-            if(!"TWD".equals(text(leg,"currency")) || (!shortStrategy && !namedSell && (!positiveLots || !leg.get("units").isNull())))fail();
+            if(satelliteVt){if(!"USD".equals(currency) || !lots.isNull() || !positiveUnits)fail();}
+            else if(!"TWD".equals(currency) || (!shortStrategy && !namedSell && (!positiveLots || !leg.get("units").isNull())))fail();
         } else {
             if(!lots.isNull() && lots.longValue()!=0 || !leg.get("units").isNull() && new BigDecimal(leg.get("units").textValue()).signum()!=0
                     || !leg.get("limitPrice").isNull() || !leg.get("amount").isNull())fail();
             if("BLOCKED".equals(status) && leg.get("blockingReasons").isEmpty())fail();
         }
     }
+    /** Exact Task 623 satellite ACTIONABLE contract: fixed account, receipts, refs and the VT TWD conversion identity. */
+    private static void satellite(JsonNode leg,Set<String> gates,boolean vt,boolean positiveLots,boolean positiveUnits,Set<String> verifiedSources,boolean d215){
+        if(!"BUY".equals(text(leg,"action")) || !gates.equals(vt?(d215?SATELLITE_VT_D215_RECEIPTS:SATELLITE_VT_RECEIPTS):SATELLITE_009826_RECEIPTS))fail();
+        if(vt){
+            if(!leg.get("lots").isNull() || !positiveUnits || !leg.get("units").textValue().matches("[1-9][0-9]*")
+                    || new BigDecimal(leg.get("units").textValue()).compareTo(BigDecimal.valueOf(9007199254740991L))>0
+                    || !"國泰證券".equals(text(leg,"broker")) || !"CORE_D234".equals(text(leg,"subaccount")) || !"3".equals(leg.get("fees").textValue()))fail();
+        }else if(!positiveLots || !leg.get("units").isNull() || !"富邦證券".equals(text(leg,"broker")) || !"CORE_D143".equals(text(leg,"subaccount")))fail();
+        Set<String> required=vt?Set.of("policy","assets","fx","satellite-build-fills","market:美股:VT"):Set.of("policy","assets","satellite-build-fills","market:台股:009826");
+        Set<String> optional=vt?Set.of("usd-twd-month-mids"):Set.of("usd-twd-month-mids","fx");
+        for(JsonNode receipt:leg.get("receipts")){
+            String rule=text(receipt,"ruleId");Set<String> refs=new HashSet<>();receipt.get("inputRefs").forEach(r->refs.add(r.textValue()));
+            if("SATELLITE_BUILD".equals(rule)){
+                if(!refs.containsAll(required))fail();
+                for(String ref:refs)if(!required.contains(ref)&&!optional.contains(ref))fail();
+                for(String ref:optional)if(verifiedSources.contains(ref)!=refs.contains(ref))fail();
+                boolean fxStatus=false;for(JsonNode v:receipt.get("values"))if("fxStatusVerified".equals(text(v,"name"))){if(!"BOOLEAN".equals(text(v,"unit")))fail();fxStatus=true;}
+                if(!fxStatus)fail();
+            }else if("FX_CONVERSION".equals(rule)){
+                if(!refs.equals(Set.of("fx","policy")))fail();
+                BigDecimal spot=null,twdAmount=null,twdFee=null;
+                for(JsonNode v:receipt.get("values")){
+                    if(v.get("value").isNull())continue;BigDecimal value=new BigDecimal(v.get("value").textValue());
+                    switch(text(v,"name")){case "spotSellingRate"->spot=value;case "twdAmount"->twdAmount=value;case "twdFee"->twdFee=value;default->{}}
+                }
+                if(spot==null || twdAmount==null || twdFee==null || spot.signum()<=0)fail();
+                BigDecimal units=new BigDecimal(leg.get("units").textValue()),limit=new BigDecimal(leg.get("limitPrice").textValue());
+                if(twdAmount.compareTo(units.multiply(limit).multiply(spot))!=0 || twdFee.compareTo(new BigDecimal("3").multiply(spot))!=0)fail();
+            }
+        }
+    }
     private static boolean positive(JsonNode n){return n!=null && !n.isNull() && new BigDecimal(n.textValue()).signum()>0;}
+    private static boolean d215(JsonNode model){return model!=null && model.path("execution_policy").has("usd_asset_fx_preference_d215");}
+    /**
+     * Task 625: with a D-215 bundle every bond leg and the VT build leg carries exactly one D215_FX receipt with refs
+     * {fx, policy, market:<market>:<symbol>}; status/reason pairs and value names/units are closed sets. An ACTIONABLE
+     * leg's D215_FX must PASS (enforced by the generic ACTIONABLE receipt rule). No other leg, and no legacy bundle, may carry it.
+     */
+    private static void d215Receipt(JsonNode leg,boolean scoped,boolean d215,boolean vt,boolean active){
+        JsonNode found=null;
+        for(JsonNode r:leg.get("receipts"))if(D215_RULE.equals(text(r,"ruleId"))){if(found!=null)fail();found=r;}
+        if(!scoped||!d215){if(found!=null)fail();return;}
+        if(found==null)fail();
+        String symbol=text(leg,"symbol"),market=text(leg,"market"),status=text(found,"status"),reason=text(found,"reason");
+        Set<String> refs=new HashSet<>();found.get("inputRefs").forEach(r->refs.add(r.textValue()));
+        if(!refs.equals(Set.of("fx","policy","market:"+market+":"+symbol)))fail();
+        boolean ok=switch(status){
+            case "PASS"->Set.of("D215_NO_FX_PREFERENCE_VETO","D215_FX_PREFERENCE_EXCEPTION_REVIEW").contains(reason);
+            case "BLOCK"->"D215_FX_WAIT_PREFERRED".equals(reason);
+            case "UNAVAILABLE"->Set.of("D215_FX_EVIDENCE_UNKNOWN","D215_FX_POLICY_UNAVAILABLE").contains(reason)||reason.matches("SOURCE_NOT_VERIFIED:[^,]+(,SOURCE_NOT_VERIFIED:[^,]+)*");
+            default->false;
+        };
+        if(!ok||active&&!"PASS".equals(status))fail();
+        String currency=vt?"USD":"TWD";Set<String> names=new HashSet<>();
+        for(JsonNode v:found.get("values")){
+            String name=text(v,"name"),unit=text(v,"unit");if(!names.add(name)||!symbol.equals(v.get("subject").textValue()))fail();
+            String expected=switch(name){case "assetHigh52w","d215WaitCeilingAmount"->currency;default->D215_UNITS.get(name);};
+            if(expected==null||!expected.equals(unit))fail();
+            if(name.equals(vt?"d215WaitCeilingLots":"d215WaitCeilingUnits"))fail();
+            if("BOOLEAN".equals(unit)&&!v.get("value").isNull()&&!Set.of("0","1").contains(v.get("value").textValue()))fail();
+        }
+        for(String name:Set.of("fxSpotSelling","fxRangeLow","fxRangeHigh","fxRangePosition","fxAbsoluteHigh","fxHigh","assetHigh52w","assetDrawdown52w","cheapAssetException"))if(!names.contains(name))fail();
+        if(names.stream().anyMatch(n->n.startsWith("d215WaitCeiling"))&&(active||!"BLOCKED".equals(text(leg,"status"))))fail();
+    }
     private static void receipts(JsonNode list,Set<String> sources){array(list,5000);for(JsonNode r:list){
         fields(r,"ruleId","calculatorVersion","inputRefs","status","reason","values","scope");text(r,"ruleId");text(r,"calculatorVersion");text(r,"reason");
         if(!Set.of("PASS","BLOCK","UNAVAILABLE","NOT_EVALUATED").contains(text(r,"status")))fail();
