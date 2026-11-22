@@ -56,4 +56,48 @@ class DailyDecisionCalculatorTest {
         Input base=input();for(String slot:List.of("12:00","11:40")){Input frame=input(base.date(),base.sessions(),Map.of("00865B",new BigDecimal("9.8"),"00719B",new BigDecimal("9.85"),"00697B",new BigDecimal("9.9")),Map.of(),slot);Quote q=frame.symbols().get("00865B").quote();for(long volume:List.of(0L,1L,1000L,1001L,1500L,1501L)){int maximum=slot.equals("12:00")&&volume>0&&volume<=1500?volume<=1000?20:15:5;for(int excess:List.of(0,1)){Quote aged=new Quote(q.price(),q.previousClose(),volume,q.date(),frame.capturedAt().minusSeconds(maximum*60L+excess),q.source(),q.status(),false,q.premium(),q.premiumDate());assertThat(DailyDecisionCalculator.quoteQualified(POLICY,frame,aged)).as(slot+" volume="+volume+" excess="+excess).isEqualTo(excess==0);}}}
     }
 
+
+    // ---- Task 626.20: 00865B emergency quote-gap reason codes (synthetic verified-subaccount Inputs only) ----
+    static Input emergency(Input in,java.util.function.UnaryOperator<Symbol> change,BigDecimal emergencyValue,Evidence subaccounts){Symbol s=change.apply(in.symbols().get("00865B"));Input changed=symbol(in,"00865B",s);return new Input(changed.date(),changed.slot(),changed.capturedAt(),changed.sessions(),changed.totalAssets(),changed.totalDeposits(),changed.termDeposits(),changed.bondValue(),changed.fx(),changed.fxEvidence(),changed.bearWindow(),changed.symbols(),changed.budget(),subaccounts,emergencyValue);}
+    static Symbol quote(Symbol s,String status,BigDecimal premium){Quote q=s.quote();return replace(s,new Quote(q.price(),q.previousClose(),q.volume(),q.date(),q.updatedAt(),q.source(),status,false,premium,premium==null?null:q.premiumDate()),s.currentValue(),s.tradability());}
+    static Symbol book(Symbol s,boolean valid){Book b=s.book();return new Symbol(s.code(),s.quote(),new Book(b.source(),b.date(),b.sourceTime(),b.fetchedAt(),b.levels(),valid),s.closes(),s.distributions(),s.distributionVerified(),s.currentValue(),s.position(),s.pending(),s.radar(),s.valuation(),s.tradability(),s.mediumAction(),s.mediumCandidateAction(),s.intraday());}
+    static Symbol radar(Symbol s,Evidence radar){return new Symbol(s.code(),s.quote(),s.book(),s.closes(),s.distributions(),s.distributionVerified(),s.currentValue(),s.position(),s.pending(),radar,s.valuation(),s.tradability(),s.mediumAction(),s.mediumCandidateAction(),s.intraday());}
+    static Candidate emergencyLeg(Input in){Candidate c=DailyDecisionCalculator.calculate(POLICY,in).candidates().getLast();assertThat(c.strategy()).isEqualTo("EMERGENCY_CATHAY");return c;}
+    static Receipt capacityReceipt(Candidate c){return c.receipts().stream().filter(r->r.ruleId().equals("EMERGENCY_CAPACITY")).findFirst().orElseThrow();}
+    @Test void emergencyQuoteGapIsTheOnlyNamedReasonWhenItIsTheOnlyBlock(){
+        Input base=input();
+        record Case(java.util.function.UnaryOperator<Symbol> change,List<String> reasons){}
+        for(Case k:List.of(new Case(s->quote(s,"DELAYED",s.quote().premium()),List.of("LIVE_PRICE_UNVERIFIED")),
+                new Case(s->book(s,false),List.of("BEST_FIVE_UNVERIFIED")),
+                new Case(s->quote(s,"LIVE",null),List.of("PREMIUM_OR_PRICE_UNVERIFIED")),
+                new Case(s->quote(s,"DELAYED",null),List.of("LIVE_PRICE_UNVERIFIED","PREMIUM_OR_PRICE_UNVERIFIED")))){
+            Candidate c=emergencyLeg(emergency(base,k.change(),BigDecimal.ZERO,PASS));
+            assertThat(c.lots()).isZero();assertThat(c.blockingReasons()).containsExactlyElementsOf(k.reasons());
+            assertThat(DailyDecisionCalculator.QUOTE_REFRESH_GAPS).containsAll(c.blockingReasons());
+            Receipt r=capacityReceipt(c);assertThat(r.status()).isEqualTo("UNAVAILABLE");assertThat(r.reason()).isEqualTo(k.reasons().getFirst());
+        }
+    }
+    @Test void emergencyGenericCodeStaysForRealCapacityOrEvidenceReasons(){
+        Input base=input();
+        // quote gap mixed with a non-quote evidence gap
+        Candidate mixed=emergencyLeg(emergency(base,s->radar(quote(s,"DELAYED",s.quote().premium()),new Evidence("UNAVAILABLE","EXACT_RADAR_UNVERIFIED")),BigDecimal.ZERO,PASS));
+        assertThat(mixed.blockingReasons()).contains("LIVE_PRICE_UNVERIFIED","EXACT_RADAR_UNVERIFIED","EMERGENCY_TARGET_CAPACITY_OR_EVIDENCE");
+        // target already full: gap <= 0
+        Candidate full=emergencyLeg(emergency(base,s->quote(s,"DELAYED",s.quote().premium()),new BigDecimal("999999999"),PASS));
+        assertThat(full.blockingReasons()).contains("LIVE_PRICE_UNVERIFIED","EMERGENCY_TARGET_CAPACITY_OR_EVIDENCE");assertThat(capacityReceipt(full).status()).isEqualTo("BLOCK");
+        // verified quote but zero funded capacity
+        Input poor=new Input(base.date(),base.slot(),base.capturedAt(),base.sessions(),base.totalAssets(),BigDecimal.ZERO,base.termDeposits(),base.bondValue(),base.fx(),base.fxEvidence(),base.bearWindow(),base.symbols(),base.budget(),PASS,BigDecimal.ZERO);
+        Candidate zero=emergencyLeg(poor);assertThat(zero.blockingReasons()).containsExactly("EMERGENCY_TARGET_CAPACITY_OR_EVIDENCE");
+        // elots > 0 is unchanged
+        Candidate buy=emergencyLeg(base);assertThat(buy.lots()).isEqualTo(2);assertThat(capacityReceipt(buy).status()).isEqualTo("PASS");assertThat(capacityReceipt(buy).reason()).isEqualTo("EMERGENCY_SEPARATE_QUOTA_SHARED_FUNDS");
+        assertThat(DailyDecisionCalculator.VERSION).isEqualTo("SRPP_D130_D195_V1");
+    }
+    @Test void currentAdapterShapeKeepsBoth00865BLegsSubaccountUnverifiedAndNullEmergencyValueNeverTriggers(){
+        Evidence unverified=new Evidence("UNAVAILABLE","SUBACCOUNT_UNVERIFIED");
+        Input production=emergency(input(),s->new Symbol(s.code(),quote(s,"DELAYED",s.quote().premium()).quote(),s.book(),s.closes(),s.distributions(),s.distributionVerified(),s.currentValue(),unverified,unverified,s.radar(),s.valuation(),s.tradability(),s.mediumAction(),s.mediumCandidateAction(),s.intraday()),null,unverified);
+        Result r=DailyDecisionCalculator.calculate(POLICY,production);
+        for(Candidate c:r.candidates())if(c.symbol().equals("00865B")){assertThat(c.blockingReasons()).contains("SUBACCOUNT_UNVERIFIED");assertThat(DailyDecisionCalculator.QUOTE_REFRESH_GAPS.containsAll(c.blockingReasons())).isFalse();}
+        Candidate nullGap=emergencyLeg(emergency(input(),s->quote(s,"DELAYED",s.quote().premium()),null,PASS));
+        assertThat(nullGap.blockingReasons()).containsExactly("EMERGENCY_TARGET_CAPACITY_OR_EVIDENCE","LIVE_PRICE_UNVERIFIED");assertThat(capacityReceipt(nullGap).status()).isEqualTo("BLOCK");
+    }
 }

@@ -11,6 +11,8 @@ public final class DailyDecisionCalculator {
     public static final String VERSION="SRPP_D130_D195_V1";
     private static final BigDecimal THOUSAND=new BigDecimal("1000"),HUNDRED=new BigDecimal("100");
     private static final MathContext MC=MathContext.DECIMAL128;
+    /** SRPP trade_blocker_policy.QUOTE_REFRESH_GAPS: the six D-230 capture-gap codes (Task 626.5 / 626.20 share this constant). */
+    public static final Set<String> QUOTE_REFRESH_GAPS=Set.of("LIVE_PRICE_UNVERIFIED","LIVE_QUOTE_STALE","BEST_FIVE_UNVERIFIED","FUBON_OFFICIAL_CAPTURE_FAILED","FUBON_SOURCE_NOT_CAPTURED","PREMIUM_OR_PRICE_UNVERIFIED");
     private DailyDecisionCalculator() {}
     public record Quality(boolean suitable,String reason,BigDecimal rawDrawdown,BigDecimal drawdownPercent,BigDecimal high) {}
     public static Result calculate(Policy p,Input in){
@@ -73,7 +75,11 @@ public final class DailyDecisionCalculator {
             elots=capacity(p,in,emergency,cap,available,true,roundBond,roundAssets);
             if(elots>0){elimit=limit(emergency,elots);eamount=elimit.multiply(THOUSAND).multiply(BigDecimal.valueOf(elots));}
         }
-        add(er,eb,"EMERGENCY_CAPACITY",elots>0?"PASS":"BLOCK",elots>0?"EMERGENCY_SEPARATE_QUOTA_SHARED_FUNDS":"EMERGENCY_TARGET_CAPACITY_OR_EVIDENCE",List.of("assets","subaccounts","reservations","policy","book:00865B"),true,Map.of("lots",Integer.toString(elots)));
+        // Task 626.20: when a positive emergency gap exists and the reused shared gates failed only on quote capture gaps,
+        // name the exact quote gap instead of the generic capacity/evidence code; every other zero keeps the original code.
+        boolean quoteGapOnly=elots==0&&!eb.isEmpty()&&QUOTE_REFRESH_GAPS.containsAll(eb)&&gap!=null&&gap.signum()>0;
+        if(quoteGapOnly)add(er,eb,"EMERGENCY_CAPACITY","UNAVAILABLE",eb.first(),List.of("assets","subaccounts","reservations","policy","book:00865B"),true,Map.of("lots",Integer.toString(elots)));
+        else add(er,eb,"EMERGENCY_CAPACITY",elots>0?"PASS":"BLOCK",elots>0?"EMERGENCY_SEPARATE_QUOTA_SHARED_FUNDS":"EMERGENCY_TARGET_CAPACITY_OR_EVIDENCE",List.of("assets","subaccounts","reservations","policy","book:00865B"),true,Map.of("lots",Integer.toString(elots)));
         out.add(candidate("00865B","EMERGENCY_CATHAY",elots,elimit,eamount,eb,er));
         return new Result(List.copyOf(out),ranking);
     }
@@ -122,17 +128,20 @@ public final class DailyDecisionCalculator {
         BigDecimal tick=last.compareTo(new BigDecimal("50"))<0?new BigDecimal("0.01"):new BigDecimal("0.05");
         return last.divide(tick,0,RoundingMode.FLOOR).multiply(tick);
     }
-    static boolean quoteQualified(Policy p,Input in,Quote q){return q!=null&&q.price()!=null&&q.price().signum()>0&&in.date().equals(q.date())&&q.updatedAt()!=null&&!q.updatedAt().isAfter(in.capturedAt())&&q.updatedAt().atZone(ZoneId.of("Asia/Taipei")).toLocalDate().equals(in.date())&&q.source()!=null&&!q.source().isBlank()&&Boolean.FALSE.equals(q.closed())&&"LIVE".equals(q.status())&&(early(p,in,q)||Duration.between(q.updatedAt(),in.capturedAt()).compareTo(Duration.ofMinutes(reportQuoteMinutes(p,in,q)))<=0);}
+    public static boolean quoteQualified(Policy p,Input in,Quote q){return q!=null&&q.price()!=null&&q.price().signum()>0&&in.date().equals(q.date())&&q.updatedAt()!=null&&!q.updatedAt().isAfter(in.capturedAt())&&q.updatedAt().atZone(ZoneId.of("Asia/Taipei")).toLocalDate().equals(in.date())&&q.source()!=null&&!q.source().isBlank()&&Boolean.FALSE.equals(q.closed())&&"LIVE".equals(q.status())&&(early(p,in,q)||Duration.between(q.updatedAt(),in.capturedAt()).compareTo(Duration.ofMinutes(reportQuoteMinutes(p,in,q)))<=0);}
     private static int reportQuoteMinutes(Policy p,Input in,Quote q){
         if("12:00".equals(in.slot())&&q.volume()!=null&&q.volume()>0){if(q.volume()<=1000)return 20;if(q.volume()<=1500)return 15;}
         return p.acquisitionMinutes();
     }
     private static boolean early(Policy p,Input in,Quote q){return "09:05".equals(in.slot())&&q.volume()!=null&&q.volume()>0&&q.volume()<p.earlyVolumeBelow()&&q.previousClose()!=null&&q.previousClose().signum()>0&&q.price()!=null&&q.price().compareTo(q.previousClose())!=0;}
-    static boolean bookQualified(Policy p,Input in,Book b){if(b==null||!b.valid()||!in.date().equals(b.date())||b.sourceTime()==null||b.fetchedAt()==null||!Set.of("FUBON_BOOKS","YAHOO_TW").contains(Objects.toString(b.source(),""))||b.sourceTime().isAfter(in.capturedAt())||b.fetchedAt().isAfter(in.capturedAt())||Duration.between(b.sourceTime(),in.capturedAt()).compareTo(Duration.ofMinutes(p.acquisitionMinutes()))>0||b.levels()==null||b.levels().size()!=5)return false;
+    public static boolean bookQualified(Policy p,Input in,Book b){if(b==null||!b.valid()||!in.date().equals(b.date())||b.sourceTime()==null||b.fetchedAt()==null||!Set.of("FUBON_BOOKS","YAHOO_TW").contains(Objects.toString(b.source(),""))||b.sourceTime().isAfter(in.capturedAt())||b.fetchedAt().isAfter(in.capturedAt())||Duration.between(b.sourceTime(),in.capturedAt()).compareTo(Duration.ofMinutes(p.acquisitionMinutes()))>0||b.levels()==null||b.levels().size()!=5)return false;
         BigDecimal bid=null,ask=null;for(Level l:b.levels()){if(l.bid()==null||l.ask()==null||l.bid().signum()<=0||l.ask().signum()<=0||l.bidLots()<0||l.askLots()<0||l.bid().compareTo(l.ask())>0||bid!=null&&l.bid().compareTo(bid)>=0||ask!=null&&l.ask().compareTo(ask)<=0)return false;bid=l.bid();ask=l.ask();}return true;}
     private static BigDecimal normalizedGap(Policy p,Input in,String c){BigDecimal target=p.targets().get(c).multiply(in.totalAssets());return target.subtract(in.symbols().get(c).currentValue().add(in.budget().strategicReservedValues().getOrDefault(c,BigDecimal.ZERO))).divide(target,MC);}
-    private static BigDecimal cost(Policy p,BigDecimal amount){return amount.add(amount.multiply(p.feeRate()).setScale(2,RoundingMode.CEILING));}
-    public static BigDecimal inflation(Policy p,LocalDate date){return BigDecimal.valueOf(StrictMath.pow(BigDecimal.ONE.add(p.inflation()).doubleValue(),ChronoUnit.DAYS.between(p.baseDate(),date)/365.25));}
+    /** Taiwan broker fee of this calculator: amount x feeRate rounded up to the cent (Task 626 re-sizing reuses it). */
+    public static BigDecimal fee(Policy p,BigDecimal amount){return amount.multiply(p.feeRate()).setScale(2,RoundingMode.CEILING);}
+    public static BigDecimal cost(Policy p,BigDecimal amount){return amount.add(fee(p,amount));}
+    public static BigDecimal inflation(Policy p,LocalDate date){return inflation(p.inflation(),p.baseDate(),date);}
+    public static BigDecimal inflation(BigDecimal annualRate,LocalDate baseDate,LocalDate date){return BigDecimal.valueOf(StrictMath.pow(BigDecimal.ONE.add(annualRate).doubleValue(),ChronoUnit.DAYS.between(baseDate,date)/365.25));}
     public static String decimal(BigDecimal d){return d.signum()==0?"0":d.stripTrailingZeros().toPlainString();}
     private static void evidence(List<Receipt> r,SortedSet<String>b,String id,Evidence e,List<String>refs,boolean block){add(r,b,id,e==null?"UNAVAILABLE":e.status(),e==null?id+"_UNVERIFIED":e.reason(),refs,block,Map.of());}
     private static void add(List<Receipt>r,SortedSet<String>b,String id,String status,String reason,List<String>refs,boolean block,Map<String,String>v){r.add(new Receipt(id,VERSION,refs,status,reason,v));if(block&&Set.of("BLOCK","UNAVAILABLE").contains(status))b.add(reason);}

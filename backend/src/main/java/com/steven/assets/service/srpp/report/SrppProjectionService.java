@@ -6,6 +6,10 @@ import com.steven.assets.model.AppUser;
 import com.steven.assets.repository.SrppReportRepository;
 import com.steven.assets.security.CurrentUserContext;
 import com.steven.assets.service.MarketDataService;
+import com.steven.assets.service.PriceQueryService;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.steven.assets.service.srpp.decision.DecisionFacts;
+import com.steven.assets.service.srpp.decision.DecisionInputCapturePort;
 import com.steven.assets.service.srpp.PublishedSwaggerIdentity;
 import com.steven.assets.srpp.*;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,15 +21,51 @@ import java.math.BigDecimal;
 import java.time.*;
 import java.util.*;
 
-/** Task 497 immutable package projection.  It has no writer, vendor, broker or producer dependency. */
+/**
+ * Task 497 immutable package projection; Task 626 adds order-plan v2 on the same route.
+ * v1: no IO; v2: read-only cached market reads at call time, no writer, vendor refresh, broker or producer trigger.
+ */
 @Service
 public class SrppProjectionService {
     private static final JsonNodeFactory F=JsonNodeFactory.instance;
     private static final List<String> FACTS=List.of("WEEK52_POSITION","K","D","RSI5","BIAS10","WILLIAMS_R9","PREMIUM_PERCENT","OVERHEAT_HIT","LOW_HIT","ENTRY_WATCH","BUY_OBSERVATION","SELL_OBSERVATION");
     private final CurrentUserContext owner; private final MarketDataService calendar; private final SrppPolicyRegistryService registry; private final PublishedSwaggerIdentity swagger; private final SrppReportAuthority authority; private final SrppReportRepository repository; private final Clock clock;
-    @Autowired public SrppProjectionService(CurrentUserContext owner,MarketDataService calendar,SrppPolicyRegistryService registry,PublishedSwaggerIdentity swagger,SrppReportAuthority authority,SrppReportRepository repository){this(owner,calendar,registry,swagger,authority,repository,Clock.system(SrppTime.TW_ZONE));}
+    /** Task 626 v2 read-only dependencies; null only in v1-only construction, where every v2 request is 503. */
+    private PriceQueryService prices; private SrppReportFubonCapturePort fubon; private ObjectMapper mapper; private JsonNode modelOverride;
+    public SrppProjectionService(CurrentUserContext owner,MarketDataService calendar,SrppPolicyRegistryService registry,PublishedSwaggerIdentity swagger,SrppReportAuthority authority,SrppReportRepository repository){this(owner,calendar,registry,swagger,authority,repository,Clock.system(SrppTime.TW_ZONE));}
+    @Autowired public SrppProjectionService(CurrentUserContext owner,MarketDataService calendar,SrppPolicyRegistryService registry,PublishedSwaggerIdentity swagger,SrppReportAuthority authority,SrppReportRepository repository,PriceQueryService prices,SrppReportFubonCapturePort fubon,ObjectMapper mapper){this(owner,calendar,registry,swagger,authority,repository,Clock.system(SrppTime.TW_ZONE));this.prices=prices;this.fubon=fubon;this.mapper=mapper;}
     SrppProjectionService(CurrentUserContext owner,MarketDataService calendar,SrppPolicyRegistryService registry,PublishedSwaggerIdentity swagger,SrppReportAuthority authority,SrppReportRepository repository,Clock clock){this.owner=owner;this.calendar=calendar;this.registry=registry;this.swagger=swagger;this.authority=authority;this.repository=repository;this.clock=clock;}
-    @Transactional(readOnly=true) public String order(MultiValueMap<String,String> values){ SrppProjectionRequest.Order q=SrppProjectionRequest.order(values); Loaded l=load(q.common()); Instant now=clock.instant(); if(q.asOf().isBefore(l.capturedAt)||q.asOf().isAfter(now))throw new SrppReportProblem("INVALID_REQUEST"); return SrppJcs.canonicalize(plan(l,q)); }
+    /** Test seam: v2 read-only dependencies and, for the D-234 enabled bundle fixtures, the model the package was calculated with. */
+    SrppProjectionService withV2(PriceQueryService prices,SrppReportFubonCapturePort fubon,ObjectMapper mapper,JsonNode model){this.prices=prices;this.fubon=fubon;this.mapper=mapper;this.modelOverride=model;return this;}
+    @Transactional(readOnly=true) public String order(MultiValueMap<String,String> values){ if(values!=null&&values.containsKey(SrppProjectionRequest.PROJECTION_VERSION))return orderV2(values); SrppProjectionRequest.Order q=SrppProjectionRequest.order(values); Loaded l=load(q.common()); Instant now=clock.instant(); if(q.asOf().isBefore(l.capturedAt)||q.asOf().isAfter(now))throw new SrppReportProblem("INVALID_REQUEST"); return SrppJcs.canonicalize(plan(l,q)); }
+    private String orderV2(MultiValueMap<String,String> values){
+        SrppProjectionRequest.OrderV2 q=SrppProjectionRequest.orderV2(values); Loaded l=load(q.order().common()); Instant now=clock.instant();
+        if(q.order().asOf().isBefore(l.capturedAt())||q.order().asOf().isAfter(now))throw new SrppReportProblem("INVALID_REQUEST");
+        if(prices==null||mapper==null)throw new SrppReportProblem("CONTEXT_NOT_READY");
+        if(!authority.decision().policy().bundleHash().equals(q.order().common().policy()))throw new SrppReportProblem("POLICY_UNSUPPORTED");
+        JsonNode snapshot=l.root().path("inputSnapshot");ObjectNode input=(ObjectNode)l.input();
+        DecisionFacts.Input facts;try{facts=mapper.convertValue(input.path("facts"),DecisionFacts.Input.class);}catch(RuntimeException e){throw new SrppReportProblem("UPSTREAM_INVALID");}
+        if(!snapshot.path("sourceVector").isObject()||!snapshot.path("assetSnapshotId").isIntegralNumber()||!snapshot.path("assetGeneratedAt").isTextual())throw new SrppReportProblem("UPSTREAM_INVALID");
+        DecisionInputCapturePort.Frozen frozen=new DecisionInputCapturePort.Frozen(facts,input,(ObjectNode)snapshot.path("sourceVector"),snapshot.path("assetSnapshotId").asLong(),snapshot.path("assetGeneratedAt").asText());
+        long ownerId=owner.getEffectiveUserId();
+        SrppOrderPlanV2.MarketReads reads=new SrppOrderPlanV2.MarketReads(){
+            public Map<String,SrppOrderPlanV2.Read> taiwan(List<String> codes){
+                Set<PriceQueryService.PriceKey> keys=new LinkedHashSet<>();for(String code:codes)keys.add(new PriceQueryService.PriceKey(code,"台股"));
+                Map<PriceQueryService.PriceKey,Optional<PriceQueryService.LivePrice>> live;try{live=prices.getLiveBatch(keys,Map.of());}catch(RuntimeException unavailable){live=Map.of();}
+                Map<String,SrppOrderPlanV2.Read> out=new LinkedHashMap<>();
+                for(String code:codes){
+                    PriceQueryService.LivePrice quote=live==null?null:live.getOrDefault(new PriceQueryService.PriceKey(code,"台股"),Optional.empty()).orElse(null);
+                    PriceQueryService.EtfNav nav;try{nav=prices.getEtfNav(code,"台股").orElse(null);}catch(RuntimeException unavailable){nav=null;}
+                    com.steven.assets.dto.QuoteDetailDto.Response book;try{book=calendar.getQuoteDetail(code,"台股");}catch(RuntimeException unavailable){book=null;}
+                    out.put(code,new SrppOrderPlanV2.Read(code,quote,nav,book,quote==null));
+                }
+                return out;
+            }
+            public SrppReportFubonCapturePort.Capture fubon(long owner,LocalDate date,Instant at){if(fubon==null)throw new IllegalStateException("FUBON_CAPTURE_UNAVAILABLE");return SrppProjectionService.this.fubon.capture(owner,date,at);}
+        };
+        JsonNode model=modelOverride!=null?modelOverride.deepCopy():authority.model();
+        return SrppJcs.canonicalize(SrppOrderPlanV2.plan(new SrppOrderPlanV2.Context(l,frozen,authority.decision().policy(),model,l.registered(),q,now,clock,reads,mapper,ownerId)));
+    }
     @Transactional(readOnly=true) public String facts(MultiValueMap<String,String> values){ SrppProjectionRequest.Symbols q=SrppProjectionRequest.symbols(values); Loaded l=load(q.common()); return SrppJcs.canonicalize(symbolFacts(l,q)); }
     private Loaded load(SrppProjectionRequest.Common q){
         ZonedDateTime now=ZonedDateTime.now(clock.withZone(SrppTime.TW_ZONE)); if(!q.date().equals(now.toLocalDate())||now.toLocalTime().isBefore(LocalTime.parse(q.slot())))throw new SrppReportProblem("INVALID_REQUEST");
@@ -39,7 +79,7 @@ public class SrppProjectionService {
         if(!saved.id().toString().equals(root.path("calculationRunId").asText())||!saved.contentHash().equals(root.path("contentSha256").asText())||!saved.inputHash().equals(root.path("inputSnapshot").path("inputSnapshotSha256").asText())||identity.path("ownerUserId").asLong()!=ownerId||!q.consumer().equals(identity.path("consumer").asText()))throw new SrppReportProblem("UPSTREAM_INVALID");
         Instant captured;try{captured=Instant.parse(root.path("inputSnapshot").path("capturedAt").asText());}catch(RuntimeException e){throw new SrppReportProblem("UPSTREAM_INVALID");}
         JsonNode input;try{input=SrppJcs.parseStrict(root.path("inputSnapshot").path("inputBundleJcs").asText());}catch(RuntimeException e){throw new SrppReportProblem("UPSTREAM_INVALID");}
-        return new Loaded(root,input,captured);
+        return new Loaded(root,input,captured,policy.get());
     }
     private ObjectNode plan(Loaded l,SrppProjectionRequest.Order q){
         List<Leg> legs=legs(l.root);Map<String,SrppProjectionRequest.Decision> decisions=new LinkedHashMap<>();int previous=-1;for(var d:q.decisions()){int position=-1;for(int i=0;i<legs.size();i++)if(legs.get(i).id.equals(d.legId())){position=i;break;}if(position<0||position<=previous||decisions.put(d.legId(),d)!=null)throw new SrppReportProblem("INVALID_REQUEST");previous=position;}
@@ -50,7 +90,7 @@ public class SrppProjectionService {
         ArrayNode projected=out.putArray("legs");int complete=0,unavailable=0,notEvaluated=0;for(Leg leg:legs){LegProjection p=projectLeg(l,leg,decisions.get(leg.id));projected.add(p.node());switch(p.coverage()){case COMPLETE->complete++;case UNAVAILABLE->unavailable++;case NOT_EVALUATED->notEvaluated++;}}
         coverage(out,legs.size(),complete,0,unavailable,notEvaluated);out.put("executionScope","REPORT_RECOMMENDATION_ONLY");out.put("tradeAuthorization",false);out.put("placesOrders",false);out.putArray("receiptRefs");hash(out);return out;
     }
-    private ObjectNode decision(SrppProjectionRequest.Decision d){ObjectNode o=F.objectNode();o.put("legId",d.legId());o.put("verdict",d.verdict());if(d.amount()==null)o.putNull("amount");else o.put("amount",d.amount());if(d.reason()==null)o.putNull("reason");else o.put("reason",d.reason());return o;}
+    static ObjectNode decision(SrppProjectionRequest.Decision d){ObjectNode o=F.objectNode();o.put("legId",d.legId());o.put("verdict",d.verdict());if(d.amount()==null)o.putNull("amount");else o.put("amount",d.amount());if(d.reason()==null)o.putNull("reason");else o.put("reason",d.reason());return o;}
     private LegProjection projectLeg(Loaded loaded,Leg leg,SrppProjectionRequest.Decision decision){
         JsonNode b=leg.node;ObjectNode o=F.objectNode();String action=text(b,"action");
         o.put("legId",leg.id);o.put("market",market(text(b,"market")));o.put("symbol",text(b,"symbol"));o.put("action",action);
@@ -83,7 +123,7 @@ public class SrppProjectionService {
      * that normal source shape therefore remains the deliberate all-null fallback until a complete sealed
      * source exists, rather than inventing an amount at projection time.
      */
-    private QuoteProof quoteProof(Loaded loaded,Leg leg){
+    static QuoteProof quoteProof(Loaded loaded,Leg leg){
         try{
             String wireMarket=market(text(leg.node,"market")),sourceMarket="TW".equals(wireMarket)?"台股":"美股",symbol=text(leg.node,"symbol"),sourceId="market:"+sourceMarket+":"+symbol;
             JsonNode source=loaded.input.path("sources").path(sourceId),vector=loaded.root.path("inputSnapshot").path("sourceVector").path(sourceId),quote=source.path("quote");
@@ -116,16 +156,16 @@ public class SrppProjectionService {
     private ObjectNode outsideFact(String n){ObjectNode o=unavailableFact(n,"NOT_IN_PACKAGE_CAPTURE");o.put("status","UNAVAILABLE");return o;}
     private boolean trusted(JsonNode source,JsonNode vector,String id){try{String symbol=id.substring("market:台股:".length());return source.isObject()&&"台股".equals(source.path("market").asText())&&symbol.equals(source.path("symbol").asText())&&vector.isObject()&&id.equals(vector.path("sourceId").asText())&&"VERIFIED".equals(vector.path("validation").asText())&&vector.path("sha256").asText().matches("[a-f0-9]{64}")&&vector.path("sha256").asText().equals(SrppJcs.sha256Hex(SrppJcs.canonicalize(source)))&&Instant.parse(vector.path("capturedAt").asText())!=null;}catch(RuntimeException e){return false;}}
     private List<Leg> legs(JsonNode root){List<Leg> out=new ArrayList<>();JsonNode modules=root.path("modules");if(!modules.isArray())throw new SrppReportProblem("UPSTREAM_INVALID");for(JsonNode m:modules){String module=text(m,"moduleId");JsonNode rows=m.path("data").path("legs");if(!rows.isArray())throw new SrppReportProblem("UPSTREAM_INVALID");for(int i=0;i<rows.size();i++){JsonNode leg=rows.get(i);String action=text(leg,"action"),market=text(leg,"market");if(!Set.of("BUY","SELL","NONE").contains(action)||!Set.of("台股","美股").contains(market))throw new SrppReportProblem("UPSTREAM_INVALID");if(!"NONE".equals(action))out.add(new Leg(module+"."+i,module,i,leg));}}return out;}
-    private static String market(String market){return switch(market){case "台股"->"TW";case "美股"->"US";default->throw new SrppReportProblem("UPSTREAM_INVALID");};}
-    private static String text(JsonNode n,String field){if(!n.path(field).isTextual()||n.path(field).asText().isBlank())throw new SrppReportProblem("UPSTREAM_INVALID");return n.path(field).asText();}
-    private static JsonNode baseLots(JsonNode leg){JsonNode n=leg.path("lots");return n.isIntegralNumber()&&n.longValue()>=0?n.deepCopy():NullNode.instance;}
-    private static JsonNode baseUnits(JsonNode leg){JsonNode n=leg.path("units");return n.isTextual()&&publicDecimal(n.textValue())&&new BigDecimal(n.textValue()).signum()>=0?n.deepCopy():NullNode.instance;}
+    static String market(String market){return switch(market){case "台股"->"TW";case "美股"->"US";default->throw new SrppReportProblem("UPSTREAM_INVALID");};}
+    static String text(JsonNode n,String field){if(!n.path(field).isTextual()||n.path(field).asText().isBlank())throw new SrppReportProblem("UPSTREAM_INVALID");return n.path(field).asText();}
+    static JsonNode baseLots(JsonNode leg){JsonNode n=leg.path("lots");return n.isIntegralNumber()&&n.longValue()>=0?n.deepCopy():NullNode.instance;}
+    static JsonNode baseUnits(JsonNode leg){JsonNode n=leg.path("units");return n.isTextual()&&publicDecimal(n.textValue())&&new BigDecimal(n.textValue()).signum()>=0?n.deepCopy():NullNode.instance;}
     /** Public v1 grammar: at most 18 integer digits and eight fractional digits, with no exponent or trailing zero. */
     private static boolean publicDecimal(String value){return SrppDecimal.isCanonical(value)&&value.matches("(?:0|[1-9][0-9]{0,17})(?:\\.[0-9]{0,7}[1-9])?");}
     private static boolean positivePublicDecimal(String value){try{return publicDecimal(value)&&new BigDecimal(value).signum()>0;}catch(RuntimeException invalid){return false;}}
-    private static void putBase(ObjectNode out,Loaded l){ObjectNode base=out.putObject("base");base.put("packageContentSha256",l.root.path("contentSha256").asText());base.put("inputSnapshotSha256",l.root.path("inputSnapshot").path("inputSnapshotSha256").asText());base.put("inputSnapshotCapturedAt",l.capturedAt.toString());}
+    static void putBase(ObjectNode out,Loaded l){ObjectNode base=out.putObject("base");base.put("packageContentSha256",l.root.path("contentSha256").asText());base.put("inputSnapshotSha256",l.root.path("inputSnapshot").path("inputSnapshotSha256").asText());base.put("inputSnapshotCapturedAt",l.capturedAt.toString());}
     private static void coverage(ObjectNode out,int requested,int complete,int partial,int unavailable,int notEvaluated){ObjectNode c=out.putObject("coverage");c.put("requestedCount",requested);c.put("completeCount",complete);c.put("partialCount",partial);c.put("unavailableCount",unavailable);c.put("notEvaluatedCount",notEvaluated);}
     private static void hash(ObjectNode out){out.put("contentSha256",SrppJcs.sha256Hex(SrppJcs.canonicalize(out)));}
     private enum Coverage { COMPLETE, UNAVAILABLE, NOT_EVALUATED }
-    private record Loaded(JsonNode root,JsonNode input,Instant capturedAt){} private record Leg(String id,String moduleId,int index,JsonNode node){} private record LegProjection(ObjectNode node,Coverage coverage){} private record QuoteProof(String sourceId,String revision,String sha256,String capturedAt,String price,String amount){}
+    record Loaded(JsonNode root,JsonNode input,Instant capturedAt,SupportedPolicy registered){Loaded(JsonNode root,JsonNode input,Instant capturedAt){this(root,input,capturedAt,null);}} record Leg(String id,String moduleId,int index,JsonNode node){} private record LegProjection(ObjectNode node,Coverage coverage){} record QuoteProof(String sourceId,String revision,String sha256,String capturedAt,String price,String amount){}
 }

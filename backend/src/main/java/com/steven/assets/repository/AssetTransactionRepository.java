@@ -73,6 +73,27 @@ public interface AssetTransactionRepository extends JpaRepository<AssetTransacti
             @Param("tradeDate") LocalDate tradeDate,
             @Param("transactionType") String transactionType);
 
+    /**
+     * SRPP D-143/D-234 satellite build pace (Task 623). The report producer runs on a scheduler
+     * thread without HTTP tenant identity, where {@code ownerFilter} is either not enabled or
+     * fail-closed by {@link com.steven.assets.security.TenantFilterAspect}; as for
+     * {@link #existsByOwnerUserIdAndBrokerFilledNo}, a native query bypasses {@code @Filter} so the
+     * explicit {@code ownerUserId} parameter alone scopes the rows. Every type/market/direction is
+     * returned unfiltered (the pure calculator filters), in deterministic {@code trade_date, id} order.
+     */
+    @Query(value = """
+        SELECT * FROM asset_transaction
+        WHERE owner_user_id = :ownerUserId
+          AND asset_code IN (:codes)
+          AND trade_date BETWEEN :start AND :end
+        ORDER BY trade_date ASC, id ASC
+        """, nativeQuery = true)
+    List<AssetTransaction> findSatelliteBuildRows(
+            @Param("ownerUserId") Long ownerUserId,
+            @Param("codes") java.util.Collection<String> codes,
+            @Param("start") LocalDate start,
+            @Param("end") LocalDate end);
+
     /** Explicit owner scope also works on the token-only internal sync path without ownerFilter. */
     @Query(value = """
         SELECT * FROM asset_transaction

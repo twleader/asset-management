@@ -16,6 +16,7 @@ import java.util.*;
 /** Saved recommendations remain reserved until an exact canonical leg/order/fill link exists. */
 @Component
 public class SrppReportReservationCapture {
+    static final Set<String> SATELLITE_STRATEGIES=Set.of(SrppReportModuleCalculator.SATELLITE_009826_STRATEGY,SrppReportModuleCalculator.SATELLITE_VT_STRATEGY);
     private final SrppDecisionRepository decisions;
     private final SrppReportRepository reports;
     public SrppReportReservationCapture(SrppDecisionRepository decisions,SrppReportRepository reports){this.decisions=decisions;this.reports=reports;}
@@ -42,6 +43,8 @@ public class SrppReportReservationCapture {
                 int legIndex=index++;if(!"ACTIONABLE_FOR_REPORT".equals(leg.path("status").asText()))continue;
                 JsonNode quantity=leg.path("units").isNull()?leg.path("lots"):leg.path("units");
                 if(quantity.isMissingNode()||new BigDecimal(quantity.asText()).signum()<=0)continue;
+                // D-143/D-234 build pace is consumed only by confirmed fills; an unfilled proposal reserves nothing across packages.
+                if(SATELLITE_STRATEGIES.contains(leg.path("strategy").asText()))continue;
                 String key=report.path("sharedCalculationId").asText()+"/"+module.path("moduleId").asText()+"/"+legIndex;if(!seen.add(key))continue;
                 ObjectNode row=rows.addObject();row.put("origin","REPORT");row.putNull("decisionRunId");row.put("reservationId",SrppJcs.sha256Hex("REPORT/"+key));row.set("calculationRunId",report.path("calculationRunId"));row.set("sharedCalculationId",report.path("sharedCalculationId"));row.set("tradingDate",identity.path("tradingDate"));row.set("reportSlot",identity.path("reportSlot"));row.set("policyBundleSha256",identity.path("policyBundleSha256"));row.set("moduleId",module.path("moduleId"));row.put("legIndex",legIndex);
                 for(String field:List.of("symbol","market","strategy","action","lots","units","amount","currency","fees"))row.set(field,leg.path(field));

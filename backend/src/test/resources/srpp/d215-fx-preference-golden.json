@@ -1,0 +1,1861 @@
+{
+  "cases": [
+    {
+      "expected": {
+        "absolute_rate_high": false,
+        "cancels_scheduled_dca": false,
+        "changes_other_buy_gates": false,
+        "classification_authority": "D215_ACCEPTED_POLICY_MAP",
+        "classification_status": "VERIFIED",
+        "decision": "D-215",
+        "execution_scope": "PREFERENCE_REVIEW_ONLY",
+        "fx_risk": "NORMAL",
+        "places_orders": false,
+        "range_high": "33.5",
+        "range_low": "30",
+        "range_position": "0.8",
+        "range_status": "VERIFIED",
+        "rate": "32.8",
+        "reasons": [],
+        "scope": "TWD_TRADED_BOND_ETF",
+        "status": "NO_FX_PREFERENCE_VETO",
+        "symbol": "00865B",
+        "trade_authorization": false
+      },
+      "name": "bond_00865B_absolute_equal_32_8_normal",
+      "payload": {
+        "asset": {
+          "action": "BUY",
+          "currency": "TWD",
+          "in_existing_universe": true,
+          "instrument_type": "BOND_ETF",
+          "market": "台股",
+          "symbol": "00865B"
+        },
+        "checked_at": "2026-11-23T09:05:00+08:00",
+        "fx_completed_as_of": "2026-11-20",
+        "fx_history": {
+          "completedAsOfDate": "2026-11-20",
+          "coverage": "COMPLETE",
+          "currency_pair": "USD/TWD",
+          "dailyRates": [
+            {
+              "buyRate": "29.9",
+              "date": "2026-11-20",
+              "rate": "30"
+            },
+            {
+              "buyRate": "33.4",
+              "date": "2025-09-19",
+              "rate": "33.5"
+            },
+            {
+              "buyRate": "29.9",
+              "date": "2025-03-03",
+              "rate": "30"
+            },
+            {
+              "buyRate": "29.9",
+              "date": "2024-11-22",
+              "rate": "30"
+            }
+          ],
+          "droppedDates": [],
+          "droppedUndated": false,
+          "provider_id": "BANK_OF_TAIWAN",
+          "provider_status": "RECORDED",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "source": "FINMIND_TAIWAN_EXCHANGE_RATE_NATIVE",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "spot_basis_verified": true,
+          "validation": "VERIFIED",
+          "windowEnd": "2026-11-23",
+          "windowStart": "2024-11-23"
+        },
+        "fx_quote": {
+          "as_of": "2026-11-23T09:04:58+08:00",
+          "currency_pair": "USD/TWD",
+          "freshness_verified": true,
+          "provider_id": "BANK_OF_TAIWAN",
+          "quote_status": "LIVE",
+          "rate": "32.8",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "rate_date": "2026-11-23",
+          "source": "BANK_OF_TAIWAN_LIVE_SPOT",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "validation": "VERIFIED"
+        }
+      }
+    },
+    {
+      "expected": {
+        "absolute_rate_high": true,
+        "cancels_scheduled_dca": false,
+        "changes_other_buy_gates": false,
+        "cheap_exception_verified": false,
+        "classification_authority": "D215_ACCEPTED_POLICY_MAP",
+        "classification_status": "VERIFIED",
+        "decision": "D-215",
+        "execution_scope": "PREFERENCE_REVIEW_ONLY",
+        "fx_risk": "HIGH",
+        "places_orders": false,
+        "range_position": null,
+        "range_status": "UNKNOWN",
+        "rate": "32.81",
+        "reasons": [
+          "FX_TWO_YEAR_HISTORY_UNVERIFIED",
+          "FX_EXCEPTION_PRICE_SOURCE_UNVERIFIED"
+        ],
+        "scope": "TWD_TRADED_BOND_ETF",
+        "status": "WAIT_PREFERRED",
+        "symbol": "00719B",
+        "trade_authorization": false
+      },
+      "name": "bond_00719B_absolute_above_32_8_range_missing",
+      "payload": {
+        "asset": {
+          "action": "BUY",
+          "currency": "TWD",
+          "in_existing_universe": true,
+          "instrument_type": "BOND_ETF",
+          "market": "台股",
+          "symbol": "00719B"
+        },
+        "checked_at": "2026-11-23T09:05:00+08:00",
+        "fx_completed_as_of": "2026-11-20",
+        "fx_quote": {
+          "as_of": "2026-11-23T09:04:58+08:00",
+          "currency_pair": "USD/TWD",
+          "freshness_verified": true,
+          "provider_id": "BANK_OF_TAIWAN",
+          "quote_status": "LIVE",
+          "rate": "32.81",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "rate_date": "2026-11-23",
+          "source": "BANK_OF_TAIWAN_LIVE_SPOT",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "validation": "VERIFIED"
+        }
+      }
+    },
+    {
+      "expected": {
+        "absolute_rate_high": false,
+        "cancels_scheduled_dca": false,
+        "changes_other_buy_gates": false,
+        "cheap_exception_verified": false,
+        "classification_authority": "D215_ACCEPTED_POLICY_MAP",
+        "classification_status": "VERIFIED",
+        "decision": "D-215",
+        "execution_scope": "PREFERENCE_REVIEW_ONLY",
+        "fx_risk": "HIGH",
+        "places_orders": false,
+        "range_high": "33",
+        "range_low": "30",
+        "range_position": "0.9",
+        "range_status": "VERIFIED",
+        "rate": "32.7",
+        "reasons": [
+          "FX_EXCEPTION_PRICE_SOURCE_UNVERIFIED"
+        ],
+        "scope": "TWD_TRADED_BOND_ETF",
+        "status": "WAIT_PREFERRED",
+        "symbol": "00697B",
+        "trade_authorization": false
+      },
+      "name": "bond_00697B_position_exact_0_90_high",
+      "payload": {
+        "asset": {
+          "action": "BUY",
+          "currency": "TWD",
+          "in_existing_universe": true,
+          "instrument_type": "BOND_ETF",
+          "market": "台股",
+          "symbol": "00697B"
+        },
+        "checked_at": "2026-11-23T09:05:00+08:00",
+        "fx_completed_as_of": "2026-11-20",
+        "fx_history": {
+          "completedAsOfDate": "2026-11-20",
+          "coverage": "COMPLETE",
+          "currency_pair": "USD/TWD",
+          "dailyRates": [
+            {
+              "buyRate": "29.9",
+              "date": "2026-11-20",
+              "rate": "30"
+            },
+            {
+              "buyRate": "32.9",
+              "date": "2025-09-19",
+              "rate": "33"
+            },
+            {
+              "buyRate": "29.9",
+              "date": "2025-03-03",
+              "rate": "30"
+            },
+            {
+              "buyRate": "29.9",
+              "date": "2024-11-22",
+              "rate": "30"
+            }
+          ],
+          "droppedDates": [],
+          "droppedUndated": false,
+          "provider_id": "BANK_OF_TAIWAN",
+          "provider_status": "RECORDED",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "source": "FINMIND_TAIWAN_EXCHANGE_RATE_NATIVE",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "spot_basis_verified": true,
+          "validation": "VERIFIED",
+          "windowEnd": "2026-11-23",
+          "windowStart": "2024-11-23"
+        },
+        "fx_quote": {
+          "as_of": "2026-11-23T09:04:58+08:00",
+          "currency_pair": "USD/TWD",
+          "freshness_verified": true,
+          "provider_id": "BANK_OF_TAIWAN",
+          "quote_status": "LIVE",
+          "rate": "32.7",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "rate_date": "2026-11-23",
+          "source": "BANK_OF_TAIWAN_LIVE_SPOT",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "validation": "VERIFIED"
+        }
+      }
+    },
+    {
+      "expected": {
+        "absolute_rate_high": false,
+        "cancels_scheduled_dca": false,
+        "changes_other_buy_gates": false,
+        "classification_authority": "D215_ACCEPTED_POLICY_MAP",
+        "classification_status": "VERIFIED",
+        "decision": "D-215",
+        "execution_scope": "PREFERENCE_REVIEW_ONLY",
+        "fx_risk": "NORMAL",
+        "places_orders": false,
+        "range_high": "33",
+        "range_low": "30",
+        "range_position": "0.8966666666666666666666666667",
+        "range_status": "VERIFIED",
+        "rate": "32.69",
+        "reasons": [],
+        "scope": "TWD_TRADED_BOND_ETF",
+        "status": "NO_FX_PREFERENCE_VETO",
+        "symbol": "00865B",
+        "trade_authorization": false
+      },
+      "name": "bond_00865B_position_below_0_90_normal",
+      "payload": {
+        "asset": {
+          "action": "BUY",
+          "currency": "TWD",
+          "in_existing_universe": true,
+          "instrument_type": "BOND_ETF",
+          "market": "台股",
+          "symbol": "00865B"
+        },
+        "checked_at": "2026-11-23T09:05:00+08:00",
+        "fx_completed_as_of": "2026-11-20",
+        "fx_history": {
+          "completedAsOfDate": "2026-11-20",
+          "coverage": "COMPLETE",
+          "currency_pair": "USD/TWD",
+          "dailyRates": [
+            {
+              "buyRate": "29.9",
+              "date": "2026-11-20",
+              "rate": "30"
+            },
+            {
+              "buyRate": "32.9",
+              "date": "2025-09-19",
+              "rate": "33"
+            },
+            {
+              "buyRate": "29.9",
+              "date": "2025-03-03",
+              "rate": "30"
+            },
+            {
+              "buyRate": "29.9",
+              "date": "2024-11-22",
+              "rate": "30"
+            }
+          ],
+          "droppedDates": [],
+          "droppedUndated": false,
+          "provider_id": "BANK_OF_TAIWAN",
+          "provider_status": "RECORDED",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "source": "FINMIND_TAIWAN_EXCHANGE_RATE_NATIVE",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "spot_basis_verified": true,
+          "validation": "VERIFIED",
+          "windowEnd": "2026-11-23",
+          "windowStart": "2024-11-23"
+        },
+        "fx_quote": {
+          "as_of": "2026-11-23T09:04:58+08:00",
+          "currency_pair": "USD/TWD",
+          "freshness_verified": true,
+          "provider_id": "BANK_OF_TAIWAN",
+          "quote_status": "LIVE",
+          "rate": "32.69",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "rate_date": "2026-11-23",
+          "source": "BANK_OF_TAIWAN_LIVE_SPOT",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "validation": "VERIFIED"
+        }
+      }
+    },
+    {
+      "expected": {
+        "absolute_rate_high": false,
+        "cancels_scheduled_dca": false,
+        "changes_other_buy_gates": false,
+        "cheap_exception_verified": false,
+        "classification_authority": "D215_ACCEPTED_POLICY_MAP",
+        "classification_status": "VERIFIED",
+        "decision": "D-215",
+        "execution_scope": "PREFERENCE_REVIEW_ONLY",
+        "fx_risk": "UNKNOWN",
+        "places_orders": false,
+        "range_position": null,
+        "range_status": "UNKNOWN",
+        "rate": "31",
+        "reasons": [
+          "FX_TWO_YEAR_RANGE_ZERO",
+          "FX_EXCEPTION_PRICE_SOURCE_UNVERIFIED"
+        ],
+        "scope": "TWD_TRADED_BOND_ETF",
+        "status": "FX_EVIDENCE_UNKNOWN",
+        "symbol": "00865B",
+        "trade_authorization": false
+      },
+      "name": "bond_zero_range_unknown",
+      "payload": {
+        "asset": {
+          "action": "BUY",
+          "currency": "TWD",
+          "in_existing_universe": true,
+          "instrument_type": "BOND_ETF",
+          "market": "台股",
+          "symbol": "00865B"
+        },
+        "checked_at": "2026-11-23T09:05:00+08:00",
+        "fx_completed_as_of": "2026-11-20",
+        "fx_history": {
+          "completedAsOfDate": "2026-11-20",
+          "coverage": "COMPLETE",
+          "currency_pair": "USD/TWD",
+          "dailyRates": [
+            {
+              "buyRate": "30.9",
+              "date": "2026-11-20",
+              "rate": "31"
+            },
+            {
+              "buyRate": "30.9",
+              "date": "2025-09-19",
+              "rate": "31"
+            },
+            {
+              "buyRate": "30.9",
+              "date": "2025-03-03",
+              "rate": "31"
+            },
+            {
+              "buyRate": "30.9",
+              "date": "2024-11-22",
+              "rate": "31"
+            }
+          ],
+          "droppedDates": [],
+          "droppedUndated": false,
+          "provider_id": "BANK_OF_TAIWAN",
+          "provider_status": "RECORDED",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "source": "FINMIND_TAIWAN_EXCHANGE_RATE_NATIVE",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "spot_basis_verified": true,
+          "validation": "VERIFIED",
+          "windowEnd": "2026-11-23",
+          "windowStart": "2024-11-23"
+        },
+        "fx_quote": {
+          "as_of": "2026-11-23T09:04:58+08:00",
+          "currency_pair": "USD/TWD",
+          "freshness_verified": true,
+          "provider_id": "BANK_OF_TAIWAN",
+          "quote_status": "LIVE",
+          "rate": "31",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "rate_date": "2026-11-23",
+          "source": "BANK_OF_TAIWAN_LIVE_SPOT",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "validation": "VERIFIED"
+        }
+      }
+    },
+    {
+      "expected": {
+        "absolute_rate_high": false,
+        "cancels_scheduled_dca": false,
+        "changes_other_buy_gates": false,
+        "cheap_exception_verified": false,
+        "classification_authority": "D215_ACCEPTED_POLICY_MAP",
+        "classification_status": "VERIFIED",
+        "decision": "D-215",
+        "execution_scope": "PREFERENCE_REVIEW_ONLY",
+        "fx_risk": "UNKNOWN",
+        "places_orders": false,
+        "range_position": null,
+        "range_status": "UNKNOWN",
+        "rate": "32.0",
+        "reasons": [
+          "FX_TWO_YEAR_HISTORY_UNVERIFIED",
+          "FX_EXCEPTION_PRICE_SOURCE_UNVERIFIED"
+        ],
+        "scope": "TWD_TRADED_BOND_ETF",
+        "status": "FX_EVIDENCE_UNKNOWN",
+        "symbol": "00865B",
+        "trade_authorization": false
+      },
+      "name": "bond_missing_history_unknown",
+      "payload": {
+        "asset": {
+          "action": "BUY",
+          "currency": "TWD",
+          "in_existing_universe": true,
+          "instrument_type": "BOND_ETF",
+          "market": "台股",
+          "symbol": "00865B"
+        },
+        "checked_at": "2026-11-23T09:05:00+08:00",
+        "fx_completed_as_of": "2026-11-20",
+        "fx_quote": {
+          "as_of": "2026-11-23T09:04:58+08:00",
+          "currency_pair": "USD/TWD",
+          "freshness_verified": true,
+          "provider_id": "BANK_OF_TAIWAN",
+          "quote_status": "LIVE",
+          "rate": "32.0",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "rate_date": "2026-11-23",
+          "source": "BANK_OF_TAIWAN_LIVE_SPOT",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "validation": "VERIFIED"
+        }
+      }
+    },
+    {
+      "expected": {
+        "absolute_rate_high": false,
+        "cancels_scheduled_dca": false,
+        "changes_other_buy_gates": false,
+        "cheap_exception_verified": false,
+        "classification_authority": "D215_ACCEPTED_POLICY_MAP",
+        "classification_status": "VERIFIED",
+        "decision": "D-215",
+        "execution_scope": "PREFERENCE_REVIEW_ONLY",
+        "fx_risk": "HIGH",
+        "places_orders": false,
+        "range_high": "33",
+        "range_low": "30",
+        "range_position": "0.9",
+        "range_status": "VERIFIED",
+        "rate": "32.7",
+        "reasons": [],
+        "scope": "TWD_TRADED_BOND_ETF",
+        "status": "WAIT_PREFERRED",
+        "symbol": "00865B",
+        "trade_authorization": false
+      },
+      "name": "bond_etf_drawdown_exact_10_no_exception",
+      "payload": {
+        "asset": {
+          "action": "BUY",
+          "currency": "TWD",
+          "in_existing_universe": true,
+          "instrument_type": "BOND_ETF",
+          "market": "台股",
+          "price_verified_current_round": true,
+          "quote_last": "90",
+          "session_date": "2026-11-23",
+          "symbol": "00865B"
+        },
+        "asset_completed_as_of": "2026-11-20",
+        "asset_price_fact": {
+          "completedAsOfDate": "2026-11-20",
+          "completedPriceHistory": [
+            {
+              "close": "90",
+              "high": "90",
+              "tradingDate": "2026-11-20"
+            },
+            {
+              "close": "99",
+              "high": "100",
+              "tradingDate": "2026-06-03"
+            },
+            {
+              "close": "94",
+              "high": "95",
+              "tradingDate": "2025-11-21"
+            }
+          ],
+          "currency": "TWD",
+          "droppedDates": [],
+          "droppedUndated": false,
+          "high": "100",
+          "highDate": "2026-06-03",
+          "market": "台股",
+          "priceBasis": "TW_SPLIT_STOCK_PRICE",
+          "referencePrice": "90",
+          "source": "CANONICAL_PRICE_HISTORY",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "status": "AVAILABLE",
+          "stockCode": "00865B",
+          "validation": "VERIFIED",
+          "windowStart": "2025-11-21"
+        },
+        "checked_at": "2026-11-23T09:05:00+08:00",
+        "fx_completed_as_of": "2026-11-20",
+        "fx_history": {
+          "completedAsOfDate": "2026-11-20",
+          "coverage": "COMPLETE",
+          "currency_pair": "USD/TWD",
+          "dailyRates": [
+            {
+              "buyRate": "29.9",
+              "date": "2026-11-20",
+              "rate": "30"
+            },
+            {
+              "buyRate": "32.9",
+              "date": "2025-09-19",
+              "rate": "33"
+            },
+            {
+              "buyRate": "29.9",
+              "date": "2025-03-03",
+              "rate": "30"
+            },
+            {
+              "buyRate": "29.9",
+              "date": "2024-11-22",
+              "rate": "30"
+            }
+          ],
+          "droppedDates": [],
+          "droppedUndated": false,
+          "provider_id": "BANK_OF_TAIWAN",
+          "provider_status": "RECORDED",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "source": "FINMIND_TAIWAN_EXCHANGE_RATE_NATIVE",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "spot_basis_verified": true,
+          "validation": "VERIFIED",
+          "windowEnd": "2026-11-23",
+          "windowStart": "2024-11-23"
+        },
+        "fx_quote": {
+          "as_of": "2026-11-23T09:04:58+08:00",
+          "currency_pair": "USD/TWD",
+          "freshness_verified": true,
+          "provider_id": "BANK_OF_TAIWAN",
+          "quote_status": "LIVE",
+          "rate": "32.7",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "rate_date": "2026-11-23",
+          "source": "BANK_OF_TAIWAN_LIVE_SPOT",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "validation": "VERIFIED"
+        }
+      }
+    },
+    {
+      "expected": {
+        "absolute_rate_high": false,
+        "cancels_scheduled_dca": false,
+        "changes_other_buy_gates": false,
+        "cheap_exception_verified": true,
+        "classification_authority": "D215_ACCEPTED_POLICY_MAP",
+        "classification_status": "VERIFIED",
+        "decision": "D-215",
+        "execution_scope": "PREFERENCE_REVIEW_ONLY",
+        "fx_risk": "HIGH",
+        "places_orders": false,
+        "range_high": "33",
+        "range_low": "30",
+        "range_position": "0.9",
+        "range_status": "VERIFIED",
+        "rate": "32.7",
+        "reasons": [],
+        "scope": "TWD_TRADED_BOND_ETF",
+        "status": "FX_PREFERENCE_EXCEPTION_REVIEW",
+        "symbol": "00865B",
+        "trade_authorization": false
+      },
+      "name": "bond_etf_drawdown_above_10_exception",
+      "payload": {
+        "asset": {
+          "action": "BUY",
+          "currency": "TWD",
+          "in_existing_universe": true,
+          "instrument_type": "BOND_ETF",
+          "market": "台股",
+          "price_verified_current_round": true,
+          "quote_last": "89.99",
+          "session_date": "2026-11-23",
+          "symbol": "00865B"
+        },
+        "asset_completed_as_of": "2026-11-20",
+        "asset_price_fact": {
+          "completedAsOfDate": "2026-11-20",
+          "completedPriceHistory": [
+            {
+              "close": "89.99",
+              "high": "89.99",
+              "tradingDate": "2026-11-20"
+            },
+            {
+              "close": "99",
+              "high": "100",
+              "tradingDate": "2026-06-03"
+            },
+            {
+              "close": "94",
+              "high": "95",
+              "tradingDate": "2025-11-21"
+            }
+          ],
+          "currency": "TWD",
+          "droppedDates": [],
+          "droppedUndated": false,
+          "high": "100",
+          "highDate": "2026-06-03",
+          "market": "台股",
+          "priceBasis": "TW_SPLIT_STOCK_PRICE",
+          "referencePrice": "89.99",
+          "source": "CANONICAL_PRICE_HISTORY",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "status": "AVAILABLE",
+          "stockCode": "00865B",
+          "validation": "VERIFIED",
+          "windowStart": "2025-11-21"
+        },
+        "checked_at": "2026-11-23T09:05:00+08:00",
+        "fx_completed_as_of": "2026-11-20",
+        "fx_history": {
+          "completedAsOfDate": "2026-11-20",
+          "coverage": "COMPLETE",
+          "currency_pair": "USD/TWD",
+          "dailyRates": [
+            {
+              "buyRate": "29.9",
+              "date": "2026-11-20",
+              "rate": "30"
+            },
+            {
+              "buyRate": "32.9",
+              "date": "2025-09-19",
+              "rate": "33"
+            },
+            {
+              "buyRate": "29.9",
+              "date": "2025-03-03",
+              "rate": "30"
+            },
+            {
+              "buyRate": "29.9",
+              "date": "2024-11-22",
+              "rate": "30"
+            }
+          ],
+          "droppedDates": [],
+          "droppedUndated": false,
+          "provider_id": "BANK_OF_TAIWAN",
+          "provider_status": "RECORDED",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "source": "FINMIND_TAIWAN_EXCHANGE_RATE_NATIVE",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "spot_basis_verified": true,
+          "validation": "VERIFIED",
+          "windowEnd": "2026-11-23",
+          "windowStart": "2024-11-23"
+        },
+        "fx_quote": {
+          "as_of": "2026-11-23T09:04:58+08:00",
+          "currency_pair": "USD/TWD",
+          "freshness_verified": true,
+          "provider_id": "BANK_OF_TAIWAN",
+          "quote_status": "LIVE",
+          "rate": "32.7",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "rate_date": "2026-11-23",
+          "source": "BANK_OF_TAIWAN_LIVE_SPOT",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "validation": "VERIFIED"
+        }
+      }
+    },
+    {
+      "expected": {
+        "absolute_rate_high": false,
+        "cancels_scheduled_dca": false,
+        "changes_other_buy_gates": false,
+        "cheap_exception_verified": true,
+        "classification_authority": "D215_ACCEPTED_POLICY_MAP",
+        "classification_status": "VERIFIED",
+        "decision": "D-215",
+        "execution_scope": "PREFERENCE_REVIEW_ONLY",
+        "fx_risk": "HIGH",
+        "places_orders": false,
+        "range_high": "33",
+        "range_low": "30",
+        "range_position": "0.9",
+        "range_status": "VERIFIED",
+        "rate": "32.7",
+        "reasons": [],
+        "scope": "USD_DENOMINATED_ASSET",
+        "status": "FX_PREFERENCE_EXCEPTION_REVIEW",
+        "symbol": "GOOG",
+        "trade_authorization": false
+      },
+      "name": "stock_goog_drawdown_exact_30_exception",
+      "payload": {
+        "asset": {
+          "action": "BUY",
+          "currency": "USD",
+          "in_existing_universe": true,
+          "instrument_type": "STOCK",
+          "market": "美股",
+          "price_verified_current_round": true,
+          "quote_last": "70",
+          "session_date": "2026-11-23",
+          "symbol": "GOOG"
+        },
+        "asset_completed_as_of": "2026-11-20",
+        "asset_price_fact": {
+          "completedAsOfDate": "2026-11-20",
+          "completedPriceHistory": [
+            {
+              "close": "70",
+              "high": "70",
+              "tradingDate": "2026-11-20"
+            },
+            {
+              "close": "99",
+              "high": "100",
+              "tradingDate": "2026-06-03"
+            },
+            {
+              "close": "94",
+              "high": "95",
+              "tradingDate": "2025-11-21"
+            }
+          ],
+          "currency": "USD",
+          "droppedDates": [],
+          "droppedUndated": false,
+          "high": "100",
+          "highDate": "2026-06-03",
+          "market": "美股",
+          "priceBasis": "STORED_PRICE_ONLY",
+          "referencePrice": "70",
+          "source": "CANONICAL_PRICE_HISTORY",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "status": "AVAILABLE",
+          "stockCode": "GOOG",
+          "validation": "VERIFIED",
+          "windowStart": "2025-11-21"
+        },
+        "checked_at": "2026-11-23T09:05:00+08:00",
+        "fx_completed_as_of": "2026-11-20",
+        "fx_history": {
+          "completedAsOfDate": "2026-11-20",
+          "coverage": "COMPLETE",
+          "currency_pair": "USD/TWD",
+          "dailyRates": [
+            {
+              "buyRate": "29.9",
+              "date": "2026-11-20",
+              "rate": "30"
+            },
+            {
+              "buyRate": "32.9",
+              "date": "2025-09-19",
+              "rate": "33"
+            },
+            {
+              "buyRate": "29.9",
+              "date": "2025-03-03",
+              "rate": "30"
+            },
+            {
+              "buyRate": "29.9",
+              "date": "2024-11-22",
+              "rate": "30"
+            }
+          ],
+          "droppedDates": [],
+          "droppedUndated": false,
+          "provider_id": "BANK_OF_TAIWAN",
+          "provider_status": "RECORDED",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "source": "FINMIND_TAIWAN_EXCHANGE_RATE_NATIVE",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "spot_basis_verified": true,
+          "validation": "VERIFIED",
+          "windowEnd": "2026-11-23",
+          "windowStart": "2024-11-23"
+        },
+        "fx_quote": {
+          "as_of": "2026-11-23T09:04:58+08:00",
+          "currency_pair": "USD/TWD",
+          "freshness_verified": true,
+          "provider_id": "BANK_OF_TAIWAN",
+          "quote_status": "LIVE",
+          "rate": "32.7",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "rate_date": "2026-11-23",
+          "source": "BANK_OF_TAIWAN_LIVE_SPOT",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "validation": "VERIFIED"
+        }
+      }
+    },
+    {
+      "expected": {
+        "absolute_rate_high": false,
+        "cancels_scheduled_dca": false,
+        "changes_other_buy_gates": false,
+        "cheap_exception_verified": false,
+        "classification_authority": "D215_ACCEPTED_POLICY_MAP",
+        "classification_status": "VERIFIED",
+        "decision": "D-215",
+        "execution_scope": "PREFERENCE_REVIEW_ONLY",
+        "fx_risk": "HIGH",
+        "places_orders": false,
+        "range_high": "33",
+        "range_low": "30",
+        "range_position": "0.9",
+        "range_status": "VERIFIED",
+        "rate": "32.7",
+        "reasons": [],
+        "scope": "USD_DENOMINATED_ASSET",
+        "status": "WAIT_PREFERRED",
+        "symbol": "GOOG",
+        "trade_authorization": false
+      },
+      "name": "stock_goog_drawdown_29_99_wait",
+      "payload": {
+        "asset": {
+          "action": "BUY",
+          "currency": "USD",
+          "in_existing_universe": true,
+          "instrument_type": "STOCK",
+          "market": "美股",
+          "price_verified_current_round": true,
+          "quote_last": "70.01",
+          "session_date": "2026-11-23",
+          "symbol": "GOOG"
+        },
+        "asset_completed_as_of": "2026-11-20",
+        "asset_price_fact": {
+          "completedAsOfDate": "2026-11-20",
+          "completedPriceHistory": [
+            {
+              "close": "70.01",
+              "high": "70.01",
+              "tradingDate": "2026-11-20"
+            },
+            {
+              "close": "99",
+              "high": "100",
+              "tradingDate": "2026-06-03"
+            },
+            {
+              "close": "94",
+              "high": "95",
+              "tradingDate": "2025-11-21"
+            }
+          ],
+          "currency": "USD",
+          "droppedDates": [],
+          "droppedUndated": false,
+          "high": "100",
+          "highDate": "2026-06-03",
+          "market": "美股",
+          "priceBasis": "STORED_PRICE_ONLY",
+          "referencePrice": "70.01",
+          "source": "CANONICAL_PRICE_HISTORY",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "status": "AVAILABLE",
+          "stockCode": "GOOG",
+          "validation": "VERIFIED",
+          "windowStart": "2025-11-21"
+        },
+        "checked_at": "2026-11-23T09:05:00+08:00",
+        "fx_completed_as_of": "2026-11-20",
+        "fx_history": {
+          "completedAsOfDate": "2026-11-20",
+          "coverage": "COMPLETE",
+          "currency_pair": "USD/TWD",
+          "dailyRates": [
+            {
+              "buyRate": "29.9",
+              "date": "2026-11-20",
+              "rate": "30"
+            },
+            {
+              "buyRate": "32.9",
+              "date": "2025-09-19",
+              "rate": "33"
+            },
+            {
+              "buyRate": "29.9",
+              "date": "2025-03-03",
+              "rate": "30"
+            },
+            {
+              "buyRate": "29.9",
+              "date": "2024-11-22",
+              "rate": "30"
+            }
+          ],
+          "droppedDates": [],
+          "droppedUndated": false,
+          "provider_id": "BANK_OF_TAIWAN",
+          "provider_status": "RECORDED",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "source": "FINMIND_TAIWAN_EXCHANGE_RATE_NATIVE",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "spot_basis_verified": true,
+          "validation": "VERIFIED",
+          "windowEnd": "2026-11-23",
+          "windowStart": "2024-11-23"
+        },
+        "fx_quote": {
+          "as_of": "2026-11-23T09:04:58+08:00",
+          "currency_pair": "USD/TWD",
+          "freshness_verified": true,
+          "provider_id": "BANK_OF_TAIWAN",
+          "quote_status": "LIVE",
+          "rate": "32.7",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "rate_date": "2026-11-23",
+          "source": "BANK_OF_TAIWAN_LIVE_SPOT",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "validation": "VERIFIED"
+        }
+      }
+    },
+    {
+      "expected": {
+        "absolute_rate_high": false,
+        "cancels_scheduled_dca": false,
+        "changes_other_buy_gates": false,
+        "cheap_exception_verified": true,
+        "classification_authority": "D215_ACCEPTED_POLICY_MAP",
+        "classification_status": "VERIFIED",
+        "decision": "D-215",
+        "execution_scope": "PREFERENCE_REVIEW_ONLY",
+        "fx_risk": "UNKNOWN",
+        "places_orders": false,
+        "range_position": null,
+        "range_status": "UNKNOWN",
+        "rate": "32.5",
+        "reasons": [
+          "FX_TWO_YEAR_HISTORY_UNVERIFIED"
+        ],
+        "scope": "USD_DENOMINATED_ASSET",
+        "status": "FX_PREFERENCE_EXCEPTION_REVIEW",
+        "symbol": "VT",
+        "trade_authorization": false
+      },
+      "name": "vt_range_unknown_with_verified_exception",
+      "payload": {
+        "asset": {
+          "action": "BUY",
+          "currency": "USD",
+          "in_existing_universe": true,
+          "instrument_type": "EQUITY_ETF",
+          "market": "美股",
+          "price_verified_current_round": true,
+          "quote_last": "88",
+          "session_date": "2026-11-23",
+          "symbol": "VT"
+        },
+        "asset_completed_as_of": "2026-11-20",
+        "asset_price_fact": {
+          "completedAsOfDate": "2026-11-20",
+          "completedPriceHistory": [
+            {
+              "close": "88",
+              "high": "88",
+              "tradingDate": "2026-11-20"
+            },
+            {
+              "close": "99",
+              "high": "100",
+              "tradingDate": "2026-06-03"
+            },
+            {
+              "close": "94",
+              "high": "95",
+              "tradingDate": "2025-11-21"
+            }
+          ],
+          "currency": "USD",
+          "droppedDates": [],
+          "droppedUndated": false,
+          "high": "100",
+          "highDate": "2026-06-03",
+          "market": "美股",
+          "priceBasis": "STORED_PRICE_ONLY",
+          "referencePrice": "88",
+          "source": "CANONICAL_PRICE_HISTORY",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "status": "AVAILABLE",
+          "stockCode": "VT",
+          "validation": "VERIFIED",
+          "windowStart": "2025-11-21"
+        },
+        "checked_at": "2026-11-23T09:05:00+08:00",
+        "fx_completed_as_of": "2026-11-20",
+        "fx_quote": {
+          "as_of": "2026-11-23T09:04:58+08:00",
+          "currency_pair": "USD/TWD",
+          "freshness_verified": true,
+          "provider_id": "BANK_OF_TAIWAN",
+          "quote_status": "LIVE",
+          "rate": "32.5",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "rate_date": "2026-11-23",
+          "source": "BANK_OF_TAIWAN_LIVE_SPOT",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "validation": "VERIFIED"
+        }
+      }
+    },
+    {
+      "expected": {
+        "absolute_rate_high": false,
+        "cancels_scheduled_dca": false,
+        "changes_other_buy_gates": false,
+        "classification_authority": "D215_ACCEPTED_POLICY_MAP",
+        "classification_status": "VERIFIED",
+        "decision": "D-215",
+        "execution_scope": "PREFERENCE_REVIEW_ONLY",
+        "fx_risk": "NORMAL",
+        "places_orders": false,
+        "range_high": "33",
+        "range_low": "30",
+        "range_position": "0.3333333333333333333333333333",
+        "range_status": "VERIFIED",
+        "rate": "31",
+        "reasons": [],
+        "scope": "USD_DENOMINATED_ASSET",
+        "status": "NO_FX_PREFERENCE_VETO",
+        "symbol": "VT",
+        "trade_authorization": false
+      },
+      "name": "vt_normal",
+      "payload": {
+        "asset": {
+          "action": "BUY",
+          "currency": "USD",
+          "in_existing_universe": true,
+          "instrument_type": "EQUITY_ETF",
+          "market": "美股",
+          "symbol": "VT"
+        },
+        "checked_at": "2026-11-23T09:05:00+08:00",
+        "fx_completed_as_of": "2026-11-20",
+        "fx_history": {
+          "completedAsOfDate": "2026-11-20",
+          "coverage": "COMPLETE",
+          "currency_pair": "USD/TWD",
+          "dailyRates": [
+            {
+              "buyRate": "29.9",
+              "date": "2026-11-20",
+              "rate": "30"
+            },
+            {
+              "buyRate": "32.9",
+              "date": "2025-09-19",
+              "rate": "33"
+            },
+            {
+              "buyRate": "29.9",
+              "date": "2025-03-03",
+              "rate": "30"
+            },
+            {
+              "buyRate": "29.9",
+              "date": "2024-11-22",
+              "rate": "30"
+            }
+          ],
+          "droppedDates": [],
+          "droppedUndated": false,
+          "provider_id": "BANK_OF_TAIWAN",
+          "provider_status": "RECORDED",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "source": "FINMIND_TAIWAN_EXCHANGE_RATE_NATIVE",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "spot_basis_verified": true,
+          "validation": "VERIFIED",
+          "windowEnd": "2026-11-23",
+          "windowStart": "2024-11-23"
+        },
+        "fx_quote": {
+          "as_of": "2026-11-23T09:04:58+08:00",
+          "currency_pair": "USD/TWD",
+          "freshness_verified": true,
+          "provider_id": "BANK_OF_TAIWAN",
+          "quote_status": "LIVE",
+          "rate": "31",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "rate_date": "2026-11-23",
+          "source": "BANK_OF_TAIWAN_LIVE_SPOT",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "validation": "VERIFIED"
+        }
+      }
+    },
+    {
+      "expected": {
+        "cancels_scheduled_dca": false,
+        "changes_other_buy_gates": false,
+        "classification_authority": "D215_ACCEPTED_POLICY_MAP",
+        "classification_status": "VERIFIED",
+        "decision": "D-215",
+        "execution_scope": "PREFERENCE_REVIEW_ONLY",
+        "fx_risk": "UNKNOWN",
+        "places_orders": false,
+        "range_position": null,
+        "range_status": "UNKNOWN",
+        "reasons": [
+          "FX_CURRENT_RATE_UNVERIFIED"
+        ],
+        "scope": "TWD_TRADED_BOND_ETF",
+        "status": "FX_EVIDENCE_UNKNOWN",
+        "symbol": "00865B",
+        "trade_authorization": false
+      },
+      "name": "quote_indicative_unknown",
+      "payload": {
+        "asset": {
+          "action": "BUY",
+          "currency": "TWD",
+          "in_existing_universe": true,
+          "instrument_type": "BOND_ETF",
+          "market": "台股",
+          "price_verified_current_round": true,
+          "quote_last": "85",
+          "session_date": "2026-11-23",
+          "symbol": "00865B"
+        },
+        "asset_completed_as_of": "2026-11-20",
+        "asset_price_fact": {
+          "completedAsOfDate": "2026-11-20",
+          "completedPriceHistory": [
+            {
+              "close": "85",
+              "high": "85",
+              "tradingDate": "2026-11-20"
+            },
+            {
+              "close": "99",
+              "high": "100",
+              "tradingDate": "2026-06-03"
+            },
+            {
+              "close": "94",
+              "high": "95",
+              "tradingDate": "2025-11-21"
+            }
+          ],
+          "currency": "TWD",
+          "droppedDates": [],
+          "droppedUndated": false,
+          "high": "100",
+          "highDate": "2026-06-03",
+          "market": "台股",
+          "priceBasis": "TW_SPLIT_STOCK_PRICE",
+          "referencePrice": "85",
+          "source": "CANONICAL_PRICE_HISTORY",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "status": "AVAILABLE",
+          "stockCode": "00865B",
+          "validation": "VERIFIED",
+          "windowStart": "2025-11-21"
+        },
+        "checked_at": "2026-11-23T09:05:00+08:00",
+        "fx_completed_as_of": "2026-11-20",
+        "fx_history": {
+          "completedAsOfDate": "2026-11-20",
+          "coverage": "COMPLETE",
+          "currency_pair": "USD/TWD",
+          "dailyRates": [
+            {
+              "buyRate": "29.9",
+              "date": "2026-11-20",
+              "rate": "30"
+            },
+            {
+              "buyRate": "32.9",
+              "date": "2025-09-19",
+              "rate": "33"
+            },
+            {
+              "buyRate": "29.9",
+              "date": "2025-03-03",
+              "rate": "30"
+            },
+            {
+              "buyRate": "29.9",
+              "date": "2024-11-22",
+              "rate": "30"
+            }
+          ],
+          "droppedDates": [],
+          "droppedUndated": false,
+          "provider_id": "BANK_OF_TAIWAN",
+          "provider_status": "RECORDED",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "source": "FINMIND_TAIWAN_EXCHANGE_RATE_NATIVE",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "spot_basis_verified": true,
+          "validation": "VERIFIED",
+          "windowEnd": "2026-11-23",
+          "windowStart": "2024-11-23"
+        },
+        "fx_quote": {
+          "as_of": "2026-11-23T09:04:58+08:00",
+          "currency_pair": "USD/TWD",
+          "freshness_verified": true,
+          "provider_id": "BANK_OF_TAIWAN",
+          "quote_status": "INDICATIVE",
+          "rate": "32.7",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "rate_date": "2026-11-23",
+          "source": "BANK_OF_TAIWAN_LIVE_SPOT",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "validation": "VERIFIED"
+        }
+      }
+    },
+    {
+      "expected": {
+        "cancels_scheduled_dca": false,
+        "changes_other_buy_gates": false,
+        "classification_authority": null,
+        "classification_status": "UNKNOWN",
+        "decision": "D-215",
+        "execution_scope": "PREFERENCE_REVIEW_ONLY",
+        "fx_risk": "UNKNOWN",
+        "places_orders": false,
+        "range_position": null,
+        "range_status": "UNKNOWN",
+        "reasons": [
+          "D215_TYPE_AUTHORITY_UNVERIFIED_HEURISTICS_NOT_ACCEPTED"
+        ],
+        "status": "FX_EVIDENCE_UNKNOWN",
+        "symbol": "00937B",
+        "trade_authorization": false
+      },
+      "name": "twd_unlisted_bond_claim_unknown",
+      "payload": {
+        "asset": {
+          "action": "BUY",
+          "currency": "TWD",
+          "in_existing_universe": true,
+          "instrument_type": "BOND_ETF",
+          "market": "台股",
+          "symbol": "00937B"
+        },
+        "checked_at": "2026-11-23T09:05:00+08:00",
+        "fx_completed_as_of": "2026-11-20",
+        "fx_history": {
+          "completedAsOfDate": "2026-11-20",
+          "coverage": "COMPLETE",
+          "currency_pair": "USD/TWD",
+          "dailyRates": [
+            {
+              "buyRate": "29.9",
+              "date": "2026-11-20",
+              "rate": "30"
+            },
+            {
+              "buyRate": "32.9",
+              "date": "2025-09-19",
+              "rate": "33"
+            },
+            {
+              "buyRate": "29.9",
+              "date": "2025-03-03",
+              "rate": "30"
+            },
+            {
+              "buyRate": "29.9",
+              "date": "2024-11-22",
+              "rate": "30"
+            }
+          ],
+          "droppedDates": [],
+          "droppedUndated": false,
+          "provider_id": "BANK_OF_TAIWAN",
+          "provider_status": "RECORDED",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "source": "FINMIND_TAIWAN_EXCHANGE_RATE_NATIVE",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "spot_basis_verified": true,
+          "validation": "VERIFIED",
+          "windowEnd": "2026-11-23",
+          "windowStart": "2024-11-23"
+        },
+        "fx_quote": {
+          "as_of": "2026-11-23T09:04:58+08:00",
+          "currency_pair": "USD/TWD",
+          "freshness_verified": true,
+          "provider_id": "BANK_OF_TAIWAN",
+          "quote_status": "LIVE",
+          "rate": "31",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "rate_date": "2026-11-23",
+          "source": "BANK_OF_TAIWAN_LIVE_SPOT",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "validation": "VERIFIED"
+        }
+      }
+    },
+    {
+      "expected": {
+        "cancels_scheduled_dca": false,
+        "changes_other_buy_gates": false,
+        "classification_authority": "D215_ACCEPTED_POLICY_MAP",
+        "classification_status": "VERIFIED",
+        "decision": "D-215",
+        "execution_scope": "PREFERENCE_REVIEW_ONLY",
+        "fx_risk": "NOT_APPLICABLE",
+        "places_orders": false,
+        "range_position": null,
+        "range_status": "UNKNOWN",
+        "reasons": [],
+        "status": "NOT_APPLICABLE",
+        "symbol": "0050",
+        "trade_authorization": false
+      },
+      "name": "twd_equity_etf_0050_not_applicable",
+      "payload": {
+        "asset": {
+          "action": "BUY",
+          "currency": "TWD",
+          "in_existing_universe": true,
+          "instrument_type": "EQUITY_ETF",
+          "market": "台股",
+          "symbol": "0050"
+        },
+        "checked_at": "2026-11-23T09:05:00+08:00",
+        "fx_completed_as_of": "2026-11-20",
+        "fx_history": {
+          "completedAsOfDate": "2026-11-20",
+          "coverage": "COMPLETE",
+          "currency_pair": "USD/TWD",
+          "dailyRates": [
+            {
+              "buyRate": "29.9",
+              "date": "2026-11-20",
+              "rate": "30"
+            },
+            {
+              "buyRate": "32.9",
+              "date": "2025-09-19",
+              "rate": "33"
+            },
+            {
+              "buyRate": "29.9",
+              "date": "2025-03-03",
+              "rate": "30"
+            },
+            {
+              "buyRate": "29.9",
+              "date": "2024-11-22",
+              "rate": "30"
+            }
+          ],
+          "droppedDates": [],
+          "droppedUndated": false,
+          "provider_id": "BANK_OF_TAIWAN",
+          "provider_status": "RECORDED",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "source": "FINMIND_TAIWAN_EXCHANGE_RATE_NATIVE",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "spot_basis_verified": true,
+          "validation": "VERIFIED",
+          "windowEnd": "2026-11-23",
+          "windowStart": "2024-11-23"
+        },
+        "fx_quote": {
+          "as_of": "2026-11-23T09:04:58+08:00",
+          "currency_pair": "USD/TWD",
+          "freshness_verified": true,
+          "provider_id": "BANK_OF_TAIWAN",
+          "quote_status": "LIVE",
+          "rate": "31",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "rate_date": "2026-11-23",
+          "source": "BANK_OF_TAIWAN_LIVE_SPOT",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "validation": "VERIFIED"
+        }
+      }
+    },
+    {
+      "expected": {
+        "absolute_rate_high": false,
+        "cancels_scheduled_dca": false,
+        "changes_other_buy_gates": false,
+        "cheap_exception_verified": false,
+        "classification_authority": "D215_ACCEPTED_POLICY_MAP",
+        "classification_status": "VERIFIED",
+        "decision": "D-215",
+        "execution_scope": "PREFERENCE_REVIEW_ONLY",
+        "fx_risk": "UNKNOWN",
+        "places_orders": false,
+        "range_position": null,
+        "range_status": "UNKNOWN",
+        "rate": "32.0",
+        "reasons": [
+          "FX_TWO_YEAR_WINDOW_MISMATCH",
+          "FX_EXCEPTION_PRICE_SOURCE_UNVERIFIED"
+        ],
+        "scope": "TWD_TRADED_BOND_ETF",
+        "status": "FX_EVIDENCE_UNKNOWN",
+        "symbol": "00865B",
+        "trade_authorization": false
+      },
+      "name": "history_window_start_mismatch_unknown",
+      "payload": {
+        "asset": {
+          "action": "BUY",
+          "currency": "TWD",
+          "in_existing_universe": true,
+          "instrument_type": "BOND_ETF",
+          "market": "台股",
+          "symbol": "00865B"
+        },
+        "checked_at": "2026-11-23T09:05:00+08:00",
+        "fx_completed_as_of": "2026-11-20",
+        "fx_history": {
+          "completedAsOfDate": "2026-11-20",
+          "coverage": "COMPLETE",
+          "currency_pair": "USD/TWD",
+          "dailyRates": [
+            {
+              "buyRate": "29.9",
+              "date": "2026-11-20",
+              "rate": "30"
+            },
+            {
+              "buyRate": "32.9",
+              "date": "2025-09-19",
+              "rate": "33"
+            },
+            {
+              "buyRate": "29.9",
+              "date": "2025-03-03",
+              "rate": "30"
+            },
+            {
+              "buyRate": "29.9",
+              "date": "2024-11-22",
+              "rate": "30"
+            }
+          ],
+          "droppedDates": [],
+          "droppedUndated": false,
+          "provider_id": "BANK_OF_TAIWAN",
+          "provider_status": "RECORDED",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "source": "FINMIND_TAIWAN_EXCHANGE_RATE_NATIVE",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "spot_basis_verified": true,
+          "validation": "VERIFIED",
+          "windowEnd": "2026-11-23",
+          "windowStart": "2024-11-24"
+        },
+        "fx_quote": {
+          "as_of": "2026-11-23T09:04:58+08:00",
+          "currency_pair": "USD/TWD",
+          "freshness_verified": true,
+          "provider_id": "BANK_OF_TAIWAN",
+          "quote_status": "LIVE",
+          "rate": "32.0",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "rate_date": "2026-11-23",
+          "source": "BANK_OF_TAIWAN_LIVE_SPOT",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "validation": "VERIFIED"
+        }
+      }
+    },
+    {
+      "expected": {
+        "absolute_rate_high": false,
+        "cancels_scheduled_dca": false,
+        "changes_other_buy_gates": false,
+        "classification_authority": "D215_ACCEPTED_POLICY_MAP",
+        "classification_status": "VERIFIED",
+        "decision": "D-215",
+        "execution_scope": "PREFERENCE_REVIEW_ONLY",
+        "fx_risk": "NORMAL",
+        "places_orders": false,
+        "range_high": "33",
+        "range_low": "30",
+        "range_position": "0.3333333333333333333333333333",
+        "range_status": "VERIFIED",
+        "rate": "31",
+        "reasons": [],
+        "scope": "TWD_TRADED_BOND_ETF",
+        "status": "NO_FX_PREFERENCE_VETO",
+        "symbol": "00865B",
+        "trade_authorization": false
+      },
+      "name": "leap_day_window_start",
+      "payload": {
+        "asset": {
+          "action": "BUY",
+          "currency": "TWD",
+          "in_existing_universe": true,
+          "instrument_type": "BOND_ETF",
+          "market": "台股",
+          "symbol": "00865B"
+        },
+        "checked_at": "2028-02-29T09:05:00+08:00",
+        "fx_completed_as_of": "2028-02-28",
+        "fx_history": {
+          "completedAsOfDate": "2028-02-28",
+          "coverage": "COMPLETE",
+          "currency_pair": "USD/TWD",
+          "dailyRates": [
+            {
+              "buyRate": "30.9",
+              "date": "2028-02-28",
+              "rate": "31"
+            },
+            {
+              "buyRate": "32.9",
+              "date": "2026-12-25",
+              "rate": "33"
+            },
+            {
+              "buyRate": "29.9",
+              "date": "2026-06-08",
+              "rate": "30"
+            },
+            {
+              "buyRate": "30.9",
+              "date": "2026-02-27",
+              "rate": "31"
+            }
+          ],
+          "droppedDates": [],
+          "droppedUndated": false,
+          "provider_id": "BANK_OF_TAIWAN",
+          "provider_status": "RECORDED",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "source": "FINMIND_TAIWAN_EXCHANGE_RATE_NATIVE",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "spot_basis_verified": true,
+          "validation": "VERIFIED",
+          "windowEnd": "2028-02-29",
+          "windowStart": "2026-02-28"
+        },
+        "fx_quote": {
+          "as_of": "2028-02-29T09:04:58+08:00",
+          "currency_pair": "USD/TWD",
+          "freshness_verified": true,
+          "provider_id": "BANK_OF_TAIWAN",
+          "quote_status": "LIVE",
+          "rate": "31",
+          "rate_basis": "BANK_SPOT_SELLING",
+          "rate_date": "2028-02-29",
+          "source": "BANK_OF_TAIWAN_LIVE_SPOT",
+          "source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "validation": "VERIFIED"
+        }
+      }
+    }
+  ],
+  "policy": {
+    "absolute_rate_strictly_above": 32.8,
+    "cadence": "The original USD/TWD >33 halving of VOO/009826 monthly baseline and cap remains an upper limit; a preference to wait can reduce buying, never increase those limits. Existing scheduled DCA instructions are not automatically canceled or changed.",
+    "calculator": "scripts/usd_asset_fx_preference.py",
+    "changes_other_buy_gates": false,
+    "changes_retirement_model": false,
+    "cheap_exception": "Only source-verified instrument classification and own same-session price versus complete 52-week price high can support an exception review: individual STOCK drawdown >= 30%; ETF drawdown strictly > 10%. Exact 10% ETF drawdown is insufficient. Unknown classification gets no exception; never infer ETF status from ticker text. This releases only the FX preference, never universe, stabilization, strategic price, funding, target/group/total-cap or execution rules.",
+    "d130_precedence": "D-215 explicitly supersedes the older D-130 restriction against other conditions reducing a price-suitable one-lot recommendation only for this accepted FX preference: an eligible strategic or emergency TWD bond-ETF buy may WAIT_PREFERRED when FX is high without its own verified >10% ETF drawdown exception. Preserve quota, target, funding, source and all other original constraints.",
+    "decision": "D-215",
+    "document": "docs/USD_ASSET_FX_PREFERENCE.md",
+    "enabled": true,
+    "etf_exception_drawdown_fraction": 0.1,
+    "etf_exception_strictly_greater": true,
+    "exception_scope": "ANY_EXISTING_UNIVERSE_USD_STOCK_OR_ETF",
+    "final_report_composition": {
+      "facts_key": "usd_asset_fx_preference_d215",
+      "fingerprint": "scripts/record_report_inputs.py",
+      "guard": "scripts/report_evidence_guard.py:usd_asset_fx_issue",
+      "missing_evidence_action": "WATCH_ONLY_NO_EXECUTABLE_BUY",
+      "positive_api_quantity_is_ceiling": true,
+      "required_scopes": [
+        "D130_STRATEGIC_BOND",
+        "EMERGENCY_00865B",
+        "USD_STRATEGIC_MANUAL",
+        "USD_SCHEDULED_DCA_REVIEW",
+        "US_TACTICAL",
+        "TWD_BOND_SHORT_TERM"
+      ],
+      "source_api_validator": "scripts/verify_usd_asset_fx_source.py",
+      "verified_api_blocked_or_zero_preserved": true
+    },
+    "formula": "High FX cost when qualified live USD/TWD > 32.8 OR (live USD/TWD - lowest rate in exact last two calendar years) / (highest - lowest) >= 0.90. This is range position, not an empirical percentile. Test exact boundaries by Decimal cross multiplication; a zero range is UNKNOWN. Use coherent BANK_SPOT_SELLING USD sell rates, not MID/buy/sell mixing. Historical canonical rows do not record provider; disclose this uncertainty and do not claim same-provider proof.",
+    "historical_basis_readiness": "Legacy canonical rows with mixed cash/spot sell-rate origins cannot prove this range. Use only the actually completed, provenance-verified two-year BANK_SPOT_SELLING source from the separately authorized data repair; unknown/mixed rows remain excluded and source gaps remain UNKNOWN until verified readback, never relabeled by declaration.",
+    "historical_provider_status": "Preserve actual recorded source/provider provenance; explicit unknown on old rows is disclosure, not proof of coherent spot basis.",
+    "missing_evidence": "Missing current rate means UNKNOWN. When current rate <=32.8 but complete two-calendar-year range is unavailable, retain UNKNOWN and disclose it; never substitute one-year history, a five-year percentile or zero range. A verified current rate >32.8 independently establishes HIGH even when range is unknown; a separately verified cheap-asset exception may then be reviewed, not inferred from missing data. With a qualified current live bank spot selling rate and verified own-asset cheap exception, the FX preference can be waived even if the two-year range remains UNKNOWN: the verified exception covers either possible FX state. Retain UNKNOWN risk/range, never invent HIGH or NORMAL. Missing current cost/source cannot be waived.",
+    "native_history_coverage": "Retain all legacy UNKNOWN canonical rows. Exclude their prices/count them only when immutable trusted FinMind NATIVE_QUERY URL intervals for TaiwanExchangeRate/USD continuously cover the exact window through independent completed D, with qualified source-member-bound prices, boundary and latest D. Bank OBSERVATION captures may supply verified SPOT prices but never query coverage. Do not require all canonical dates to be native bank days or relabel legacy as verified.",
+    "places_orders": false,
+    "preference": "Prefer waiting when FX is HIGH; not a report-wide financial halt. Respect existing scoped verified BLOCKED and all non-FX gates. This preference cannot cancel or alter actual broker scheduled DCA orders.",
+    "purchase_scope": "All proposed new USD-denominated asset BUY/ADD, including VOO/VT/SGOV, whether funded by existing USD or TWD sub-brokerage; also all source-verified BOND_ETF purchases traded in TWD, including strategic D-130 and emergency 00865B sleeves, as Steven explicitly specified. Do not infer bond ETF classification from ticker names. TWD-traded stock ETFs such as 0050/00881 do not enter the FX scope solely through USD underlying exposure. Do not execute conversion, transfer or order actions.",
+    "range_position_threshold": 0.9,
+    "rate_basis": "BANK_SPOT_SELLING",
+    "soft_preference": true,
+    "stock_exception_drawdown_fraction": 0.3,
+    "trade_authorization": false,
+    "twd_traded_bond_etfs_count_as_usd_assets": true,
+    "verified_instruments": [
+      {
+        "instrument_kind": "EQUITY_ETF",
+        "market": "台股",
+        "quote_currency": "TWD",
+        "source_document": "research/ETF_UNIVERSE.md",
+        "source_sha256": "5ea009791bd09360dbab44661ce26dba4b8a765c2c5277ff680846bc00b5d6f0",
+        "stock_code": "0050"
+      },
+      {
+        "instrument_kind": "EQUITY_ETF",
+        "market": "台股",
+        "quote_currency": "TWD",
+        "source_document": "research/ETF_UNIVERSE.md",
+        "source_sha256": "5ea009791bd09360dbab44661ce26dba4b8a765c2c5277ff680846bc00b5d6f0",
+        "stock_code": "00881"
+      },
+      {
+        "instrument_kind": "EQUITY_ETF",
+        "market": "台股",
+        "quote_currency": "TWD",
+        "source_document": "research/ETF_UNIVERSE.md",
+        "source_sha256": "5ea009791bd09360dbab44661ce26dba4b8a765c2c5277ff680846bc00b5d6f0",
+        "stock_code": "0056"
+      },
+      {
+        "instrument_kind": "EQUITY_ETF",
+        "market": "台股",
+        "quote_currency": "TWD",
+        "source_document": "research/ETF_UNIVERSE.md",
+        "source_sha256": "5ea009791bd09360dbab44661ce26dba4b8a765c2c5277ff680846bc00b5d6f0",
+        "stock_code": "00878"
+      },
+      {
+        "instrument_kind": "EQUITY_ETF",
+        "market": "台股",
+        "quote_currency": "TWD",
+        "source_document": "research/ETF_UNIVERSE.md",
+        "source_sha256": "5ea009791bd09360dbab44661ce26dba4b8a765c2c5277ff680846bc00b5d6f0",
+        "stock_code": "00713"
+      },
+      {
+        "instrument_kind": "EQUITY_ETF",
+        "market": "台股",
+        "quote_currency": "TWD",
+        "source_document": "research/ETF_UNIVERSE.md",
+        "source_sha256": "5ea009791bd09360dbab44661ce26dba4b8a765c2c5277ff680846bc00b5d6f0",
+        "stock_code": "00919"
+      },
+      {
+        "instrument_kind": "EQUITY_ETF",
+        "market": "台股",
+        "quote_currency": "TWD",
+        "source_document": "research/ETF_UNIVERSE.md",
+        "source_sha256": "5ea009791bd09360dbab44661ce26dba4b8a765c2c5277ff680846bc00b5d6f0",
+        "stock_code": "009826"
+      },
+      {
+        "instrument_kind": "EQUITY_ETF",
+        "market": "台股",
+        "quote_currency": "TWD",
+        "source_document": "research/ETF_UNIVERSE.md",
+        "source_sha256": "5ea009791bd09360dbab44661ce26dba4b8a765c2c5277ff680846bc00b5d6f0",
+        "stock_code": "006208"
+      },
+      {
+        "instrument_kind": "EQUITY_ETF",
+        "market": "台股",
+        "quote_currency": "TWD",
+        "source_document": "research/ETF_UNIVERSE.md",
+        "source_sha256": "5ea009791bd09360dbab44661ce26dba4b8a765c2c5277ff680846bc00b5d6f0",
+        "stock_code": "009804"
+      },
+      {
+        "instrument_kind": "EQUITY_ETF",
+        "market": "台股",
+        "quote_currency": "TWD",
+        "source_document": "research/ETF_UNIVERSE.md",
+        "source_sha256": "5ea009791bd09360dbab44661ce26dba4b8a765c2c5277ff680846bc00b5d6f0",
+        "stock_code": "00850"
+      },
+      {
+        "instrument_kind": "EQUITY_ETF",
+        "market": "台股",
+        "quote_currency": "TWD",
+        "source_document": "research/ETF_UNIVERSE.md",
+        "source_sha256": "5ea009791bd09360dbab44661ce26dba4b8a765c2c5277ff680846bc00b5d6f0",
+        "stock_code": "00882"
+      },
+      {
+        "instrument_kind": "BOND_ETF",
+        "market": "台股",
+        "quote_currency": "TWD",
+        "source_document": "research/ETF_UNIVERSE.md",
+        "source_sha256": "5ea009791bd09360dbab44661ce26dba4b8a765c2c5277ff680846bc00b5d6f0",
+        "stock_code": "00865B"
+      },
+      {
+        "instrument_kind": "BOND_ETF",
+        "market": "台股",
+        "quote_currency": "TWD",
+        "source_document": "research/ETF_UNIVERSE.md",
+        "source_sha256": "5ea009791bd09360dbab44661ce26dba4b8a765c2c5277ff680846bc00b5d6f0",
+        "stock_code": "00719B"
+      },
+      {
+        "instrument_kind": "BOND_ETF",
+        "market": "台股",
+        "quote_currency": "TWD",
+        "source_document": "research/ETF_UNIVERSE.md",
+        "source_sha256": "5ea009791bd09360dbab44661ce26dba4b8a765c2c5277ff680846bc00b5d6f0",
+        "stock_code": "00697B"
+      },
+      {
+        "instrument_kind": "BOND_ETF",
+        "market": "台股",
+        "quote_currency": "TWD",
+        "source_document": "research/ETF_UNIVERSE.md",
+        "source_sha256": "5ea009791bd09360dbab44661ce26dba4b8a765c2c5277ff680846bc00b5d6f0",
+        "stock_code": "00679B"
+      },
+      {
+        "instrument_kind": "BOND_ETF",
+        "market": "台股",
+        "quote_currency": "TWD",
+        "source_document": "research/ETF_UNIVERSE.md",
+        "source_sha256": "5ea009791bd09360dbab44661ce26dba4b8a765c2c5277ff680846bc00b5d6f0",
+        "stock_code": "00751B"
+      },
+      {
+        "instrument_kind": "EQUITY_ETF",
+        "market": "美股",
+        "quote_currency": "USD",
+        "source_document": "research/ETF_UNIVERSE.md",
+        "source_sha256": "5ea009791bd09360dbab44661ce26dba4b8a765c2c5277ff680846bc00b5d6f0",
+        "stock_code": "VOO"
+      },
+      {
+        "instrument_kind": "EQUITY_ETF",
+        "market": "美股",
+        "quote_currency": "USD",
+        "source_document": "research/ETF_UNIVERSE.md",
+        "source_sha256": "5ea009791bd09360dbab44661ce26dba4b8a765c2c5277ff680846bc00b5d6f0",
+        "stock_code": "VT"
+      },
+      {
+        "instrument_kind": "BOND_ETF",
+        "market": "美股",
+        "quote_currency": "USD",
+        "source_document": "research/ETF_UNIVERSE.md",
+        "source_sha256": "5ea009791bd09360dbab44661ce26dba4b8a765c2c5277ff680846bc00b5d6f0",
+        "stock_code": "SGOV"
+      },
+      {
+        "instrument_kind": "STOCK",
+        "market": "美股",
+        "quote_currency": "USD",
+        "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
+        "source_sha256": "772aa3b0b792a591a3710d1570be6dc6926fe58afa3ae2502835ccb889da96f7",
+        "stock_code": "GOOG"
+      },
+      {
+        "instrument_kind": "STOCK",
+        "market": "美股",
+        "quote_currency": "USD",
+        "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
+        "source_sha256": "772aa3b0b792a591a3710d1570be6dc6926fe58afa3ae2502835ccb889da96f7",
+        "stock_code": "GOOGL"
+      },
+      {
+        "instrument_kind": "STOCK",
+        "market": "美股",
+        "quote_currency": "USD",
+        "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
+        "source_sha256": "772aa3b0b792a591a3710d1570be6dc6926fe58afa3ae2502835ccb889da96f7",
+        "stock_code": "MSFT"
+      },
+      {
+        "instrument_kind": "STOCK",
+        "market": "美股",
+        "quote_currency": "USD",
+        "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
+        "source_sha256": "772aa3b0b792a591a3710d1570be6dc6926fe58afa3ae2502835ccb889da96f7",
+        "stock_code": "AVGO"
+      },
+      {
+        "instrument_kind": "STOCK",
+        "market": "美股",
+        "quote_currency": "USD",
+        "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
+        "source_sha256": "772aa3b0b792a591a3710d1570be6dc6926fe58afa3ae2502835ccb889da96f7",
+        "stock_code": "NVDA"
+      },
+      {
+        "instrument_kind": "STOCK",
+        "market": "美股",
+        "quote_currency": "USD",
+        "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
+        "source_sha256": "772aa3b0b792a591a3710d1570be6dc6926fe58afa3ae2502835ccb889da96f7",
+        "stock_code": "AAPL"
+      },
+      {
+        "instrument_kind": "STOCK",
+        "market": "美股",
+        "quote_currency": "USD",
+        "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
+        "source_sha256": "772aa3b0b792a591a3710d1570be6dc6926fe58afa3ae2502835ccb889da96f7",
+        "stock_code": "AMZN"
+      }
+    ],
+    "window_calendar_years": 2
+  },
+  "schema": "D215_FX_PREFERENCE_GOLDEN_V1"
+}

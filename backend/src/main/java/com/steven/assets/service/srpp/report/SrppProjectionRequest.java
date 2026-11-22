@@ -21,12 +21,41 @@ final class SrppProjectionRequest {
             return new Common(email,consumer,LocalDate.parse(date),slot,policy,swagger,UUID.fromString(run));
         } catch (RuntimeException bad) { throw new SrppReportProblem("INVALID_REQUEST"); }
     }
+    /** Task 626 v2-only keys; the v1 parser's closed key set rejects every one of them. */
+    static final String PROJECTION_VERSION="projectionVersion", V2="SRPP_ORDER_PLAN_PROJECTION_V2";
+    static final Set<String> V2_KEYS = Set.of(PROJECTION_VERSION,"riskMode","riskTotalScore","riskAssessedCount","riskMaxCategoryScore","riskReceiptSha256","runStartedAt","fundingCommitments");
     static Order order(MultiValueMap<String,String> values) {
         Common common=common(values, union(COMMON,Set.of("decisions","asOf")));
         try {
-            String raw=one(values,"decisions"), asOf=one(values,"asOf");
+            String asOf=one(values,"asOf");
             if (!asOf.equals(asOf.strip())) throw new IllegalArgumentException();
             Instant at=Instant.parse(asOf);
+            return new Order(common,at,decisions(one(values,"decisions")));
+        } catch(RuntimeException bad){ if(bad instanceof SrppReportProblem p)throw p;throw new SrppReportProblem("INVALID_REQUEST"); }
+    }
+    /** Task 626 v2: every v1 rule plus eight required closed keys; grammar only (bundle ranges are checked after load). */
+    static OrderV2 orderV2(MultiValueMap<String,String> values) {
+        Common common=common(values, union(union(COMMON,Set.of("decisions","asOf")),V2_KEYS));
+        try {
+            if(!values.keySet().containsAll(V2_KEYS))throw new IllegalArgumentException();
+            String asOf=one(values,"asOf");
+            if (!asOf.equals(asOf.strip())) throw new IllegalArgumentException();
+            Instant at=Instant.parse(asOf);
+            if(!V2.equals(one(values,PROJECTION_VERSION)))throw new IllegalArgumentException();
+            String mode=one(values,"riskMode");if(!Set.of("NORMAL","CAUTIOUS","DEFENSIVE").contains(mode))throw new IllegalArgumentException();
+            int total=integer(one(values,"riskTotalScore"),"0|[1-9][0-9]{0,2}"),assessed=integer(one(values,"riskAssessedCount"),"0|[1-9][0-9]?"),max=integer(one(values,"riskMaxCategoryScore"),"0|[1-9][0-9]?");
+            String receipt=one(values,"riskReceiptSha256");if(!receipt.matches("[a-f0-9]{64}"))throw new IllegalArgumentException();
+            Instant started=Instant.parse(one(values,"runStartedAt"));
+            String[] funding=one(values,"fundingCommitments").split(",",-1);
+            if(funding.length!=2||!funding[0].startsWith("TWD~")||!funding[1].startsWith("USD~"))throw new IllegalArgumentException();
+            String twd=funding[0].substring(4),usd=funding[1].substring(4);
+            for(String amount:List.of(twd,usd))if(!amount.matches("(?:0|[1-9][0-9]{0,17})(?:\\.[0-9]{0,7}[1-9])?"))throw new IllegalArgumentException();
+            return new OrderV2(new Order(common,at,decisions(one(values,"decisions"))),mode,total,assessed,max,receipt,started,new java.math.BigDecimal(twd),new java.math.BigDecimal(usd),twd,usd);
+        } catch(RuntimeException bad){ if(bad instanceof SrppReportProblem p)throw p;throw new SrppReportProblem("INVALID_REQUEST"); }
+    }
+    private static int integer(String value,String grammar){if(!value.matches(grammar))throw new IllegalArgumentException();return Integer.parseInt(value);}
+    private static List<Decision> decisions(String raw) {
+        {
             String[] parts=raw.split(",",-1); if(parts.length<1||parts.length>25)throw new IllegalArgumentException();
             List<Decision> decisions=new ArrayList<>(); Set<String> ids=new HashSet<>();
             for(String token:parts){ if(token.isEmpty()||!token.equals(token.strip()))throw new IllegalArgumentException(); String[] f=token.split("~",-1); if(f.length<2||f.length>4||f[0].isEmpty()||!f[0].matches("[A-Z][A-Z0-9_]{0,127}\\.[0-9]{1,6}")||!ids.add(f[0]))throw new IllegalArgumentException();
@@ -37,8 +66,8 @@ final class SrppProjectionRequest {
                     default -> throw new IllegalArgumentException();
                 }
             }
-            return new Order(common,at,List.copyOf(decisions));
-        } catch(RuntimeException bad){ if(bad instanceof SrppReportProblem p)throw p;throw new SrppReportProblem("INVALID_REQUEST"); }
+            return List.copyOf(decisions);
+        }
     }
     static Symbols symbols(MultiValueMap<String,String> values) {
         Common common=common(values, union(COMMON,Set.of("stockCodes"))); String raw=values.getFirst("stockCodes");
@@ -51,5 +80,6 @@ final class SrppProjectionRequest {
     record Common(String email,String consumer,LocalDate date,String slot,String policy,String swagger,UUID run) {}
     record Decision(String legId,String verdict,String amount,String reason) {}
     record Order(Common common, Instant asOf, List<Decision> decisions) {}
+    record OrderV2(Order order,String riskMode,int riskTotalScore,int riskAssessedCount,int riskMaxCategoryScore,String riskReceiptSha256,Instant runStartedAt,java.math.BigDecimal commitmentTwd,java.math.BigDecimal commitmentUsd,String commitmentTwdText,String commitmentUsdText) {}
     record Symbols(Common common,List<String> stockCodes) {}
 }

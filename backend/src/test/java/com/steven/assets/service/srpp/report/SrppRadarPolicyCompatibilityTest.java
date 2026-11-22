@@ -79,7 +79,7 @@ class SrppRadarPolicyCompatibilityTest {
         var fixture = SrppReportStateTopupCalculatorTest.fullFixture();
         ObjectNode sources = (ObjectNode) fixture.frozen().input().path("sources");
         for (var entry : sources.properties()) {
-            if (entry.getKey().startsWith("market:台股:")) {
+            if (entry.getKey().startsWith("market:台股:") && entry.getValue().path("radar").isObject()) {
                 radarPolicy((ObjectNode) entry.getValue().path("radar"), version, verification);
             }
         }

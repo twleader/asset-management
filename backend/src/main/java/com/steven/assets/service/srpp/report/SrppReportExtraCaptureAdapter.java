@@ -35,11 +35,13 @@ public final class SrppReportExtraCaptureAdapter implements SrppReportExtraCaptu
         JsonNode named=e.path("named_cash_rotation_d223");if(named.path("enabled").asBoolean())for(String key:List.of("buy_symbol","sell_symbol"))if(!named.path(key).asText().isBlank())universe.add("台股:"+named.path(key).asText());
         Map<String,List<LocalDate>> calendarSessions=new HashMap<>();Map<String,Boolean> calendarQuality=new HashMap<>(),calendarComplete=new HashMap<>();Map<String,LocalDate>calendarStart=new HashMap<>(),calendarUnknown=new HashMap<>();
         for(String m:List.of("台股","美股")){List<LocalDate> dates=new ArrayList<>();boolean known=false,complete=true;LocalDate start=null,unknown=null;for(int d=1;d<=550;d++){LocalDate day=date.minusDays(d);Optional<Boolean> flag=market.isTradingDayCachedOnly(m,day);if(flag.isEmpty()){complete=false;unknown=day;break;}known=true;start=day;if(flag.get())dates.add(day);}Collections.reverse(dates);calendarSessions.put(m,dates);calendarQuality.put(m,known);calendarComplete.put(m,complete);calendarStart.put(m,start);calendarUnknown.put(m,unknown);}
+        List<com.steven.assets.model.ExchangeRateHistory> d215FxRows=null;
         Set<String> reused=new HashSet<>();model.path("execution_policy").path("bond_price_selection_d195").path("strategic_symbols").forEach(c->reused.add(c.asText()));
         for(String key:universe){String m=key.substring(0,key.indexOf(':')),code=key.substring(key.indexOf(':')+1);ObjectNode body=JsonNodeFactory.instance.objectNode();body.put("market",m);body.put("symbol",code);body.put("volumeUnit","SHARES");
             boolean reuse="台股".equals(m)&&reused.contains(code)&&frozenSources.has("daily:"+code);
             if(reuse){JsonNode q=frozenSources.path("quote:"+code);body.set("quote",q.path("rawQuote"));body.set("nav",q.path("rawNav"));body.set("book",frozenSources.path("book:"+code));body.set("radar",frozenSources.path("radar:"+code));body.set("dividends",frozenSources.path("dividends:"+code));body.set("daily",frozenSources.path("daily:"+code).deepCopy());for(JsonNode row:body.path("daily")){if(row instanceof ObjectNode object){boolean trusted=false;try{trusted=prices.isTrustedClose(mapper.treeToValue(row,StockPriceHistory.class));}catch(Exception invalid){}object.put("trusted",trusted);}}body.set("indicators",JsonNodeFactory.instance.arrayNode());}
-            if(reuse){var currentDividends=dividends.findByStockSinceYear(code,m,date.getYear()-2);
+            List<com.steven.assets.model.StockDividendHistory> currentDividends=null;
+            if(reuse){currentDividends=dividends.findByStockSinceYear(code,m,date.getYear()-2);
                 if(!financialDividends(currentDividends,model,code,date)
                         ||!json(currentDividends).equals(body.path("dividends")))body.putNull("dividends");}
             List<StockPriceHistory> rows=reuse?List.of():history.findByStockCodeAndMarketAndTradingDateBetweenOrderByTradingDateAsc(code,m,date.minusDays(730),date.minusDays(1));
@@ -51,7 +53,7 @@ public final class SrppReportExtraCaptureAdapter implements SrppReportExtraCaptu
             var dividendRows=dividends.findByStockSinceYear(code,m,date.getYear()-2);
             if(financialDividends(dividendRows,model,code,date))body.set("dividends",json(dividendRows));
             else body.putNull("dividends");
-            if(Set.of("VOO","0050","00881").contains(code)){
+            if(Set.of("VOO","0050","00881","VT","00865B","00719B","00697B").contains(code)){
                 try{
                     List<StockPriceHistory> desc=new ArrayList<>(rows);desc.sort(Comparator.comparing(StockPriceHistory::getTradingDate).reversed());
                     var adjustment=new DistributionAdjustedPriceService();
@@ -65,7 +67,7 @@ public final class SrppReportExtraCaptureAdapter implements SrppReportExtraCaptu
                         if(fxHistory==null)body.putObject("usdFxPurchase").put("evaluated",false);
                         else {
                             var rate=mapper.treeToValue(frozenSources.path("fx"),UsdTwdLiveRateService.LiveRate.class);
-                            var fxRows=fxHistory.findByCurrencyAndRateDateBetweenOrderByRateDateAsc("USD",date.minusYears(2),date.minusDays(1));
+                            if(d215FxRows==null)d215FxRows=fxHistory.findByCurrencyAndRateDateBetweenOrderByRateDateAsc("USD",date.minusYears(2),date.minusDays(1));var fxRows=d215FxRows;
                             List<LocalDate> tw=calendarSessions.get("台股");LocalDate completedTw=tw.isEmpty()?null:tw.getLast();
                             body.set("usdFxPurchase",json(UsdFxPurchaseContext.forAsset("VOO","美股","USD",UsdFxPurchaseContext.live(rate,at,completedTw,fxRows,null))));
                         }
@@ -75,11 +77,39 @@ public final class SrppReportExtraCaptureAdapter implements SrppReportExtraCaptu
             // Existing business indicator-series computes from canonical persisted rows; no vendor IO.
             try{body.set("indicators",json(indicators.indicatorSeries(code,m,date.minusDays(730),date.minusDays(1))));}catch(RuntimeException absent){body.set("indicators",JsonNodeFactory.instance.arrayNode());}
             }
+            // Task 625: reused D-195 bonds carry only 100 frozen daily rows; one extra canonical read feeds the price-only exception basis.
+            if(reuse&&D215_PRICE_ONLY_BONDS.contains(code)){
+                try{List<StockPriceHistory> canonical=history.findByStockCodeAndMarketAndTradingDateBetweenOrderByTradingDateAsc(code,m,date.minusDays(730),date.minusDays(1));
+                    priceOnly(body,canonical,currentDividends,m);
+                }catch(Exception unavailable){body.put("priceOnlyBasisStatus","UNAVAILABLE");}
+            }
+            if(D215_FX_CODES.contains(code)){
+                try{
+                    if(fxHistory==null)body.putObject("usdFxPurchase").put("evaluated",false);
+                    else {
+                        if(d215FxRows==null)d215FxRows=fxHistory.findByCurrencyAndRateDateBetweenOrderByRateDateAsc("USD",date.minusYears(2),date.minusDays(1));
+                        var rate=mapper.treeToValue(frozenSources.path("fx"),UsdTwdLiveRateService.LiveRate.class);
+                        List<LocalDate> tw=calendarSessions.get("台股");LocalDate completedTw=tw.isEmpty()?null:tw.getLast();
+                        var context=UsdFxPurchaseContext.forAsset(code,m,"台股".equals(m)?"TWD":"USD",UsdFxPurchaseContext.live(rate,at,completedTw,d215FxRows,null));
+                        body.set("usdFxPurchase",json(SrppReportD215FxPreference.orderChecked(context,d215FxRows)));
+                    }
+                }catch(Exception fxUnavailable){body.putObject("usdFxPurchase").put("evaluated",false).put("reason","D215_FX_CONTEXT_UNAVAILABLE");}
+            }
             ArrayNode sessions=body.putArray("completedSessions");calendarSessions.get(m).forEach(d->sessions.add(d.toString()));body.put("calendarVerified",calendarQuality.get(m));body.put("lookbackComplete",calendarComplete.get(m));if(calendarStart.get(m)==null)body.putNull("calendarCoverageStart");else body.put("calendarCoverageStart",calendarStart.get(m).toString());body.put("calendarCoverageEnd",date.minusDays(1).toString());if(calendarUnknown.get(m)==null)body.putNull("calendarUnknownDate");else body.put("calendarUnknownDate",calendarUnknown.get(m).toString());
             String sourceId="market:"+key;sources.set(sourceId,body);SourceQuality quality=assess(body,date,Instant.now());source(vector,sourceId,body,at,quality.coverage(),quality.validation());
         }
         for(String id:List.of("payroll","tax","core-state","global-pace","regime","short-sleeve","us-tactical","dca-identity","topup-state","report-reservations")){if(frozenSources.has(id))continue;ObjectNode unavailable=sources.putObject(id);unavailable.put("status","UNAVAILABLE");unavailable.put("reason",id.toUpperCase(Locale.ROOT).replace('-','_')+"_CANONICAL_SOURCE_UNAVAILABLE");source(vector,id,unavailable,at,"NONE","UNAVAILABLE");}
         Instant completedAt=Instant.now();vector.forEach(v->((ObjectNode)v).put("capturedAt",completedAt.toString()));return new ExtraCapture(sources,vector);
+    }
+    private static final Set<String> D215_FX_CODES=Set.of("VT","00865B","00719B","00697B"),D215_PRICE_ONLY_BONDS=Set.of("00865B","00719B","00697B");
+    /** Price-only (split-adjusted, no cash dividend) completed rows for the D-215 exception basis; trusted flag per canonical row. */
+    private void priceOnly(ObjectNode body,List<StockPriceHistory> rows,List<com.steven.assets.model.StockDividendHistory> dividendRows,String m){
+        List<StockPriceHistory> desc=new ArrayList<>(rows);desc.sort(Comparator.comparing(StockPriceHistory::getTradingDate).reversed());
+        var basis=new DistributionAdjustedPriceService().priceReturnBasis(desc,dividendRows,m);
+        Set<LocalDate> trustedDates=new HashSet<>();for(var row:rows)if(prices.isTrustedClose(row))trustedDates.add(row.getTradingDate());
+        ArrayNode priceRows=body.putArray("priceOnlyDaily");
+        for(var row:basis.rowsDesc()){ObjectNode raw=(ObjectNode)json(row);raw.put("trusted",trustedDates.contains(row.getTradingDate()));priceRows.add(raw);}
+        body.put("priceOnlyBasis",m.equals("台股")?"TW_SPLIT_STOCK_PRICE":"STORED_PRICE_ONLY").put("priceOnlyBasisStatus","AVAILABLE");
     }
     public record SourceQuality(String coverage,String validation){}
     /** Composite validation proves captured identity and provenance; each calculator still checks its own horizon/age/gates. */

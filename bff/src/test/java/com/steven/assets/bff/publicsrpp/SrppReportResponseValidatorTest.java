@@ -190,6 +190,14 @@ class SrppReportResponseValidatorTest {
  private static ObjectNode fact(String name,String subject,String value,String unit){var n=com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();n.put("name",name).put("subject",subject).put("value",value).put("unit",unit).put("quality","EXACT").putNull("reason");return n;}
  private static JsonNode leg(String status,int lots){String json="{\"symbol\":\"00865B\",\"market\":\"台股\",\"broker\":null,\"subaccount\":null,\"strategy\":\"D130\",\"status\":\""+status+"\",\"action\":\"BUY\",\"lots\":"+lots+",\"units\":null,\"limitPrice\":\"40\",\"amount\":\"40000\",\"currency\":\"TWD\",\"fees\":\"20\",\"netProfitSpace\":null,\"rankingReason\":null,\"blockingReasons\":[\"PENDING_UNVERIFIED\"],\"receipts\":[]}";return SrppDailyContextResponseValidator.parseStrict(json.getBytes(StandardCharsets.UTF_8));}
 
+ private static ObjectNode withPooledHeadroom(String name)throws Exception{
+  ObjectNode root=producer("full-codex");ObjectNode funding=null;for(JsonNode m:root.get("modules"))if("FUNDING_CAPACITY".equals(m.get("moduleId").asText()))funding=(ObjectNode)m;assertThat(funding).isNotNull();
+  var facts=(com.fasterxml.jackson.databind.node.ArrayNode)funding.get("data").get("facts");for(String currency:java.util.List.of("TWD","USD")){var f=facts.addObject();f.put("name",name);f.put("subject",currency);f.put("value","TWD".equals(currency)?"3442122.0773":"0");f.put("unit",currency);f.put("quality","EXACT");f.putNull("reason");}return root;
+ }
+ @Test void fundingCapacityAcceptsPooledPostBuyHeadroomAndStillRejectsUnknownNames()throws Exception{
+  validateProducer(withPooledHeadroom("pooledPostBuyHeadroom"));
+  assertThatThrownBy(()->validateProducer(withPooledHeadroom("pooledPostBuyHeadroomUnknown"))).isInstanceOf(RuntimeException.class);
+ }
  private static ObjectNode d222Fact(String name,String subject,String unit,String value){
   var f=com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();f.put("name",name);if(subject==null)f.putNull("subject");else f.put("subject",subject);f.put("unit",unit);if(value==null){f.putNull("value");f.put("quality","UNAVAILABLE");f.put("reason","FIELD_SOURCE_UNVERIFIED");}else{f.put("value",value);f.put("quality","EXACT");f.putNull("reason");}return f;
  }
@@ -245,4 +253,80 @@ class SrppReportResponseValidatorTest {
  @Test void namedSellerUnitsBelow152ValidateWithExactAccountAndFourteenGates(){validate(namedSellerFixture());}
  @Test void namedSellerRejectsMissingBatchOrCooldownAndWrongQuantityType(){for(String mutation:java.util.List.of("D152_BATCH","COOLDOWN","lots","scope")){ObjectNode n=namedSellerFixture(),l=(ObjectNode)n.path("modules").get(8).path("data").path("legs").get(0);if(mutation.equals("lots"))l.put("lots",3);else if(mutation.equals("scope"))l.put("symbol","0050");else {var a=(com.fasterxml.jackson.databind.node.ArrayNode)l.path("receipts");for(int i=a.size()-1;i>=0;i--)if(a.get(i).path("ruleId").asText().equals(mutation))a.remove(i);}assertThatThrownBy(()->validate(n)).as(mutation).isInstanceOf(RuntimeException.class);}}
 
+ // ---- Task 623 satellite build legs (actual business-services producer wire) ----
+ private static ObjectNode paceLeg(ObjectNode root,String symbol){for(JsonNode leg:root.path("modules").get(9).path("data").path("legs"))if(symbol.equals(leg.path("symbol").asText()))return (ObjectNode)leg;throw new AssertionError(symbol);}
+ private static ObjectNode receipt(ObjectNode leg,String rule){for(JsonNode r:leg.path("receipts"))if(rule.equals(r.path("ruleId").asText()))return (ObjectNode)r;throw new AssertionError(rule);}
+ private static void rejectsProducer(String name,Consumer<ObjectNode> mutation)throws Exception{ObjectNode root=producer(name);mutation.accept(root);assertThatThrownBy(()->validateProducer(root)).isInstanceOf(RuntimeException.class);}
+ @Test void actualProducerSatelliteLegsValidateIncludingHalvedUnverifiedMids() throws Exception {
+  for(String name:java.util.List.of("satellite-enabled","satellite-mids-unavailable")){
+   ObjectNode root=producer(name);assertThat(root.path("modules").get(9).path("moduleId").asText()).isEqualTo("GLOBAL_EQUITY_PACE");
+   assertThat(paceLeg(root,"009826").path("status").asText()).isEqualTo("ACTIONABLE_FOR_REPORT");assertThat(paceLeg(root,"VT").path("status").asText()).isEqualTo("ACTIONABLE_FOR_REPORT");assertThat(paceLeg(root,"VT").path("market").asText()).isEqualTo("美股");
+   boolean mids=name.equals("satellite-enabled");assertThat(receipt(paceLeg(root,"VT"),"SATELLITE_BUILD").path("inputRefs").toString().contains("usd-twd-month-mids")).isEqualTo(mids);
+   validateProducer(root);
+  }
+ }
+ @Test void vtUsLegIsAcceptedOnlyInGlobalEquityPaceWithItsExactIdentity() throws Exception {
+  rejectsProducer("satellite-enabled",root->((com.fasterxml.jackson.databind.node.ArrayNode)root.path("modules").get(8).path("data").path("legs")).add(paceLeg(root,"VT").deepCopy()));
+  rejectsProducer("satellite-enabled",root->((ObjectNode)root.path("modules").get(5).path("data").path("legs").get(0)).put("market","美股"));
+  rejectsProducer("satellite-enabled",root->paceLeg(root,"VT").put("currency","TWD"));
+  rejectsProducer("satellite-enabled",root->paceLeg(root,"VT").put("symbol","VOO"));
+  rejectsProducer("satellite-enabled",root->paceLeg(root,"009826").put("market","美股").put("currency","USD"));
+  rejectsProducer("satellite-enabled",root->paceLeg(root,"009826").put("subaccount","CORE_D215"));
+  rejectsProducer("satellite-enabled",root->paceLeg(root,"VT").put("broker","富邦證券"));
+  rejectsProducer("satellite-enabled",root->paceLeg(root,"VT").put("strategy","SATELLITE_BUILD_D143"));
+ }
+ @Test void satelliteReceiptSetFxIdentityAndWholeUnitsAreExact() throws Exception {
+  rejectsProducer("satellite-enabled",root->{var receipts=(com.fasterxml.jackson.databind.node.ArrayNode)paceLeg(root,"VT").path("receipts");for(int i=receipts.size()-1;i>=0;i--)if("FX_CONVERSION".equals(receipts.get(i).path("ruleId").asText()))receipts.remove(i);});
+  rejectsProducer("satellite-enabled",root->((com.fasterxml.jackson.databind.node.ArrayNode)paceLeg(root,"009826").path("receipts")).add(receipt(paceLeg(root,"VT"),"FX_CONVERSION").deepCopy()));
+  rejectsProducer("satellite-enabled",root->{for(JsonNode v:receipt(paceLeg(root,"VT"),"FX_CONVERSION").path("values"))if("twdAmount".equals(v.path("name").asText()))((ObjectNode)v).put("value","24376");});
+  rejectsProducer("satellite-enabled",root->{for(JsonNode v:receipt(paceLeg(root,"VT"),"FX_CONVERSION").path("values"))if("twdFee".equals(v.path("name").asText()))((ObjectNode)v).put("value","97");});
+  rejectsProducer("satellite-enabled",root->receipt(paceLeg(root,"VT"),"FX_CONVERSION").putArray("inputRefs").add("fx"));
+  rejectsProducer("satellite-enabled",root->paceLeg(root,"VT").put("units","5.5").put("amount","825"));
+  rejectsProducer("satellite-enabled",root->paceLeg(root,"VT").put("fees","2.5"));
+  rejectsProducer("satellite-enabled",root->{var refs=receipt(paceLeg(root,"VT"),"SATELLITE_BUILD").putArray("inputRefs");for(String r:java.util.List.of("assets","fx","market:美股:VT","policy","satellite-build-fills"))refs.add(r);});
+  rejectsProducer("satellite-enabled",root->{var refs=receipt(paceLeg(root,"009826"),"SATELLITE_BUILD").putArray("inputRefs");for(String r:java.util.List.of("assets","fx","policy","satellite-build-fills","usd-twd-month-mids"))refs.add(r);});
+  rejectsProducer("satellite-enabled",root->{var values=(com.fasterxml.jackson.databind.node.ArrayNode)receipt(paceLeg(root,"009826"),"SATELLITE_BUILD").path("values");for(int i=values.size()-1;i>=0;i--)if("fxStatusVerified".equals(values.get(i).path("name").asText()))values.remove(i);});
+ }
+ @Test void blockedSatelliteLegKeepsFreeNamedAfterCloseReason() throws Exception {
+  ObjectNode root=producer("satellite-enabled");
+  for(String code:java.util.List.of("009826","VT")){ObjectNode leg=paceLeg(root,code);leg.put("status","BLOCKED");if(code.equals("VT"))leg.put("units","0");else leg.put("lots",0);for(String k:java.util.List.of("limitPrice","amount","fees","netProfitSpace","rankingReason"))leg.putNull(k);leg.putArray("blockingReasons").add("AFTER_CLOSE_INITIALIZATION_NON_EXECUTABLE");}
+  validateProducer(root);
+ }
+ // ---- Task 625 D215_FX on BOND_D130_D195 legs and the VT build leg (actual business-services producer wire) ----
+ private static ObjectNode bondLeg(ObjectNode root,String symbol,String strategy){for(JsonNode leg:root.path("modules").get(5).path("data").path("legs"))if(symbol.equals(leg.path("symbol").asText())&&strategy.equals(leg.path("strategy").asText()))return (ObjectNode)leg;throw new AssertionError(symbol);}
+ @Test void d215NormalWaitAndSourceUnverifiedProducerWiresValidate() throws Exception {
+  ObjectNode normal=producer("satellite-enabled");validateProducer(normal);
+  ObjectNode active=bondLeg(normal,"00865B","STRATEGIC_FUBON");assertThat(active.path("status").asText()).isEqualTo("ACTIONABLE_FOR_REPORT");assertThat(receipt(active,"D215_FX").path("status").asText()).isEqualTo("PASS");
+  assertThat(receipt(paceLeg(normal,"VT"),"D215_FX").path("reason").asText()).isEqualTo("D215_NO_FX_PREFERENCE_VETO");
+  ObjectNode wait=producer("satellite-d215-wait");validateProducer(wait);
+  ObjectNode waited=bondLeg(wait,"00865B","EMERGENCY_CATHAY");assertThat(waited.path("status").asText()).isEqualTo("BLOCKED");assertThat(receipt(waited,"D215_FX").path("status").asText()).isEqualTo("BLOCK");assertThat(receipt(waited,"D215_FX").toString()).contains("d215WaitCeilingLots","d215WaitCeilingAmount");
+  assertThat(receipt(paceLeg(wait,"VT"),"D215_FX").toString()).contains("d215WaitCeilingUnits");
+  ObjectNode unverified=producer("satellite-d215-bond-source-unverified");validateProducer(unverified);
+  ObjectNode blocked=bondLeg(unverified,"00865B","STRATEGIC_FUBON");assertThat(blocked.path("status").asText()).isEqualTo("BLOCKED");assertThat(receipt(blocked,"D215_FX").path("reason").asText()).isEqualTo("SOURCE_NOT_VERIFIED:market:台股:00865B");
+ }
+ @Test void d215UnknownBlockedLegsAreAcceptedButNeverActionable() throws Exception {
+  ObjectNode root=producer("satellite-d215-wait");ObjectNode leg=bondLeg(root,"00865B","STRATEGIC_FUBON");receipt(leg,"D215_FX").put("status","UNAVAILABLE").put("reason","D215_FX_EVIDENCE_UNKNOWN");validateProducer(root);
+  // An ACTIONABLE bond or VT leg needs a PASS D215_FX; WAIT, UNKNOWN and SOURCE_NOT_VERIFIED are rejected there.
+  for(String[] c:java.util.List.of(new String[]{"BLOCK","D215_FX_WAIT_PREFERRED"},new String[]{"UNAVAILABLE","D215_FX_EVIDENCE_UNKNOWN"},new String[]{"UNAVAILABLE","SOURCE_NOT_VERIFIED:market:台股:00865B"})){
+   rejectsProducer("satellite-enabled",r->receipt(bondLeg(r,"00865B","STRATEGIC_FUBON"),"D215_FX").put("status",c[0]).put("reason",c[1]));
+   rejectsProducer("satellite-enabled",r->receipt(paceLeg(r,"VT"),"D215_FX").put("status",c[0]).put("reason",c[1].replace("台股:00865B","美股:VT")));
+  }
+  rejectsProducer("satellite-enabled",r->{var receipts=(com.fasterxml.jackson.databind.node.ArrayNode)bondLeg(r,"00865B","STRATEGIC_FUBON").path("receipts");for(int i=receipts.size()-1;i>=0;i--)if("D215_FX".equals(receipts.get(i).path("ruleId").asText()))receipts.remove(i);});
+  rejectsProducer("satellite-enabled",r->{var receipts=(com.fasterxml.jackson.databind.node.ArrayNode)paceLeg(r,"VT").path("receipts");for(int i=receipts.size()-1;i>=0;i--)if("D215_FX".equals(receipts.get(i).path("ruleId").asText()))receipts.remove(i);});
+  // ACTIONABLE leg referencing an unverified source is refused even with PASS.
+  rejectsProducer("satellite-enabled",r->((ObjectNode)r.path("inputSnapshot").path("sourceVector").path("market:台股:00865B")).put("validation","UNAVAILABLE").put("coverage","NONE"));
+  rejectsProducer("satellite-enabled",r->receipt(bondLeg(r,"00865B","STRATEGIC_FUBON"),"D215_FX").put("reason","D215_FX_SOMETHING_ELSE"));
+  rejectsProducer("satellite-enabled",r->((com.fasterxml.jackson.databind.node.ArrayNode)paceLeg(r,"009826").path("receipts")).add(receipt(paceLeg(r,"VT"),"D215_FX").deepCopy()));
+ }
+ @Test void d215RefsAndValueNamesAndUnitsAreExact() throws Exception {
+  rejectsProducer("satellite-enabled",r->receipt(bondLeg(r,"00865B","STRATEGIC_FUBON"),"D215_FX").putArray("inputRefs").add("fx").add("policy"));
+  rejectsProducer("satellite-enabled",r->receipt(bondLeg(r,"00719B","STRATEGIC_FUBON"),"D215_FX").putArray("inputRefs").add("fx").add("market:台股:00865B").add("policy"));
+  rejectsProducer("satellite-enabled",r->receipt(paceLeg(r,"VT"),"D215_FX").putArray("inputRefs").add("assets").add("fx").add("market:美股:VT").add("policy"));
+  rejectsProducer("satellite-enabled",r->((com.fasterxml.jackson.databind.node.ArrayNode)receipt(bondLeg(r,"00865B","STRATEGIC_FUBON"),"D215_FX").path("values")).add(fact("fxPercentile","00865B","0.5","RATIO")));
+  rejectsProducer("satellite-enabled",r->{for(JsonNode v:receipt(bondLeg(r,"00865B","STRATEGIC_FUBON"),"D215_FX").path("values"))if("fxRangePosition".equals(v.path("name").asText()))((ObjectNode)v).put("unit","PERCENT");});
+  rejectsProducer("satellite-enabled",r->{for(JsonNode v:receipt(paceLeg(r,"VT"),"D215_FX").path("values"))if("assetHigh52w".equals(v.path("name").asText()))((ObjectNode)v).put("unit","TWD");});
+  rejectsProducer("satellite-enabled",r->{for(JsonNode v:receipt(bondLeg(r,"00865B","STRATEGIC_FUBON"),"D215_FX").path("values"))if("fxHigh".equals(v.path("name").asText()))((ObjectNode)v).put("value","2");});
+  rejectsProducer("satellite-d215-wait",r->{for(JsonNode v:receipt(bondLeg(r,"00865B","EMERGENCY_CATHAY"),"D215_FX").path("values"))if("d215WaitCeilingLots".equals(v.path("name").asText()))((ObjectNode)v).put("name","d215WaitCeilingUnits").put("unit","SHARES");});
+  rejectsProducer("satellite-enabled",r->((com.fasterxml.jackson.databind.node.ArrayNode)receipt(bondLeg(r,"00865B","STRATEGIC_FUBON"),"D215_FX").path("values")).add(fact("d215WaitCeilingLots","00865B","2","LOTS")));
+ }
 }
