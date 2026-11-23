@@ -21,7 +21,7 @@ root `/Users/steven/Project/SRPP/.claude/worktrees/morning-report-missing-a652f1
 ## 要做什麼
 
 - [x] 628.1 同步凍結 `policy_manifest.json` 原始 bytes 至 backend 決策 resource；原 Ruby 產 `d201-registration.sql`（先寫暫存檔確認非空），原 Python 重產 report-same-input 與 long-short-exit golden（只變 bundle 行）；authority gate、全部 golden `--check`、formula V3 `--check`、Ruby registry 測試通過。不改 Java、DB、formula、Swagger。
-- [ ] 628.2 雙 repo feature commit／main `--no-ff` merge／push 與 `git ls-remote` 讀回 → 已合併 SQL insert-only registry（單一 transaction，前後 row JSON 比對，舊 rows 全文不變）→ run-stack 只 build／force-recreate business-services（重啟前以唯讀 SQL 證明啟動入口皆 no-op，避開報告窗與匯出排程分鐘）→ JAR bytes 讀回並立即 `--ff-only` 快轉日報工作區 → 從 SRPP 實測 9090。
+- [x] 628.2 雙 repo feature commit／main `--no-ff` merge／push 與 `git ls-remote` 讀回 → 已合併 SQL insert-only registry（單一 transaction，前後 row JSON 比對，舊 rows 全文不變）→ run-stack 只 build／force-recreate business-services（重啟前以唯讀 SQL 證明啟動入口皆 no-op，避開報告窗與匯出排程分鐘）→ JAR bytes 讀回並立即 `--ff-only` 快轉日報工作區 → 從 SRPP 實測 9090。
 
 ## 驗證
 
@@ -45,4 +45,11 @@ git diff --check
 
 ## 完成報告
 
-（發布完成後回填：registry row 讀回、容器／JAR 驗證、9090 實測收據路徑。正式 report-calculations 採用待下一個合法時窗實跑。）
+2026-11-23 10:43–10:49 完成（SRPP main `0aa83c8`、asset main `771cdd22`，兩者 `git ls-remote` 讀回一致）：
+
+- registry：單一 transaction insert bundle `885bfcffbda0c57b63763e093eb854bf6e66c29b4f52743dc85edd5a4c05c956`；舊 75 列全文不變、新 row 四欄與 SQL 原文一致。
+- 部署：從乾淨 asset main build／force-recreate business-services（image `5bad6038…`），12 秒 healthy；JAR 內 policy_manifest、model_inputs、9090-api-swagger.md、d201-registration.sql、d201-policy-document.json 與合併來源逐位元相同。啟動入口全部 no-op（指數 self-heal 略過、分析無需補跑、快照 roll 0、無備份補跑）。
+- 日報工作區 `/Users/steven/Project/SRPP` `--ff-only` 至 main；`verify_9090.py` PASS；report-calculations 精確指紋 GET（Claude／Codex）皆 200，僅為診斷。
+- 驗證：9 條 `--check`、ruby 6 runs／264 assertions／0 failures、`spec-check` 0 BLOCK、Java 針對性測試 213 個 0 失敗。
+- 審查：Codex 額度用完，Claude 審查代理三輪（前兩輪各修一處驗證器漏洞，第 3 輪可通過）。
+- 收據：SRPP `reports/t628-release-20261123/`。正式 report-calculations 採用待今天 12:00 午報實跑。
