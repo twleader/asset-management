@@ -8,7 +8,7 @@
     "README.md": "544dda0a280a6993102f4924f750c26b9ba16b1477ce90655e3f728b6b3c0ed3",
     "assumptions/bond_forward_yields.json": "1cb1e2ae47f25c247bd796801c3390b5cdd5b0927593b7962c3411db62fa7ccd",
     "assumptions/core_sell_watch_legacy_policies.json": "9806bd6d5a84f3ecf07ebba6f84be6eb098e939382ff0ec756b495e15eea9da9",
-    "assumptions/daily_runtime_contract.json": "36700ac2f6ea1aca127d0c345bda73a20d395073486ced9a99b8d9ac5a53fa12",
+    "assumptions/daily_runtime_contract.json": "621fb7f4efcde41123478bf134a6155da9eb956cc6ec3b317fe8eb2771f03499",
     "assumptions/financial.md": "cb4313c74f584877d16adc2c62b7eb07bfbf7503d3ff93ff0493914d0ac856ab",
     "assumptions/market.md": "48942a68a9c1a1b3b50aa02fe22632bada67e63757c06127fdc08da73bb2836b",
     "assumptions/model_inputs.json": "e9e561a9fe5d8febffc480a20b2b2c013bf9c0d1469e9f37a000978e60c7f46d",
@@ -30,11 +30,11 @@
     "docs/CORE_TACTICAL_POLICY.md": "58c6e17e7860a1d2dc3a87a28d89a49aa86794a01d6d9b35326455cad0ab11f2",
     "docs/CURRENT_PLAN.md": "c4ee0168c1a848ffbd9d27356192975b27794e72daa36b620c36d0629f2a6b36",
     "docs/D107_LAYERED_SWAGGER_PROPOSAL.md": "a53252d72d02719a7e651c11f2e97d0a7cc45f50ff47deacb8db98e38a8c2ccf",
-    "docs/DAILY_TRADING_AUTOMATION.md": "1ac8e8273d2aad772d8942dbfb49a99d4d33bda746c57e086ff1c7adadc5576c",
+    "docs/DAILY_TRADING_AUTOMATION.md": "8739e71359b05085c9063b103b84ecba9dd3e9e7d6b1acb464e1e1627f2e7557",
     "docs/DATA_FETCH_RULES.md": "edeb64fe189c1a006cd56df46d75748600b5afb56b97faf91177ded336be5c50",
     "docs/DECISION_LOG.md": "b5f631975bbe772d0b00e5401fe9dc09ba09763ed71c3774e93347bf77ca5355",
     "docs/EMAIL_CORE_TEMPLATE_SAMPLE.html": "94ba972851a025e4be88d21002c884a7705d643c2fb08dba7499706600322e09",
-    "docs/EMAIL_HTML_STYLE.md": "c3665395c905dab30657293835e5a563ca394f5b32e10f7cfa9f5644cae788b5",
+    "docs/EMAIL_HTML_STYLE.md": "2784c5c5e40680836c652117f9abf018c0bbc7e3ca596360056e4964852d8ea1",
     "docs/EMAIL_TEMPLATE_SAMPLE.html": "633c63b4c209375c0222add2b8264408ffec587bd120654a5e60cc772ca83801",
     "docs/EVENT_EVIDENCE_INGEST_9090_API_SPEC.md": "e2758e6b3ee2a90cad2315f04747836d8afb2503079bff760b3cd58972c3f62e",
     "docs/HIGH_DIVIDEND_STABILIZATION.md": "4a98dcaae56bcad3e53b096f633a84eca4a851c98b441f9ffa3db91531f089c4",
@@ -243,8 +243,8 @@
     "scripts/us_tactical_order_check.py": "931aedbef8b7970a7996af1af80dfd70448a4c24e64c16fd5b3b495a801fb86d",
     "scripts/usd_asset_fx_preference.py": "d5ac579938a7cf529b3a44d19bb6488a2f3c83b5e825d5c6d02b7c04e2330af7",
     "scripts/verify_completed_technicals.py": "3b77fb8b31c0b3228fcf71460c6d435c91085dfd6e23844f8a05f80e99f8a2dd",
-    "scripts/verify_email_html.mjs": "48de9832b710cf812fbf23f40b5ca90745baf3d9d819f748cbb8b9c6fee02b1d",
-    "scripts/verify_email_html.test.mjs": "5c2331f36d24b94b3def07454be7ac4fb3a2ceea4aea6e6744e7556b904b3b29",
+    "scripts/verify_email_html.mjs": "8c8321957f8de5042de30823163b233c4b1c6920ea02d35e5b1718e4a0731d87",
+    "scripts/verify_email_html.test.mjs": "dd7c574603ff889b4ea7802f2f2ed6e58f34dffb0b6d476881d04fe4a98bf5e9",
     "scripts/verify_model_outputs.py": "a5f80383c8a228b3e6fc11efdc8d97edac52b2a84ac18eaa08ca5a6647b64491",
     "scripts/verify_pack_agent_result.py": "486f543db80752f60810dee68ac9d23dfecd703265b2895a7e2d65c6fb8a0767",
     "scripts/verify_policy_consistency.mjs": "081d3b1250bc7484ad3b7af2a8c785c5e0ef25d464b7ffa6cc29d820e866307c",
@@ -259,5 +259,5 @@
     "scripts/voo_bridge.py": "dc1735c2d35b2bcc7fbdd087175c945406986a05d42c594c694ae5bd6972d6bd",
     "scripts/voo_bridge_proxy.py": "3a7bd68cc8202bbf039641afa13dac5a4b228cf04e7c63159cf1ffa9b2ddf590"
   },
-  "POLICY_BUNDLE_SHA256": "a64154457d4f325b193b25aa429bcad672126aa3345fb5d26a766af928c3d2a9"
+  "POLICY_BUNDLE_SHA256": "885bfcffbda0c57b63763e093eb854bf6e66c29b4f52743dc85edd5a4c05c956"
 }

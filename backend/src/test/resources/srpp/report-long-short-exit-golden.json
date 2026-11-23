@@ -12491,6 +12491,6 @@
     "test_long_short_term_exit.py": "47661e96d8a3b47fe1071a073f1b37d4d362c743f40807bb740fef6400e40658",
     "test_short_term_sleeve.py": "1ecc80296e97c20793d24c47a386bbdf6f5274c789d0ce10a47c4a5cd9337a02"
   },
-  "policyBundleSha256": "a64154457d4f325b193b25aa429bcad672126aa3345fb5d26a766af928c3d2a9",
+  "policyBundleSha256": "885bfcffbda0c57b63763e093eb854bf6e66c29b4f52743dc85edd5a4c05c956",
   "schema": "SRPP_LONG_SHORT_EXIT_GOLDEN_V1"
 }
