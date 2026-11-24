@@ -14364,3 +14364,8 @@ BFF validator 對 ACTIONABLE 債券／VT 腿要求 D215_FX PASS，並核對精�
 ### Task 630 美股交易雷達通知
 
 既有設定 API 與 BFF 使用 `(stockCode, market)`，市場擴為台股及美股，保留 owner 隔離與既有狀態選項。`PriceStreamService` 從既有 `price-update` 分流；美股只接受明示 `LIVE` 且 `closed=false` 的個股事件，並且通知評估只採用品質合格的美股 `LIVE` 決策，避免收盤回填或失效報價改動基準。同一輪台股 `0000` 展開全部台股設定，其他事件依市場與代號選 active 設定；台股展開與美股事件可同輪處理，單一市場組一次 `MarketSnapshot`、單一設定評估一次。Email 沿用收件人合併機制，由 `StockDecision.market()` 提供各列市場。無 DB、行情 producer、排程或交易雷達規則變更。
+
+
+### Task 631 事件反彈退潮 authority 發布
+
+SRPP 台股與美股事件反彈退潮提示只供日報風險說明，原交易雷達 action、交易閘門、資金及限價規則維持；資產端只發布對應 authority 身分，不新增 API、計算公式、producer、DB schema、排程或交易權限。model_inputs、Swagger、formula manifest 與 calculator hashes 應保持原 bytes。以凍結 SRPP manifest 原 bytes 同步 backend，由既有 generator 重產 SQL 與 golden，golden 金融輸出保持不變。兩 repo feature commit、main no-ff merge、push 並精確 remote readback 後才執行 insert-only registry；舊 rows 不更新或刪除。之後由乾淨 main rebuild/recreate business-services、驗 healthy、新 image 與 JAR authority bytes，再從 SRPP host 對 9090 作唯讀 GET 實測。夜間不補造正式日報採用，report-calculations 合法時窗驗收保留 NOT_YET_EXECUTED。
