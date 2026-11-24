@@ -197,4 +197,20 @@ class FubonInventoryWriterTest {
                 .dividendRate(rate == null ? null : new BigDecimal(rate))
                 .currency("TWD").displayOrder(order).build();
     }
+
+    @Test void identicalRefreshPreservesPersistedRowAndPriceUpdateStillRecalculatesTheSameIdentity() {
+        StockHolding previous=holding("2330",fubon,"100","90",null,"0.05",1);previous.setId(91001L);snapshot.getStocks().add(previous);
+        var original=new FubonInventoryWriter.PreparedPosition("2330",1,new BigDecimal("90"),new BigDecimal("100"),"台積電");
+        writer.replace(9L,7L,snapshot.getSnapshotDate(),List.of(original),false);
+        writer.replace(9L,7L,snapshot.getSnapshotDate(),List.of(original),false);
+        assertThat(snapshot.getStocks()).containsExactly(previous);assertThat(snapshot.getStocks().getFirst()).isSameAs(previous);assertThat(previous.getId()).isEqualTo(91001L);
+        writer.replace(9L,7L,snapshot.getSnapshotDate(),List.of(new FubonInventoryWriter.PreparedPosition("2330",1,new BigDecimal("90"),new BigDecimal("120"),"台積電")),false);
+        assertThat(snapshot.getStocks().getFirst()).isSameAs(previous);assertThat(previous.getId()).isEqualTo(91001L);assertThat(previous.getCurrentValue()).isEqualByComparingTo("120");assertThat(previous.getEstimatedDividend()).isEqualByComparingTo("6");assertThat(snapshot.getTotalAssets()).isEqualByComparingTo("120");
+    }
+    @Test void duplicateIncomingIdentityIsRejectedBeforeMutatingOrPersistingTheCurrentScope() {
+        StockHolding previous=holding("2330",fubon,"100","90",null,null,1);previous.setId(91001L);snapshot.getStocks().add(previous);
+        var position=new FubonInventoryWriter.PreparedPosition("2330",1,new BigDecimal("90"),new BigDecimal("100"),"台積電");
+        assertThatThrownBy(()->writer.replace(9L,7L,snapshot.getSnapshotDate(),List.of(position,position),false)).isInstanceOf(FubonInventoryWriter.CommitRejected.class).hasMessage("INVALID_PREPARED_POSITION");
+        assertThat(snapshot.getStocks()).containsExactly(previous);verify(snapshotRepository,never()).saveAndFlush(snapshot);
+    }
 }

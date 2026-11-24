@@ -7,7 +7,7 @@
 | 項目 | 值 |
 | --- | --- |
 | OpenAPI | `3.1.0` |
-| 契約版本 | `1.29.0` |
+| 契約版本 | `1.30.0` |
 | AI 流程觀測契約版本 | `1.4.0` |
 | 對外路徑 | 28 條：23 個 `GET`、5 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
@@ -9000,7 +9000,7 @@ Task497 唯讀投影；僅輸出 package 內台股 universe 的十二筆固定�
 
 ### 26. `GET /api/public/srpp/report-calculations`
 
-Task489：GET只讀已發布immutable包，零計算/producer/worker/vendor/DB或Redis寫入/通知/email/券商交易。所有錯誤亦不觸發API error-log ingest；BFF與Nginx背景錯誤tailer為此exact GET具名排除persist，routecatalog只描述能力身份。背景每60秒cached日曆先行，在09:05–12:00與12:00–14:00發布對應slot；來源晚到重試、revision變動新ID，同輸入共享基底只算一次。Task537：同一已確認台股交易日14:00後，若當前owner／policy／Swagger的12:00 scope缺任一consumer包，背景以canonical DB/cache真實capture時間初始化非可執行診斷包；兩consumer皆存在即跳過，鎖內重查，每程序每scope最多3次失敗嘗試。publication-context來源標記AFTER_CLOSE_INITIALIZATION並受input/content hash保護；此模式拒絕actionable或正數量／限價／金額，不改寫計算輸出，不回補前日或09:05，不觸發vendor／券商／刷新。GET可於同日晚間純讀該真實PARTIAL／UNAVAILABLE診斷包，不代表正式金融採納或交易授權。每個query恰好一次，不接受未知/重複/空值/body/caller rawInput或建議；ACTIVE owner預設configured-admin，lookup5秒且caller Reactor identity清除。BFF驗全schema、exact owner/consumer/hash/clock、source refs、JCS來源原文與input/content hash、coverage、Decimal與positive-leg gates。12模組每項品質獨立，未完成公式scope固定NOT_EVALUATED/CALCULATOR_SCOPE_NOT_VERIFIED，不以null補0或聲稱COMPLETE；正式broker pending/subaccount缺少維持阻擋。consumer事件NOT_BOUND，未自動加入SRPP排程allowlist。成功example為isolated synthetic wire，非真交易日业务正例。
+Task629：未指定calculationRunId的latest讀取，先驗已發布immutable包全部scope/hash，再純讀當前同owner的DB完整靜態snapshot全文作比對；snapshot ID相同不代表內容相同，缺失、讀取失敗或全文不符一律503 CONTEXT_NOT_READY，等待背景producer自然發布匹配新包。指定calculationRunId時僅讀該歷史immutable包並驗原owner/consumer/日期/slot/policy/Swagger/hash，不與當前已變動snapshot比較。零計算/producer/worker/vendor/DB或Redis寫入/通知/email/券商交易。所有錯誤亦不觸發API error-log ingest；BFF與Nginx背景錯誤tailer為此exact GET具名排除persist，routecatalog只描述能力身份。背景每60秒cached日曆先行，在09:05–12:00與12:00–14:00發布對應slot；來源晚到重試、revision變動新ID，同輸入共享基底只算一次。Task537：同一已確認台股交易日14:00後，若當前owner／policy／Swagger的12:00 scope缺任一consumer包，背景以canonical DB/cache真實capture時間初始化非可執行診斷包；兩consumer皆存在即跳過，鎖內重查，每程序每scope最多3次失敗嘗試。publication-context來源標記AFTER_CLOSE_INITIALIZATION並受input/content hash保護；此模式拒絕actionable或正數量／限價／金額，不改寫計算輸出，不回補前日或09:05，不觸發vendor／券商／刷新。GET可於同日晚間純讀該真實PARTIAL／UNAVAILABLE診斷包，不代表正式金融採納或交易授權。每個query恰好一次，不接受未知/重複/空值/body/caller rawInput或建議；ACTIVE owner預設configured-admin，lookup5秒且caller Reactor identity清除。BFF驗全schema、exact owner/consumer/hash/clock、source refs、JCS來源原文與input/content hash、coverage、Decimal與positive-leg gates。12模組每項品質獨立，未完成公式scope固定NOT_EVALUATED/CALCULATOR_SCOPE_NOT_VERIFIED，不以null補0或聲稱COMPLETE；正式broker pending/subaccount缺少維持阻擋。consumer事件NOT_BOUND，未自動加入SRPP排程allowlist。成功example為isolated synthetic wire，非真交易日业务正例。
 
 #### 授權
 
@@ -9031,7 +9031,7 @@ Task489：GET只讀已發布immutable包，零計算/producer/worker/vendor/DB�
 | `404` | application/problem+json: SrppReportProblem | 固定七欄RFC9457問題；只有日曆/context暫缺可重試，來源某模組缺少以200逐欄品質呈現。 |
 | `409` | application/problem+json: SrppReportProblem | 固定七欄RFC9457問題；只有日曆/context暫缺可重試，來源某模組缺少以200逐欄品質呈現。 |
 | `502` | application/problem+json: SrppReportProblem | 固定七欄RFC9457問題；只有日曆/context暫缺可重試，來源某模組缺少以200逐欄品質呈現。 |
-| `503` | application/problem+json: SrppReportProblem | 固定七欄RFC9457問題；只有日曆/context暫缺可重試，來源某模組缺少以200逐欄品質呈現。 |
+| `503` | application/problem+json: SrppReportProblem | 固定七欄RFC9457問題；CONTEXT_NOT_READY包含尚無已發布包，以及latest包與當前同owner DB完整靜態snapshot不符、缺失或無法讀取，背景producer重新發布匹配來源前保持未就緒。固定calculationRunId不做當前snapshot比對。只有日曆/context暫缺可重試，來源某模組缺少以200逐欄品質呈現。 |
 | `405` | text/html: string | Gateway拒絕同path非GET method，Allow固定GET。 |
 | `504` | text/html: string | Gateway上游逾時，未經BFF成功schema驗證。 |
 
@@ -9650,7 +9650,7 @@ Task489：GET只讀已發布immutable包，零計算/producer/worker/vendor/DB�
     }
   },
   "503": {
-    "description": "固定七欄RFC9457問題；只有日曆/context暫缺可重試，來源某模組缺少以200逐欄品質呈現。",
+    "description": "固定七欄RFC9457問題；CONTEXT_NOT_READY包含尚無已發布包，以及latest包與當前同owner DB完整靜態snapshot不符、缺失或無法讀取，背景producer重新發布匹配來源前保持未就緒。固定calculationRunId不做當前snapshot比對。只有日曆/context暫缺可重試，來源某模組缺少以200逐欄品質呈現。",
     "headers": {
       "Cache-Control": {
         "description": "所有業務成功/問題回應固定 private, no-store；不以共享cache洩露owner資料。",

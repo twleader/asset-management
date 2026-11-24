@@ -25,6 +25,8 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
 
 /** Atomic replacement of the Fubon Taiwan stock scope; adapter I/O is completed before entry. */
 @Service
@@ -90,6 +92,14 @@ public class FubonInventoryWriter {
             throw new CommitRejected("BROKER_MISSING");
         }
 
+        List<PreparedPosition> sorted = positions.stream()
+                .peek(this::validatePrepared)
+                .sorted(Comparator.comparing(PreparedPosition::stockCode))
+                .toList();
+        Set<String> incomingCodes = new HashSet<>();
+        for (PreparedPosition position : sorted) {
+            if (!incomingCodes.add(position.stockCode())) throw new CommitRejected("INVALID_PREPARED_POSITION");
+        }
         Map<String, List<StockHolding>> oldScope = new HashMap<>();
         for (StockHolding stock : snapshot.getStocks()) {
             if (isFubonTw(stock)) {
@@ -102,13 +112,11 @@ public class FubonInventoryWriter {
                 .filter(order -> order != null)
                 .max(Integer::compareTo)
                 .orElse(-1) + 1;
-        snapshot.getStocks().removeIf(this::isFubonTw);
-
-        List<PreparedPosition> sorted = positions.stream()
-                .sorted(Comparator.comparing(PreparedPosition::stockCode))
-                .toList();
+        // Preserve the identity of a uniquely identified row, even when its source price/cost changes.
+        // Removed symbols and ambiguous old duplicates still use the original full-replacement semantics.
+        snapshot.getStocks().removeIf(stock -> isFubonTw(stock)
+                && (!incomingCodes.contains(stock.getStockCode()) || oldScope.get(stock.getStockCode()).size() != 1));
         for (PreparedPosition position : sorted) {
-            validatePrepared(position);
             BigDecimal shares = BigDecimal.valueOf(position.shares());
             // The verified broker inventory mean is the cost authority, independent of fill-history access.
             BigDecimal investmentCost = checkedMoney(position.costPrice().multiply(shares));
@@ -143,24 +151,23 @@ public class FubonInventoryWriter {
                 displayOrder = matchingOrder != null ? matchingOrder : nextDisplayOrder++;
             }
 
-            StockHolding replacement = StockHolding.builder()
-                    .snapshot(snapshot)
-                    .stockCode(position.stockCode())
-                    .market(MARKET_TW)
-                    .broker(broker)
-                    .shares(shares)
-                    .investmentCost(investmentCost)
-                    .currentValue(currentValue)
-                    .estimatedDividend(estimatedDividend)
-                    .dividendRate(dividendRate)
-                    .currency("TWD")
-                    .originalCurrencyValue(null)
-                    .transactionType(null)
-                    .transactionDate(previousTransactionDate)
-                    .transactionExchangeRate(null)
-                    .displayOrder(displayOrder)
-                    .build();
-            snapshot.getStocks().add(replacement);
+            StockHolding replacement = old.size() == 1 ? old.getFirst() : new StockHolding();
+            replacement.setSnapshot(snapshot);
+            replacement.setStockCode(position.stockCode());
+            replacement.setMarket(MARKET_TW);
+            replacement.setBroker(broker);
+            replacement.setShares(shares);
+            replacement.setInvestmentCost(investmentCost);
+            replacement.setCurrentValue(currentValue);
+            replacement.setEstimatedDividend(estimatedDividend);
+            replacement.setDividendRate(dividendRate);
+            replacement.setCurrency("TWD");
+            replacement.setOriginalCurrencyValue(null);
+            replacement.setTransactionType(null);
+            replacement.setTransactionDate(previousTransactionDate);
+            replacement.setTransactionExchangeRate(null);
+            replacement.setDisplayOrder(displayOrder);
+            if (old.size() != 1) snapshot.getStocks().add(replacement);
         }
 
         aggregateCalculator.recalculate(snapshot);

@@ -9,6 +9,7 @@ import com.steven.assets.service.*;
 import com.steven.assets.service.srpp.SrppCaptureProblem;
 import com.steven.assets.service.srpp.report.SrppRadarPolicy;
 import com.steven.assets.srpp.SrppJcs;
+import com.steven.assets.srpp.SrppAssetSnapshotIdentity;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import java.math.*;
@@ -65,7 +66,8 @@ public class DecisionInputCaptureAdapter implements DecisionInputCapturePort {
         // A name-level projection must never classify another holding with the same name and a different identity.
         unresolvedFundNames.forEach(resolvedFunds::remove);
         source(sources,vector,"classifications",classSource,"canonical-master-overrides",asOf,classificationMissing.isEmpty()?"COMPLETE":"PARTIAL",classificationMissing.isEmpty()?"VERIFIED":"UNAVAILABLE");
-        source(sources,vector,"assets",json(a),"snapshot-"+a.snapshot().id(),asOf,"COMPLETE","VERIFIED");
+        JsonNode assetSource = json(a);
+        source(sources,vector,"assets",assetSource,SrppAssetSnapshotIdentity.revision(a.snapshot().id(),assetSource.path("snapshot")),asOf,"COMPLETE","VERIFIED");
         ObjectNode calendar=JsonNodeFactory.instance.objectNode();calendar.put("tradingDate",date.toString());calendar.put("tw",true);calendar.set("weekCalendar",weekCalendar);ArrayNode sessionRows=calendar.putArray("completedSessions");sessions.forEach(d->sessionRows.add(d.toString()));
         source(sources,vector,"calendar",calendar,"calendar-"+date,asOf,sessions.size()==p.lookback()&&weekVerified?"COMPLETE":"PARTIAL",sessions.size()==p.lookback()&&weekVerified?"VERIFIED":"UNAVAILABLE");
         ObjectNode policy=JsonNodeFactory.instance.objectNode();policy.put("rawModelBytes",authority.modelBytes());policy.put("rawManifestBytes",authority.manifestBytes());policy.put("bundleHash",p.bundleHash());policy.set("typedPolicy",json(p));
@@ -156,6 +158,6 @@ public class DecisionInputCaptureAdapter implements DecisionInputCapturePort {
         return new Budget(today,week,emergency,verified,reserved,strategicReserved,emergencyReserved,bondReserved,feesReserved);
     }
     private JsonNode json(Object o){return normalize(mapper.valueToTree(o));}
-    static JsonNode normalize(JsonNode n){if(n==null||n.isNull())return NullNode.instance;if(n.isFloatingPointNumber()||n.isBigDecimal())return TextNode.valueOf(n.decimalValue().stripTrailingZeros().toPlainString());if(n.isObject()){ObjectNode o=JsonNodeFactory.instance.objectNode();n.fields().forEachRemaining(e->o.set(e.getKey(),normalize(e.getValue())));return o;}if(n.isArray()){ArrayNode a=JsonNodeFactory.instance.arrayNode();n.forEach(v->a.add(normalize(v)));return a;}return n;}
+    static JsonNode normalize(JsonNode n){return SrppAssetSnapshotIdentity.normalize(n);}
     private static void source(ObjectNode sources,ObjectNode vector,String id,JsonNode body,String revision,Instant at,String coverage,String validation){sources.set(id,body);ObjectNode receipt=vector.putObject(id);receipt.put("sourceId",id);receipt.put("revision",revision);receipt.put("capturedAt",at.toString());receipt.put("sha256",SrppJcs.hash(body));receipt.put("coverage",coverage);receipt.put("validation",validation);}
 }
