@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -77,5 +78,20 @@ class TradingRadarNotificationSettingServiceTest {
                 new TradingRadarNotificationDto.RecipientOption(6L, "unnamed@example.com", false, null)),
                 response.recipients());
         verify(recipientRepo).findAllByOrderByCreatedAtAsc();
+    }
+
+    @Test
+    void 美股個股可讀取通知設定但台股大盤與其他市場仍被拒絕() {
+        when(settingRepo.findByStockCodeAndMarket("AMD", "美股")).thenReturn(Optional.empty());
+        when(recipientRepo.findAllByOrderByCreatedAtAsc()).thenReturn(List.of());
+        TradingRadarNotificationSettingService service = new TradingRadarNotificationSettingService(
+                settingRepo, stateRepo, recipientLinkRepo, recipientRepo, tenantGuard);
+
+        TradingRadarNotificationDto.Response response = service.get("amd", "美股");
+
+        assertEquals("AMD", response.stockCode());
+        assertEquals("美股", response.market());
+        assertThrows(IllegalArgumentException.class, () -> service.get("0000", "台股"));
+        assertThrows(IllegalArgumentException.class, () -> service.get("AAPL", "英股"));
     }
 }

@@ -103,6 +103,54 @@ class TradingRadarNotificationServiceTest {
                 null, null, null, null, null, null);
     }
 
+    private static TradingRadarDto.StockDecision usDecision(boolean dataComplete, String quoteStatus) {
+        return new TradingRadarDto.StockDecision(
+                "AMD", "AMD", "美股", "STOCK", false, false,
+                "HOLD", "續抱", 70,
+                "NONE", "無", List.of(), List.of(),
+                dataComplete, BigDecimal.TEN, BigDecimal.ONE,
+                quoteStatus, "2026-08-09T10:00:00-04:00", "2026-08-09",
+                null, null, null, null, null,
+                null, null, null, null, null,
+                List.of(), List.of(), null, null, null,
+                null, null, null, null, null, null);
+    }
+
+    @Test
+    void 有效美股LIVE事件會建立首次baseline() {
+        setting.setStockCode("AMD");
+        setting.setMarket("美股");
+        setting.setInitialized(false);
+        when(settingRepo.findByActiveTrueAndStockCodeAndMarket("AMD", "美股")).thenReturn(List.of(setting));
+        when(tradingRadarService.buildMarketSnapshot("美股")).thenReturn(SNAPSHOT);
+        when(tradingRadarService.evaluateForNotification(eq("AMD"), eq("美股"), anyBoolean(), eq(SNAPSHOT)))
+                .thenReturn(usDecision(true, "LIVE"));
+
+        service.queueEvaluation("AMD", "美股");
+        service.flushEvaluations();
+
+        assertEquals("HOLD", setting.getLastAction());
+        verify(settingRepo).save(setting);
+        verify(dispatcher, never()).enqueue(any(), any(), any());
+    }
+
+    @Test
+    void 美股非LIVE或資料不完整決策不改寫baseline也不派信() {
+        setting.setStockCode("AMD");
+        setting.setMarket("美股");
+        when(settingRepo.findByActiveTrueAndStockCodeAndMarket("AMD", "美股")).thenReturn(List.of(setting));
+        when(tradingRadarService.buildMarketSnapshot("美股")).thenReturn(SNAPSHOT);
+        when(tradingRadarService.evaluateForNotification(eq("AMD"), eq("美股"), anyBoolean(), eq(SNAPSHOT)))
+                .thenReturn(usDecision(false, "LIVE"));
+
+        service.queueEvaluation("AMD", "美股");
+        service.flushEvaluations();
+
+        assertEquals("HOLD", setting.getLastAction());
+        verify(settingRepo, never()).save(setting);
+        verify(dispatcher, never()).enqueue(any(), any(), any());
+    }
+
     /**
      * 三軌決策：{@code action} 是 1月~6月 軌（唯一寄信的那一軌），
      * {@code shortAction}／{@code swingAction} 只是同一筆決策的另外兩軌。

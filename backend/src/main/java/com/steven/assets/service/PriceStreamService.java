@@ -22,6 +22,8 @@ import reactor.core.publisher.Sinks;
 @RequiredArgsConstructor
 public class PriceStreamService {
 
+    private static final String US_MARKET = "美股";
+
     private final ObjectMapper mapper = new ObjectMapper();
     @Autowired
     @Lazy
@@ -45,7 +47,9 @@ public class PriceStreamService {
             String market = n.path("market").asText(null);
             if (code != null && market != null) {
                 stockAlertService.checkAlertsFor(code, market);
-                tradingRadarNotificationService.queueEvaluation(code, market);
+                if (shouldQueueRadarNotification(market, n)) {
+                    tradingRadarNotificationService.queueEvaluation(code, market);
+                }
             }
         } catch (Exception e) {
             log.debug("alert dispatch on price-update 失敗: {}", e.getMessage());
@@ -54,5 +58,15 @@ public class PriceStreamService {
 
     public Flux<String> stream() {
         return sink.asFlux();
+    }
+
+    /**
+     * 美股收盤校正與失效快取也會共用 {@code price-update}；它們不可改寫通知 baseline。
+     * 台股沿用既有事件語意，只有美股在 fan-out 邊界額外要求明確盤中報價。
+     */
+    static boolean shouldQueueRadarNotification(String market, JsonNode event) {
+        return !US_MARKET.equals(market)
+                || ("LIVE".equals(event.path("quoteStatus").asText())
+                && !event.path("closed").asBoolean(false));
     }
 }

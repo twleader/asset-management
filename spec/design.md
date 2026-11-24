@@ -14289,3 +14289,8 @@ STRATEGIC_PRICE僅執行原政策適用symbols規則；00881不在D188 price_pos
 ## Requirement 219／Task 615：D-227 台股高檔門檻證據
 
 日報沿用 CORE_SELL_GUARD 的通用 receipts.values 契約。只在 D-227 bundle 啟用時，從凍結的同 owner 台股正持倉及既有市場 sources 回傳 D227:<symbol>。驗證雷達 identity、交易日、版本、資料完整、即時性，並檢查兩數值範圍。正向門檻收據只代表兩項數字達標，對缺少 D-174 watch state 的報告也能獨立評估。D-227 收據值使用 d227DValue（PERCENT，0–100）及 d227Week52Position（RATIO，0–1），原本封閉的 data.facts、scope 與模組覆蓋只按 D-174 原義解讀。純報告組裝器將獨立計算的 D-227 收據加到 D-174 模組，D-174 觀察帳本缺口不影響該組裝。D-227 政策鍵位於 D-174 設定之外，沿用既有 D-174 watch 指紋與 registry 公式 V3 的精確內容。新 bundle 綁定 D-227 政策與 SRPP verifier 來源，並同步更新 policy authority 及測試資料。SRPP verifier 獨立核對同一凍結來源，將此證據標為觀察。D-227 的週期、市場方向、LLM 採納及執行條件由 SRPP 同輪判定。沿用既有 envelope、OpenAPI、路由、券商及寄信界線。
+
+
+### Task 630 美股交易雷達通知
+
+既有設定 API 與 BFF 使用 `(stockCode, market)`，市場擴為台股及美股，保留 owner 隔離與既有狀態選項。PriceStreamService 從既有 price-update 分流；美股只接受明示 LIVE 且 closed=false 的個股事件，並且通知評估只採用品質合格的美股 LIVE 決策，避免收盤回填或失效報價改動基準。同一輪台股 0000 展開全部台股設定，其他事件依市場與代號選 active 設定，單一市場組一次 MarketSnapshot、單一設定評估一次。Email 沿用收件人合併機制，由 StockDecision.market() 提供各列市場。無 DB、行情 producer、排程或交易雷達規則變更。
