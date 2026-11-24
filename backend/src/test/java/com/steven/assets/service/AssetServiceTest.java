@@ -738,4 +738,15 @@ class AssetServiceTest {
         assertThat(rolled).isFalse();
         verify(snapshotRepo, never()).save(any());
     }
+
+    @Test void fullStaticDetailUsesAStableOrderAcrossDifferentCollectionLoadingOrders() {
+        BankDeposit d1=BankDeposit.builder().id(1L).amount(BigDecimal.ZERO).build(),d2=BankDeposit.builder().id(2L).amount(BigDecimal.ZERO).build();
+        FundHolding f1=FundHolding.builder().id(3L).currentValue(BigDecimal.ZERO).build(),f2=FundHolding.builder().id(4L).currentValue(BigDecimal.ZERO).build();
+        StockHolding a=StockHolding.builder().id(5L).stockCode("0050").market("台股").displayOrder(1).build(),b=StockHolding.builder().id(6L).stockCode("00881").market("台股").displayOrder(1).build(),c=StockHolding.builder().id(7L).stockCode("00919").market("台股").displayOrder(null).build();
+        snapshot.getDeposits().addAll(List.of(d2,d1));snapshot.getFunds().addAll(List.of(f2,f1));snapshot.getStocks().addAll(List.of(c,b,a));
+        var first=service.getSnapshotDetail(snapshot);
+        java.util.Collections.reverse(snapshot.getDeposits());java.util.Collections.reverse(snapshot.getFunds());java.util.Collections.reverse(snapshot.getStocks());
+        var again=service.getSnapshotDetail(snapshot);
+        assertThat(again).isEqualTo(first);assertThat(first.deposits()).extracting(AssetSnapshotDto.DepositResponse::id).containsExactly(1L,2L);assertThat(first.funds()).extracting(AssetSnapshotDto.FundResponse::id).containsExactly(3L,4L);assertThat(first.stocks()).extracting(AssetSnapshotDto.StockResponse::id).containsExactly(5L,6L,7L);
+    }
 }

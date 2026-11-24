@@ -31,7 +31,9 @@ class SrppReportReservationCaptureTest {
         for(var module:report.path("modules")){int index=0;for(var leg:module.path("data").path("legs")){int legIndex=index++;if(!"ACTIONABLE_FOR_REPORT".equals(leg.path("status").asText())||leg.path("strategy").asText().startsWith("SATELLITE_BUILD_"))continue;expected.add(SrppJcs.sha256Hex("REPORT/"+report.path("sharedCalculationId").asText()+"/"+module.path("moduleId").asText()+"/"+legIndex));}}
         assertThat(expected).isNotEmpty();
         var reports=mock(SrppReportRepository.class);
-        doAnswer(call->{java.util.function.Consumer<String> visitor=call.getArgument(3);visitor.accept(content);return null;}).when(reports).visitUnlinkedReportReservations(eq(7L),any(),any(),any());
+        var ref=SrppReportReservationCacheTest.refForBody(content);
+        doAnswer(call->{java.util.function.Consumer<SrppReportRepository.ReservationRef> visitor=call.getArgument(3);visitor.accept(ref);return null;}).when(reports).visitUnlinkedReportReservationMetadata(eq(7L),any(),any(),any());
+        when(reports.reservationBody(ref)).thenReturn(Optional.of(content));
         var source=new SrppReportReservationCapture(mock(SrppDecisionRepository.class),reports).readReportSource(7,SrppReportFixtures.DATE.plusDays(1),"09:05",SrppReportFixtures.supported().bundleHash());
         assertThat(source.path("status").asText()).isEqualTo("VERIFIED");Set<String> actual=new TreeSet<>();
         for(var row:source.path("rows")){assertThat(row.path("strategy").asText()).doesNotStartWith("SATELLITE_BUILD_");assertThat(row.path("moduleId").asText()).isNotEqualTo("GLOBAL_EQUITY_PACE");actual.add(row.path("reservationId").asText());}

@@ -242,7 +242,7 @@ end
 document = YAML.safe_load(File.read(OPENAPI), aliases: false)
 compose = YAML.safe_load(File.read(COMPOSE), aliases: false)
 assert!(document.fetch('openapi').to_s.match?(/\A3\./), 'OpenAPI 版本必須是 3.x')
-assert!(document.dig('info', 'version') == '1.29.0', 'Task 626 後 OpenAPI info.version 必須為 1.29.0')
+assert!(document.dig('info', 'version') == '1.30.0', 'Task 629 後 OpenAPI info.version 必須為 1.30.0')
 assert!(document['security'] == [], 'OpenAPI global security 必須明確為空陣列')
 
 server_urls = document.fetch('servers').map { |server| server.fetch('url') }
@@ -1155,7 +1155,7 @@ end
 report = openapi_routes.fetch(['GET', '/api/public/srpp/report-calculations'])
 assert!(report.fetch('parameters').map { |p| p.fetch('name') } ==
           %w[email consumer tradingDate reportSlot policyBundleSha256 swaggerSha256 calculationRunId], 'report exact query parameter set')
-assert!(!report.key?('requestBody') && report.fetch('description').include?('GET只讀'), 'report GET cannot accept input or calculate')
+assert!(!report.key?('requestBody') && report.fetch('description').include?('零計算/producer/worker/vendor/DB或Redis寫入/通知/email/券商交易') && report.fetch('description').include?('純讀當前同owner'), 'report GET cannot accept input or calculate')
 assert!(report.dig('responses', '200', 'content', 'application/json', 'schema', '$ref') == '#/components/schemas/SrppReportCalculations', 'report response typed envelope')
 report_fields = %w[schemaVersion calculationRunId status identity authorityRevision sharedCalculationId inputSnapshot modules coverage executionScope tradeAuthorization placesOrders contentSha256]
 assert!(schemas.fetch('SrppReportCalculations').fetch('required') == report_fields, 'report complete envelope field identity')
@@ -1319,7 +1319,7 @@ assert!(observer_op.dig('security') == [{'AiFlowToken' => []}], '專用觀測tok
 assert!(observation.dig('components','securitySchemes','AiFlowToken','name') == 'X-AI-Flow-Token', 'exact觀測header')
 assert!(frontend_nginx_app.include?('location = /api/srpp/ai-flow/events { return 404; }'), 'frontend exact deny AI ingress')
 assert!(bff_security.include?('"/api/srpp/ai-flow/events"') && bff_security.include?('"/api/bff/ai-flow/**"'), 'BFF producer及ADMIN頁路徑授權')
-assert!(document.dig('info', 'version') == '1.29.0', 'Task626 金融 YAML 必須升為1.29.0')
+assert!(document.dig('info', 'version') == '1.30.0', 'Task629 金融 YAML 必須升為1.30.0')
 unified_markdown = File.read(swagger_copies.first)
 assert!(unified_markdown.include?('| 對外路徑 | 28 條：23 個 `GET`、5 個 `POST` |'), '統一 Swagger 完整28pairs')
 assert!(unified_markdown.include?('`GET /api/public/srpp/order-plan`') && unified_markdown.include?('`GET /api/public/srpp/symbol-rule-facts`'), '統一 Swagger 包含 Task497 兩支唯讀路徑')
@@ -1336,3 +1336,10 @@ end
 # Task588 / D218 keeps the existing fact wire closed while adding six scoped identities.
 d218_topup_names = %w[referenceHigh drawdownPct tierLots targetGap normalizedGap remainingDailyLots remainingWeeklyLots d218ObservedNoNewLowSessions d218Stabilized d218AnchorLow d218UsedBudget d218CumulativeFraction d218BudgetCeiling]
 assert!(document.dig('components', 'schemas', 'SrppReportFactDividendTopup', 'properties', 'name', 'enum').sort == d218_topup_names.sort, 'Task588 DIVIDEND_TOPUP closed fact enum must contain exactly the original seven plus D218 six identities')
+
+# Task629: latest is a pure-read current-static revision fence; explicit runs remain immutable history.
+report_read = document.dig('paths', '/api/public/srpp/report-calculations', 'get')
+report_description = report_read.fetch('description')
+assert!(report_description.include?('當前同owner的DB完整靜態snapshot全文') && report_description.include?('snapshot ID相同不代表內容相同'), 'Task629 latest compares the complete same-owner static snapshot, not ID alone')
+assert!(report_description.include?('指定calculationRunId時僅讀該歷史immutable包') && report_description.include?('不與當前已變動snapshot比較'), 'Task629 explicit run readback preserves immutable history and scope validation')
+assert!(report_read.dig('responses', '503', 'description').include?('CONTEXT_NOT_READY包含') && report_read.dig('responses', '503', 'description').include?('DB完整靜態snapshot不符'), 'Task629 current-static mismatch is a transient context-not-ready response')

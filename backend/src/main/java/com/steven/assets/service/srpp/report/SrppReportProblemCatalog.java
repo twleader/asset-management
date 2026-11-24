@@ -17,7 +17,7 @@ public final class SrppReportProblemCatalog {
         Map.entry("UPSTREAM_INVALID", new Problem(502, "SRPP upstream invalid", "已保存計算包未通過內容驗證。", false)),
         Map.entry("OWNER_UNAVAILABLE", new Problem(503, "SRPP owner unavailable", "無法確認可用資料擁有者。", false)),
         Map.entry("CALENDAR_UNAVAILABLE", new Problem(503, "Taiwan calendar unavailable", "交易日曆暫時無法確認。", true)),
-        Map.entry("CONTEXT_NOT_READY", new Problem(503, "SRPP report context not ready", "本時段的不可變計算包尚未發布。", true)),
+        Map.entry("CONTEXT_NOT_READY", new Problem(503, "SRPP report context not ready", "本時段的不可變計算包尚未就緒，或與目前靜態資產不一致。", true)),
         Map.entry("INTERNAL_ERROR", new Problem(500, "SRPP internal error", "伺服器發生未預期錯誤。", false)));
     public static Problem get(String code) { Problem p = ALL.get(code); if (p == null) throw new IllegalArgumentException("Unknown report problem"); return p; }
     public static Map<String, Object> body(String code) { Problem p = get(code); Map<String, Object> n = new LinkedHashMap<>(); n.put("type", "about:blank"); n.put("title", p.title()); n.put("status", p.status()); n.put("detail", p.detail()); n.put("instance", INSTANCE); n.put("code", code); n.put("retryable", p.retryable()); return n; }

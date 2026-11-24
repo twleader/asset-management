@@ -24,15 +24,18 @@ public class SrppReportReadService {
     private final PublishedSwaggerIdentity swagger;
     private final SrppReportAuthority authority;
     private final SrppReportRepository repository;
+    private final SrppReportAssetRevision assetRevision;
     private final Clock clock;
     @Autowired
     public SrppReportReadService(CurrentUserContext owner, MarketDataService calendar, SrppPolicyRegistryService registry,
-                                 PublishedSwaggerIdentity swagger, SrppReportAuthority authority, SrppReportRepository repository) {
-        this(owner,calendar,registry,swagger,authority,repository,Clock.system(SrppTime.TW_ZONE));
+                                 PublishedSwaggerIdentity swagger, SrppReportAuthority authority, SrppReportRepository repository,
+                                 SrppReportAssetRevision assetRevision) {
+        this(owner,calendar,registry,swagger,authority,repository,assetRevision,Clock.system(SrppTime.TW_ZONE));
     }
     SrppReportReadService(CurrentUserContext owner, MarketDataService calendar, SrppPolicyRegistryService registry,
-                          PublishedSwaggerIdentity swagger, SrppReportAuthority authority, SrppReportRepository repository,Clock clock) {
-        this.owner=owner;this.calendar=calendar;this.registry=registry;this.swagger=swagger;this.authority=authority;this.repository=repository;this.clock=clock;
+                          PublishedSwaggerIdentity swagger, SrppReportAuthority authority, SrppReportRepository repository,
+                          SrppReportAssetRevision assetRevision,Clock clock) {
+        this.owner=owner;this.calendar=calendar;this.registry=registry;this.swagger=swagger;this.authority=authority;this.repository=repository;this.assetRevision=assetRevision;this.clock=clock;
     }
     @Transactional(readOnly=true)
     public String read(MultiValueMap<String,String> values) {
@@ -50,6 +53,14 @@ public class SrppReportReadService {
         JsonNode contentIdentity=verified.path("identity");
         if(!scope.date().toString().equals(contentIdentity.path("tradingDate").asText())||!scope.slot().equals(contentIdentity.path("reportSlot").asText())||!scope.policy().equals(contentIdentity.path("policyBundleSha256").asText())||!scope.swagger().equals(contentIdentity.path("swaggerSha256").asText())||!scope.calculator().equals(verified.path("authorityRevision").path("calculatorVersion").asText()))throw new SrppReportProblem("UPSTREAM_INVALID");
         if(!saved.id().toString().equals(verified.path("calculationRunId").asText())||!saved.sharedId().toString().equals(verified.path("sharedCalculationId").asText())||!saved.contentHash().equals(verified.path("contentSha256").asText())||!saved.inputHash().equals(verified.path("inputSnapshot").path("inputSnapshotSha256").asText())||verified.path("identity").path("ownerUserId").asLong()!=ownerId||!verified.path("identity").path("consumer").asText().equals(q.consumer())||!verified.path("authorityRevision").path("modelInputsSha256").asText().equals(authority.decision().policy().modelHash())||!verified.path("authorityRevision").path("policyManifestSha256").asText().equals(authority.decision().policy().manifestHash())||!verified.path("authorityRevision").path("targetAllocationSha256").asText().equals(authority.targetsHash()))throw new SrppReportProblem("UPSTREAM_INVALID");
+        if(q.runId()==null){
+            boolean matches;
+            try{
+                JsonNode input=SrppJcs.parseStrict(verified.path("inputSnapshot").path("inputBundleJcs").asText());
+                matches=assetRevision.matches(ownerId,input.path("sources").path("assets").path("snapshot"));
+            }catch(RuntimeException unavailable){matches=false;}
+            if(!matches)throw new SrppReportProblem("CONTEXT_NOT_READY");
+        }
         return saved.content();
     }
 }

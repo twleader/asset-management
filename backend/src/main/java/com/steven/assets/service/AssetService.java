@@ -1055,6 +1055,8 @@ public class AssetService {
 
     private AssetSnapshotDto.SnapshotDetailResponse toDetailResponse(AssetSnapshot s) {
         List<AssetSnapshotDto.DepositResponse> deposits = s.getDeposits().stream()
+                .sorted(java.util.Comparator.comparing(BankDeposit::getId,
+                        java.util.Comparator.nullsLast(Long::compareTo)))
                 .map(d -> {
                     BigDecimal interest = depositEstimatedInterest(d);
                     BigDecimal interestOut = interest.compareTo(BigDecimal.ZERO) > 0 ? interest : null;
@@ -1070,6 +1072,8 @@ public class AssetService {
                 }).toList();
 
         List<AssetSnapshotDto.FundResponse> funds = s.getFunds().stream()
+                .sorted(java.util.Comparator.comparing(FundHolding::getId,
+                        java.util.Comparator.nullsLast(Long::compareTo)))
                 .map(f -> {
                     BigDecimal cv = f.getCurrentValue();
                     BigDecimal divEst = f.getEstimatedDividend();
@@ -1098,8 +1102,9 @@ public class AssetService {
         }
         final java.util.Map<Long, BigDecimal> costs = mirroredCosts == null ? java.util.Map.of() : mirroredCosts;
         List<AssetSnapshotDto.StockResponse> stocks = s.getStocks().stream()
-                .sorted(java.util.Comparator.comparing(
-                    st -> st.getDisplayOrder() != null ? st.getDisplayOrder() : Integer.MAX_VALUE))
+                .sorted(java.util.Comparator.comparing(StockHolding::getDisplayOrder,
+                        java.util.Comparator.nullsLast(Integer::compareTo))
+                        .thenComparing(StockHolding::getId, java.util.Comparator.nullsLast(Long::compareTo)))
                 .map(st -> {
                     // investmentCostTwd：USD 幣別須乘有效匯率換算台幣，供匯總顯示用（與 recalcTotals 同一 helper）
                     BigDecimal rawCost = st.getInvestmentCost() != null ? st.getInvestmentCost() : BigDecimal.ZERO;

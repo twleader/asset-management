@@ -3,9 +3,13 @@ package com.steven.assets.service.srpp.report;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.*;
 import com.steven.assets.repository.*;
+import com.steven.assets.repository.SrppReportRepository.ReservationRef;
 import com.steven.assets.srpp.SrppJcs;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.time.*;
 import java.time.temporal.TemporalAdjusters;
 import java.math.BigDecimal;
@@ -16,41 +20,35 @@ import java.util.*;
 /** Saved recommendations remain reserved until an exact canonical leg/order/fill link exists. */
 @Component
 public class SrppReportReservationCapture {
+    private static final Logger LOG=LoggerFactory.getLogger(SrppReportReservationCapture.class);
     static final Set<String> SATELLITE_STRATEGIES=Set.of(SrppReportModuleCalculator.SATELLITE_009826_STRATEGY,SrppReportModuleCalculator.SATELLITE_VT_STRATEGY);
     private final SrppDecisionRepository decisions;
     private final SrppReportRepository reports;
-    public SrppReportReservationCapture(SrppDecisionRepository decisions,SrppReportRepository reports){this.decisions=decisions;this.reports=reports;}
+    private final SrppReportReservationProjectionCache projections;
+    @Autowired
+    public SrppReportReservationCapture(SrppDecisionRepository decisions,SrppReportRepository reports){this(decisions,reports,new SrppReportReservationProjectionCache());}
+    SrppReportReservationCapture(SrppDecisionRepository decisions,SrppReportRepository reports,SrppReportReservationProjectionCache projections){this.decisions=decisions;this.reports=reports;this.projections=projections;}
     @Transactional(readOnly=true)
     public List<ObjectNode> read(long owner,LocalDate date,String slot){
         LocalDate from=date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));List<ObjectNode> out=new ArrayList<>();
         for(var run:decisions.reservations(owner,from,date))if(run.date().isBefore(date)||run.slot().compareTo(slot)<0)out.add((ObjectNode)SrppJcs.parseStrict(run.content()));
-        reports.visitPriorReportReservations(owner,from,date,slot,raw -> {
-            JsonNode report=SrppJcs.parseStrict(raw);ObjectNode legacy=JsonNodeFactory.instance.objectNode();legacy.set("identity",report.path("identity"));legacy.put("calculationRunId",report.path("calculationRunId").asText());ArrayNode candidates=legacy.putObject("decision").putArray("candidates");
-            for(JsonNode m:report.path("modules"))if("BOND_D130_D195".equals(m.path("moduleId").asText()))for(JsonNode leg:m.path("data").path("legs")){
-                ObjectNode c=JsonNodeFactory.instance.objectNode();c.put("symbol",leg.path("symbol").asText());c.put("strategy",leg.path("strategy").asText());c.put("lots",leg.path("lots").asInt());c.set("amountTwd",leg.has("amount")?leg.path("amount"):leg.path("amountTwd"));candidates.add(c);
-            }
+        reports.visitPriorReportReservationMetadata(owner,from,date,slot,ref -> {
+            ObjectNode summary=projection(owner,ref);ObjectNode legacy=JsonNodeFactory.instance.objectNode();legacy.set("identity",identity(ref));legacy.put("calculationRunId",ref.id().toString());legacy.putObject("decision").set("candidates",summary.path("bondCandidates"));
             out.add(legacy);
         });
+        logCache(owner);
         return List.copyOf(out);
     }
     @Transactional(readOnly=true)
     public ObjectNode readReportSource(long owner,LocalDate date,String slot,String currentPolicy){
         ObjectNode source=JsonNodeFactory.instance.objectNode();source.put("ownerUserId",owner);source.put("tradingDate",date.toString());source.put("policyBundleSha256",currentPolicy);source.put("status","VERIFIED");source.put("verified",true);source.put("coverage","COMPLETE");ArrayNode rows=source.putArray("rows");Set<String> seen=new HashSet<>();
-        reports.visitUnlinkedReportReservations(owner,date,slot,raw -> {
-            JsonNode report=SrppReportEnvelopeValidator.validate(raw),identity=report.path("identity");
-            if(identity.path("ownerUserId").asLong()!=owner)throw new SrppReportProblem("UPSTREAM_INVALID");
-            for(JsonNode module:report.path("modules")){int index=0;for(JsonNode leg:module.path("data").path("legs")){
-                int legIndex=index++;if(!"ACTIONABLE_FOR_REPORT".equals(leg.path("status").asText()))continue;
-                JsonNode quantity=leg.path("units").isNull()?leg.path("lots"):leg.path("units");
-                if(quantity.isMissingNode()||new BigDecimal(quantity.asText()).signum()<=0)continue;
-                // D-143/D-234 build pace is consumed only by confirmed fills; an unfilled proposal reserves nothing across packages.
-                if(SATELLITE_STRATEGIES.contains(leg.path("strategy").asText()))continue;
-                String key=report.path("sharedCalculationId").asText()+"/"+module.path("moduleId").asText()+"/"+legIndex;if(!seen.add(key))continue;
-                ObjectNode row=rows.addObject();row.put("origin","REPORT");row.putNull("decisionRunId");row.put("reservationId",SrppJcs.sha256Hex("REPORT/"+key));row.set("calculationRunId",report.path("calculationRunId"));row.set("sharedCalculationId",report.path("sharedCalculationId"));row.set("tradingDate",identity.path("tradingDate"));row.set("reportSlot",identity.path("reportSlot"));row.set("policyBundleSha256",identity.path("policyBundleSha256"));row.set("moduleId",module.path("moduleId"));row.put("legIndex",legIndex);
-                for(String field:List.of("symbol","market","strategy","action","lots","units","amount","currency","fees"))row.set(field,leg.path(field));
-                row.put("status","ACTIVE");
-                row.putNull("linkedOrderId");row.putNull("linkedFillId");
-            }}
+        Set<SrppReportReservationProjectionCache.Key> missingKeys=projections.ownerKeys(owner);
+        reports.visitUnlinkedReportReservationMetadata(owner,date,slot,ref -> {
+            var key=SrppReportReservationProjectionCache.key(ref);ObjectNode summary=projection(owner,ref);
+            // This bounded initial snapshot only shrinks, even when admissions saturate
+            // or another reader admits new entries during the metadata traversal.
+            missingKeys.remove(key);
+            for(JsonNode row:summary.path("reportRows"))if(seen.add(row.path("reservationId").asText()))rows.add(row);
         });
         ArrayNode missing=source.putArray("missing");
         for(var run:decisions.unlinkedReservations(owner,date,slot)){
@@ -67,7 +65,44 @@ public class SrppReportReservationCapture {
                 else{row.putNull("fees");missing.add("LEGACY_RESERVATION_FEES_UNAVAILABLE:"+run.id());}
             }
         }
+        // A failed later row or legacy source must not trigger partial-traversal pruning.
+        projections.pruneMissing(owner,missingKeys);logCache(owner);
         if(!missing.isEmpty())source.put("status","UNAVAILABLE").put("verified",false).put("coverage","PARTIAL");
         return source;
     }
+    private ObjectNode projection(long owner,ReservationRef ref){
+        if(ref==null||ref.scope()==null||ref.scope().owner()!=owner)throw new SrppReportProblem("UPSTREAM_INVALID");
+        return projections.get(SrppReportReservationProjectionCache.key(ref),()->loadProjection(ref));
+    }
+    private ObjectNode loadProjection(ReservationRef ref){
+        String raw=reports.reservationBody(ref).orElseThrow(()->new SrppReportProblem("UPSTREAM_INVALID"));
+        JsonNode report=SrppReportEnvelopeValidator.validate(raw),identity=report.path("identity"),snapshot=report.path("inputSnapshot");var scope=ref.scope();
+        if(!ref.id().toString().equals(report.path("calculationRunId").asText())||!ref.sharedId().toString().equals(report.path("sharedCalculationId").asText())
+                ||!"FINAL".equals(ref.status())||!ref.status().equals(report.path("status").asText())||scope.owner()!=identity.path("ownerUserId").asLong()
+                ||!scope.date().toString().equals(identity.path("tradingDate").asText())||!scope.slot().equals(identity.path("reportSlot").asText())
+                ||!scope.policy().equals(identity.path("policyBundleSha256").asText())||!scope.swagger().equals(identity.path("swaggerSha256").asText())
+                ||!scope.calculator().equals(report.path("authorityRevision").path("calculatorVersion").asText())||!ref.consumer().equals(identity.path("consumer").asText())
+                ||!ref.inputHash().equals(snapshot.path("inputSnapshotSha256").asText())||!ref.contentHash().equals(report.path("contentSha256").asText())
+                ||!ref.stateHash().equals(snapshot.path("sourceVector").path("core-state").path("sha256").asText()))throw new SrppReportProblem("UPSTREAM_INVALID");
+        ObjectNode summary=JsonNodeFactory.instance.objectNode();ArrayNode candidates=summary.putArray("bondCandidates"),rows=summary.putArray("reportRows");
+        for(JsonNode module:report.path("modules")){int index=0;for(JsonNode leg:module.path("data").path("legs")){
+            int legIndex=index++;
+            if("BOND_D130_D195".equals(module.path("moduleId").asText())){
+                ObjectNode c=candidates.addObject();c.put("symbol",leg.path("symbol").asText());c.put("strategy",leg.path("strategy").asText());c.put("lots",leg.path("lots").asInt());c.set("amountTwd",leg.has("amount")?leg.path("amount"):leg.path("amountTwd"));
+            }
+            if(!"ACTIONABLE_FOR_REPORT".equals(leg.path("status").asText()))continue;
+            JsonNode quantity=leg.path("units").isNull()?leg.path("lots"):leg.path("units");
+            if(quantity.isMissingNode()||new BigDecimal(quantity.asText()).signum()<=0||SATELLITE_STRATEGIES.contains(leg.path("strategy").asText()))continue;
+            String key=report.path("sharedCalculationId").asText()+"/"+module.path("moduleId").asText()+"/"+legIndex;
+            ObjectNode row=rows.addObject();row.put("origin","REPORT");row.putNull("decisionRunId");row.put("reservationId",SrppJcs.sha256Hex("REPORT/"+key));row.set("calculationRunId",report.path("calculationRunId"));row.set("sharedCalculationId",report.path("sharedCalculationId"));row.set("tradingDate",identity.path("tradingDate"));row.set("reportSlot",identity.path("reportSlot"));row.set("policyBundleSha256",identity.path("policyBundleSha256"));row.set("moduleId",module.path("moduleId"));row.put("legIndex",legIndex);
+            for(String field:List.of("symbol","market","strategy","action","lots","units","amount","currency","fees"))row.set(field,leg.path(field));
+            row.put("status","ACTIVE");row.putNull("linkedOrderId");row.putNull("linkedFillId");
+        }}
+        return summary;
+    }
+    private static ObjectNode identity(ReservationRef ref){
+        var s=ref.scope();ObjectNode identity=JsonNodeFactory.instance.objectNode();identity.put("ownerUserId",s.owner()).put("consumer",ref.consumer()).put("tradingDate",s.date().toString()).put("reportSlot",s.slot()).put("policyBundleSha256",s.policy()).put("swaggerSha256",s.swagger());
+        return (ObjectNode)SrppJcs.parseStrict(SrppJcs.canonicalize(identity));
+    }
+    private void logCache(long owner){var s=projections.stats();LOG.info("SRPP reservation projection cache owner={} cumulativeHits={} cumulativeMisses={} admissionRejected={} entries={} bytes={}",owner,s.hits(),s.misses(),s.admissionRejected(),s.entries(),s.bytes());}
 }
