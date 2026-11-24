@@ -113,10 +113,10 @@
       <div class="bias-banner" :style="{ background: biasColor }">
         <div class="bias-main">
           <span class="bias-label">{{ biasText }}</span>
-          <span class="bias-date">{{ today.analysisDate }}　台股當日走向研判</span>
+          <span class="bias-date">{{ today.analysisDate }}　{{ isOvernightRule ? '台股基礎趨勢' : '台股當日走向研判' }}</span>
         </div>
         <div class="bias-conf" v-if="today.confidence != null">
-          <span class="conf-num">{{ today.confidence }}</span><span class="conf-unit"> / 100 信心</span>
+          <span class="conf-num">{{ today.confidence }}</span><span class="conf-unit"> / 100 {{ isOvernightRule ? '趨勢訊號一致性' : '信心' }}</span>
         </div>
       </div>
 
@@ -341,6 +341,7 @@ const emptyDesc = computed(() => settings.value.enabled === false
   ? '每日自動分析已停用；由管理者按「重新分析」手動產生'
   : '尚無分析結果（等待下一個交易日的寄送時間排程，或由管理者手動觸發）')
 
+const isOvernightRule = computed(() => today.value?.model === 'local-rule-engine:v2')
 const biasText = computed(() => biasLabel(today.value?.bias))
 const biasColor = computed(() => biasHex(today.value?.bias))
 const biasBorder = computed(() => ({ borderTop: `3px solid ${biasHex(today.value?.bias)}` }))

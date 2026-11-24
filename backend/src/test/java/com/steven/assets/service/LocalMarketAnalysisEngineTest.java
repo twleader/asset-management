@@ -289,7 +289,7 @@ class LocalMarketAnalysisEngineTest {
 
     @Test
     void ruleVersion_isTheValueWrittenToModelColumn() {
-        assertEquals("local-rule-engine:v1", LocalMarketAnalysisEngine.RULE_VERSION);
+        assertEquals("local-rule-engine:v2", LocalMarketAnalysisEngine.RULE_VERSION);
     }
 
     // ===== (g) newsHighlights：量化快照優先、欄位照原樣、url 只過 safeHttpUrl =====
