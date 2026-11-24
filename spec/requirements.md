@@ -7351,3 +7351,10 @@ SRPP 兩軌完成逐腿判斷後，需要 9090 直接算出最終張數、限價
 8. 入場額滿時拒絕新entry admission、既存entry仍可命中，超額entry每輪完整重讀，不用循環LRU掃描把所有熱entry逐出。所有來源仍處理，命中返回deepCopy、caller不可修改cache。按owner的key上限避免單一owner占滿全域key，byte界限飽和仍屬全域資源限制，必須提供hit/miss/admission-rejected/entries/bytes日誌並揭露；不宣稱任意owner數/無界歷史仍可60秒完成。冷啟動/未cache來源仍需完整歷史驗證，可能超過日報短暫重取額度；部署夜間僅由既有ApplicationReady/report producer自然暖cache，不新增暖cache排程、不手動觸發、不宣稱冷啟動已無延遲。
 
 9. 金融OpenAPI升1.30.0，report-calculations description明載latest純讀當前同owner DB完整static快照比對、不符/缺失503 CONTEXT_NOT_READY；fixed calculationRunId僅歷史immutable scope驗證，不受當前static fence。503描述同步，不新增route/欄位/寫入；Task504完整renderer／consumer identity／runtime／bundle／authority／registry發布鏈驗最後hash。
+
+
+### Task 631 事件反彈退潮規則包發布（延伸 Requirements 187／199）
+
+**User Story：** 作為 SRPP 日報使用者，我需要台美事件反彈風險提示與資產端正式規則包身分一致，且保留既有交易限制。
+
+**驗收條件：** SRPP 台股與美股事件反彈退潮提示只供日報風險說明，原交易雷達 action、交易閘門、資金及限價規則維持；資產端只發布對應 authority 身分，不新增 API、計算公式、producer、DB schema、排程或交易權限。model_inputs、Swagger、formula manifest 與 calculator hashes 應保持原 bytes。以凍結 SRPP manifest 原 bytes 同步 backend，由既有 generator 重產 SQL 與 golden，golden 金融輸出保持不變。兩 repo feature commit、main no-ff merge、push 並精確 remote readback 後才執行 insert-only registry；舊 rows 不更新或刪除。之後由乾淨 main rebuild/recreate business-services、驗 healthy、新 image 與 JAR authority bytes，再從 SRPP host 對 9090 作唯讀 GET 實測。夜間不補造正式日報採用，report-calculations 合法時窗驗收保留 NOT_YET_EXECUTED。

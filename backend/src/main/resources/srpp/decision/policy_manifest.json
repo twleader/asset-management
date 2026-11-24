@@ -8,7 +8,7 @@
     "README.md": "544dda0a280a6993102f4924f750c26b9ba16b1477ce90655e3f728b6b3c0ed3",
     "assumptions/bond_forward_yields.json": "1cb1e2ae47f25c247bd796801c3390b5cdd5b0927593b7962c3411db62fa7ccd",
     "assumptions/core_sell_watch_legacy_policies.json": "9806bd6d5a84f3ecf07ebba6f84be6eb098e939382ff0ec756b495e15eea9da9",
-    "assumptions/daily_runtime_contract.json": "1f5bd4b9b8a79920edd4d0a38a0de8cee07c72b2b5869748afee4e4a4531d381",
+    "assumptions/daily_runtime_contract.json": "7168a204e29aba785c63b423384952764035dd4df8223b5bb8dce0b0185b9794",
     "assumptions/financial.md": "cb4313c74f584877d16adc2c62b7eb07bfbf7503d3ff93ff0493914d0ac856ab",
     "assumptions/market.md": "48942a68a9c1a1b3b50aa02fe22632bada67e63757c06127fdc08da73bb2836b",
     "assumptions/model_inputs.json": "e9e561a9fe5d8febffc480a20b2b2c013bf9c0d1469e9f37a000978e60c7f46d",
@@ -30,13 +30,14 @@
     "docs/CORE_TACTICAL_POLICY.md": "58c6e17e7860a1d2dc3a87a28d89a49aa86794a01d6d9b35326455cad0ab11f2",
     "docs/CURRENT_PLAN.md": "c4ee0168c1a848ffbd9d27356192975b27794e72daa36b620c36d0629f2a6b36",
     "docs/D107_LAYERED_SWAGGER_PROPOSAL.md": "a53252d72d02719a7e651c11f2e97d0a7cc45f50ff47deacb8db98e38a8c2ccf",
-    "docs/DAILY_TRADING_AUTOMATION.md": "8739e71359b05085c9063b103b84ecba9dd3e9e7d6b1acb464e1e1627f2e7557",
+    "docs/DAILY_TRADING_AUTOMATION.md": "a4d3f78b773b0224a343e63156bc7e97ee6735328387b1792db7f46e29372884",
     "docs/DATA_FETCH_RULES.md": "edeb64fe189c1a006cd56df46d75748600b5afb56b97faf91177ded336be5c50",
     "docs/DECISION_LOG.md": "b5f631975bbe772d0b00e5401fe9dc09ba09763ed71c3774e93347bf77ca5355",
     "docs/EMAIL_CORE_TEMPLATE_SAMPLE.html": "94ba972851a025e4be88d21002c884a7705d643c2fb08dba7499706600322e09",
     "docs/EMAIL_HTML_STYLE.md": "2784c5c5e40680836c652117f9abf018c0bbc7e3ca596360056e4964852d8ea1",
     "docs/EMAIL_TEMPLATE_SAMPLE.html": "633c63b4c209375c0222add2b8264408ffec587bd120654a5e60cc772ca83801",
     "docs/EVENT_EVIDENCE_INGEST_9090_API_SPEC.md": "e2758e6b3ee2a90cad2315f04747836d8afb2503079bff760b3cd58972c3f62e",
+    "docs/EVENT_REBOUND_RISK.md": "2babdefd900d61263c94b567e3d027a56e3e809b2a5fdeec0aca56c21d074a52",
     "docs/HIGH_DIVIDEND_STABILIZATION.md": "4a98dcaae56bcad3e53b096f633a84eca4a851c98b441f9ffa3db91531f089c4",
     "docs/NAMED_CASH_ROTATION_D223.md": "fc42db5937e548c487d63010ba56f2eb7ecb73af6d8f72a153b9bd08020314ea",
     "docs/NAMED_DEEP_DRAWDOWN.md": "772aa3b0b792a591a3710d1570be6dc6926fe58afa3ae2502835ccb889da96f7",
@@ -54,7 +55,7 @@
     "docs/TRADE_BLOCKER_POLICY.md": "75f5bb5c112dbbe954ec61078359a4790735f94baab70b35baf1dde055c61f90",
     "docs/USD_ASSET_FX_PREFERENCE.md": "8cace5ef5e32876858af18b7f0668744467e01a82f7d291e0bdaf2a84a83b9a9",
     "docs/US_EARNINGS_RISK_REPORT.md": "3628247713bfd9a918b98a1b2c956d3b2c61debdcbb90cb4acb3e33caf44e99a",
-    "docs/US_REPORT_EVIDENCE.md": "922f40ac31e075d3b548a4e94c58ba2c6e8f2202d34ba470c6073b72b2bc99a9",
+    "docs/US_REPORT_EVIDENCE.md": "125af878877efdee4ce5458148f76b00e547fd1417202a5b602647cafe042ea8",
     "docs/US_TECH_DIP_REVIEW.md": "c5cae25381ebbf485d7b778a6b73203411143b161f20983417bd9810b43eee90",
     "docs/VOO_TAIWAN_BRIDGE.md": "42b1b9999af7f5cdcb29c77ffac92dfe7336447046aeb9332a291863537cbd77",
     "docs/WEEKLY_MARKET_OUTLOOK_AUTOMATION.md": "f6649f3de7b2f491fb199f1671af1c144577bb23e8e0c76533b9aa82c10a973c",
@@ -110,6 +111,7 @@
     "scripts/dividend_stabilization.py": "2a5c47e261eb83d560ace9a37591d5e958423e0447ec9c9dd896823972a19f5e",
     "scripts/drive_xlsx_to_json.py": "8313091f5d944b04b8b8682e67a3ecd8b1b15fff2b6e22ef6c10f1147cd2df91",
     "scripts/etf_distribution_components.py": "7f2484095212e5573df3f758d92f009dc9b51891c38e659f390de9981706a7af",
+    "scripts/event_rebound.py": "285fb10029a35bc37188bc3efe5dc6517d35278a297bbe5c9059fcdf607cdd3d",
     "scripts/execution_policy.py": "16fb30de344493be599d89541f0f76ee985bcd64996dada819bf0f701aad4a2d",
     "scripts/export_settings_runtime.py": "4f229d42e3aa3af9e50f3e9c78347c963b3986b245789a578eea708208445ed9",
     "scripts/fetch_9090.py": "01a989507535fc39a5161b4a47bf51045e9592d2e5fa144ad2ed6981969644ef",
@@ -259,5 +261,5 @@
     "scripts/voo_bridge.py": "dc1735c2d35b2bcc7fbdd087175c945406986a05d42c594c694ae5bd6972d6bd",
     "scripts/voo_bridge_proxy.py": "3a7bd68cc8202bbf039641afa13dac5a4b228cf04e7c63159cf1ffa9b2ddf590"
   },
-  "POLICY_BUNDLE_SHA256": "f1af47959e490b84ba47e722071ab66e183a18f018fd37f9c38a193bfbe7dbc9"
+  "POLICY_BUNDLE_SHA256": "da1a1dadcecea13671f687d90e92232bb7e3c2547eeadb34e0690c312f4965b6"
 }
