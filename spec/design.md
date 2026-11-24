@@ -14360,3 +14360,7 @@ BFF validator 對 ACTIONABLE 債券／VT 腿要求 D215_FX PASS，並核對精�
 - 容量以3owner*90day*295tick=79650個base量級保留餘裕，不把90日當query截斷。全範圍unlinked metadata成功遍歷後依實際可見ref prune同owner absent/changed keys，read的週內子範圍不prune。每owner65536避免單owner吃滿全域262144；96MiB為全域記帳限制，跨owner公平不等於保證byte可用。超額entry仍body重讀，記admission rejected與限制，不保證任意高基數/冷啟動60秒。高基數測試至少模擬79650個reference/空摘要及小容量seam飽和，不為cap省略任何來源。
 
 - 金融OpenAPI description屬可觀察契約：升1.30.0，latest僅以同owner當前DB static全文匹配的已發布包回200，缺失/不符503 CONTEXT_NOT_READY；fixedrun不跟當前快照比。更新503描述與version contract assertions；所有generated mirrors與SRPP schema identity/runtime/policy/asset authority由Task504同步，無新增route/schema fields，維持完整L0/D207。
+
+### Task 630 美股交易雷達通知
+
+既有設定 API 與 BFF 使用 `(stockCode, market)`，市場擴為台股及美股，保留 owner 隔離與既有狀態選項。`PriceStreamService` 從既有 `price-update` 分流；美股只接受明示 `LIVE` 且 `closed=false` 的個股事件，並且通知評估只採用品質合格的美股 `LIVE` 決策，避免收盤回填或失效報價改動基準。同一輪台股 `0000` 展開全部台股設定，其他事件依市場與代號選 active 設定；台股展開與美股事件可同輪處理，單一市場組一次 `MarketSnapshot`、單一設定評估一次。Email 沿用收件人合併機制，由 `StockDecision.market()` 提供各列市場。無 DB、行情 producer、排程或交易雷達規則變更。

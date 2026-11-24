@@ -26,13 +26,14 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** 收到台股價格事件後，背景評估逐檔通知設定；不依賴交易雷達頁是否開啟。 */
+/** 收到台股或有效美股盤中價格事件後，背景評估逐檔通知設定；不依賴交易雷達頁是否開啟。 */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class TradingRadarNotificationService {
 
     private static final String TW_MARKET = "台股";
+    private static final String US_MARKET = "美股";
     private static final String TAIEX_CODE = "0000";
     private static final String ALL_TW = "*\0台股";
     /** Audit marker for a baseline-only FUBON overlay adoption; never an email transition. */
@@ -54,9 +55,9 @@ public class TradingRadarNotificationService {
     private final ObjectProvider<TradingRadarNotificationService> self;
 
     public void queueEvaluation(String rawCode, String market) {
-        if (rawCode == null || !TW_MARKET.equals(market)) return;
+        if (rawCode == null || (!TW_MARKET.equals(market) && !US_MARKET.equals(market))) return;
         String code = rawCode.trim().toUpperCase();
-        pending.add(TAIEX_CODE.equals(code) ? ALL_TW : code + '\0' + market);
+        pending.add(TW_MARKET.equals(market) && TAIEX_CODE.equals(code) ? ALL_TW : code + '\0' + market);
     }
 
     /**
@@ -91,15 +92,17 @@ public class TradingRadarNotificationService {
         if (keys.contains(ALL_TW)) {
             settingRepo.findByActiveTrueAndMarket(TW_MARKET)
                     .forEach(setting -> settings.put(setting.getId(), setting));
-        } else {
-            for (String key : keys) {
-                int separator = key.indexOf('\0');
-                if (separator < 1) continue;
-                String code = key.substring(0, separator);
-                String market = key.substring(separator + 1);
-                settingRepo.findByActiveTrueAndStockCodeAndMarket(code, market)
-                        .forEach(setting -> settings.put(setting.getId(), setting));
-            }
+        }
+        // 台股 0000 只展開台股設定；同輪其餘市場的個股事件仍必須各自查詢，
+        // 不能因為 ALL_TW 已存在就被 if/else 吞掉。LinkedHashMap 保持設定只評估一次。
+        for (String key : keys) {
+            if (ALL_TW.equals(key)) continue;
+            int separator = key.indexOf('\0');
+            if (separator < 1) continue;
+            String code = key.substring(0, separator);
+            String market = key.substring(separator + 1);
+            settingRepo.findByActiveTrueAndStockCodeAndMarket(code, market)
+                    .forEach(setting -> settings.put(setting.getId(), setting));
         }
         // 每輪出現的每個市場只組一次大盤（Task 302），取代逐檔 evaluateForNotification 各自重建。
         Map<String, TradingRadarService.MarketSnapshot> byMarket = new HashMap<>();
@@ -122,6 +125,12 @@ public class TradingRadarNotificationService {
             boolean held = isHeld(setting.getOwnerUserId(), setting.getStockCode(), setting.getMarket());
             TradingRadarDto.StockDecision decision = tradingRadarService.evaluateForNotification(
                     setting.getStockCode(), setting.getMarket(), held, snapshot);
+            // 美股僅能由 PriceStreamService 已驗證的 LIVE event 觸發；仍在這裡重驗決策，
+            // 避免 cache/日曆讀取失敗或收盤資料回退時改寫既有通知基準。
+            if (US_MARKET.equals(setting.getMarket())
+                    && (!decision.dataComplete() || !"LIVE".equals(decision.quoteStatus()))) {
+                return;
+            }
             // Action semantics can change without changing V12 scoring/ruleVersion.  An invalid
             // baseline is rebuilt from the same post-gate StockDecision used by the page/export,
             // then exits before transition/cooldown/dispatcher side effects.

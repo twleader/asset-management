@@ -126,4 +126,21 @@ class TradingRadarNotificationMarketBatchTest {
         verify(usIndexRepo, times(1)).findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 500);
         verifyNoInteractions(newsRepo);
     }
+
+    @Test
+    void 台股大盤展開與美股個股同輪入列時兩個市場都會評估() {
+        when(settingRepo.findByActiveTrueAndMarket(TW_MARKET))
+                .thenReturn(List.of(setting(1L, "2330", TW_MARKET)));
+        when(settingRepo.findByActiveTrueAndStockCodeAndMarket("AMD", US_MARKET))
+                .thenReturn(List.of(setting(2L, "AMD", US_MARKET)));
+
+        service.queueEvaluation("0000", TW_MARKET);
+        service.queueEvaluation("AMD", US_MARKET);
+        service.flushEvaluations();
+
+        verify(settingRepo).findByActiveTrueAndMarket(TW_MARKET);
+        verify(settingRepo).findByActiveTrueAndStockCodeAndMarket("AMD", US_MARKET);
+        verify(twseRepo, times(1)).findTopNByOrderByTradingDateDesc(60);
+        verify(usIndexRepo, times(1)).findTopNByIndexCodeOrderByTradingDateDesc("IXIC", 500);
+    }
 }

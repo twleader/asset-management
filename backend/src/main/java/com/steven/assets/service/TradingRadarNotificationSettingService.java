@@ -25,6 +25,7 @@ import java.util.Set;
 public class TradingRadarNotificationSettingService {
 
     private static final String TW_MARKET = "台股";
+    private static final String US_MARKET = "美股";
 
     private final TradingRadarNotificationSettingRepository settingRepo;
     private final TradingRadarNotificationStateRepository stateRepo;
@@ -147,10 +148,14 @@ public class TradingRadarNotificationSettingService {
     }
 
     private String normalize(String rawCode, String market) {
-        if (!TW_MARKET.equals(market)) throw new IllegalArgumentException("交易雷達通知目前只支援台股");
+        if (!TW_MARKET.equals(market) && !US_MARKET.equals(market)) {
+            throw new IllegalArgumentException("交易雷達通知只支援台股或美股");
+        }
         if (rawCode == null || rawCode.isBlank()) throw new IllegalArgumentException("股票代號不可為空");
         String code = rawCode.trim().toUpperCase();
-        if ("0000".equals(code)) throw new IllegalArgumentException("台股大盤不可建立個股通知設定");
+        if (TW_MARKET.equals(market) && "0000".equals(code)) {
+            throw new IllegalArgumentException("台股大盤不可建立個股通知設定");
+        }
         return code;
     }
 

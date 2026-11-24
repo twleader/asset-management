@@ -34,6 +34,7 @@ public class TradingRadarNotificationDispatcher {
                 settingId,
                 decision.stockCode(),
                 decision.stockName(),
+                decision.market(),
                 decision.actionLabel(),
                 decision.counterTrendLabel(),
                 decision.score(),
@@ -97,6 +98,7 @@ public class TradingRadarNotificationDispatcher {
                     .append("<h3 style=\"margin:0 0 8px\">")
                     .append(escape(notice.stockCode())).append(" ")
                     .append(escape(notice.stockName())).append("</h3>")
+                    .append("<div><strong>市場：</strong>").append(escape(notice.market())).append("</div>")
                     .append("<div><strong>觸發狀態：</strong>")
                     .append(escape(String.join("、", notice.enteredStates()))).append("</div>")
                     .append("<div><strong>主規則建議：</strong>").append(escape(notice.actionLabel()))
@@ -163,6 +165,7 @@ public class TradingRadarNotificationDispatcher {
             Long settingId,
             String stockCode,
             String stockName,
+            String market,
             String actionLabel,
             String counterTrendLabel,
             Integer score,
