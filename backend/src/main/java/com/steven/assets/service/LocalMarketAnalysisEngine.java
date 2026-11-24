@@ -42,7 +42,8 @@ public class LocalMarketAnalysisEngine {
      * <b>規則權重或門檻日後調整時須提升此版本號</b>——理由與 {@code TradingRadarRuleEngine.RULE_VERSION}
      * 相同：否則歷史紀錄無法分辨是哪一版規則產生的判斷。
      */
-    public static final String RULE_VERSION = "local-rule-engine:v1";
+    public static final String RULE_VERSION = "local-rule-engine:v2";
+    static final String SUMMARY_PREFIX = "【本機規則引擎產生，非 LLM 研判】";
 
     // ===== 訊號權重（先驗設定，非回測校準；調整時須提升 RULE_VERSION）=====
 
@@ -640,10 +641,10 @@ public class LocalMarketAnalysisEngine {
                                        List<String> usFragments, List<String> chipFragments) {
         StringBuilder sb = new StringBuilder();
         // 自我標示：使歷史列表與每日 email 在純文字閱讀時即可分辨兩種來源，不必回查 model 欄位
-        sb.append("【本機規則引擎產生，非 LLM 研判】");
-        sb.append(analysisDate == null ? "本次" : analysisDate.toString()).append(" 台股走向研判為")
+        sb.append(SUMMARY_PREFIX);
+        sb.append(analysisDate == null ? "本次" : analysisDate.toString()).append(" 台股基礎趨勢為")
           .append(biasWord(bias)).append("，加權分數 ").append(signed(normalized))
-          .append("（值域 -100～+100），信心 ").append(confidence)
+          .append("（值域 -100～+100），趨勢訊號一致性 ").append(confidence)
           .append("％，實際參與計分訊號 ").append(signalCount).append("／")
           .append(ALL_SIGNAL_KEYS.size()).append(" 項。");
         List<String> twAndVolume = concat(twFragments, volumeFragments);

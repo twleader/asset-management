@@ -95,10 +95,12 @@ class MarketAnalysisServiceLocalEngineTest {
     private MarketAnalysisService newService(TechnicalIndicatorService technical,
                                              LocalMarketAnalysisEngine engine,
                                              String apiKey) {
+        MarketAnalysisOvernightEvidence overnight = mock(MarketAnalysisOvernightEvidence.class);
+        when(overnight.describe(any(), any())).thenReturn("開盤方向未確認。");
         MarketAnalysisService svc = new MarketAnalysisService(
                 analysisRepo, settingRepo, twseRepo, usRepo, newsRepo, objectMapper,
                 emailDispatcher, marketDataService, sendTimeService,
-                technical, institutionalRepo, engine);
+                technical, institutionalRepo, engine, overnight);
         ReflectionTestUtils.setField(svc, "apiKey", apiKey);
         ReflectionTestUtils.setField(svc, "defaultModel", "claude-opus-5");
         ReflectionTestUtils.setField(svc, "newsMaxAgeDays", 5);
@@ -129,7 +131,7 @@ class MarketAnalysisServiceLocalEngineTest {
 
         assertEquals(DailyMarketAnalysis.STATUS_OK, row.getStatus());
         assertNotEquals(DailyMarketAnalysis.STATUS_NOT_CONFIGURED, row.getStatus());
-        assertEquals("local-rule-engine:v1", row.getModel());
+        assertEquals("local-rule-engine:v2", row.getModel());
         // 本機路徑不設 batch_id、不經 PROCESSING → pollPendingBatches() 永遠撈不到它
         assertNull(row.getBatchId());
         assertNotNull(row.getBias());
@@ -141,7 +143,8 @@ class MarketAnalysisServiceLocalEngineTest {
     void localEngine_writesRuleVersionAndNonEmptyKeyFactors() {
         engineSetting(MarketAnalysisService.ENGINE_LOCAL);
         when(usRepo.findByIndexCodeAndTradingDateGreaterThanEqualOrderByTradingDateAsc(eq("SOX"), any()))
-                .thenReturn(List.of(us("SOX", DATE.minusDays(1), "7000"), us("SOX", DATE, "7350")));
+                .thenReturn(List.of(us("SOX", DATE.minusDays(2), "7000"), us("SOX", DATE.minusDays(1), "7350"),
+                        us("SOX", DATE, "100")));
         MarketAnalysisService svc = newService(mock(TechnicalIndicatorService.class),
                 new LocalMarketAnalysisEngine(), "");
 
@@ -150,7 +153,8 @@ class MarketAnalysisServiceLocalEngineTest {
         assertEquals(LocalMarketAnalysisEngine.RULE_VERSION, row.getModel());
         assertEquals("BULLISH", row.getBias());
         assertTrue(row.getKeyFactors().contains("費城半導體"), row.getKeyFactors());
-        assertTrue(row.getSummary().startsWith("【本機規則引擎產生，非 LLM 研判】"), row.getSummary());
+        assertTrue(row.getSummary().startsWith("【本機規則引擎產生，非 LLM 研判】開盤方向未確認。"), row.getSummary());
+        assertTrue(row.getKeyFactors().contains("開盤方向未確認"), row.getKeyFactors());
     }
 
     /** 357.4a：本機路徑須把 {@code result.factorGroups()} 序列化落庫；round-trip 後四個分類逐條相同。 */
@@ -158,7 +162,8 @@ class MarketAnalysisServiceLocalEngineTest {
     void localEngine_persistsFactorGroupsAsRoundTrippableJson() throws Exception {
         engineSetting(MarketAnalysisService.ENGINE_LOCAL);
         when(usRepo.findByIndexCodeAndTradingDateGreaterThanEqualOrderByTradingDateAsc(eq("SOX"), any()))
-                .thenReturn(List.of(us("SOX", DATE.minusDays(1), "7000"), us("SOX", DATE, "7350")));
+                .thenReturn(List.of(us("SOX", DATE.minusDays(2), "7000"), us("SOX", DATE.minusDays(1), "7350"),
+                        us("SOX", DATE, "100")));
         MarketAnalysisService svc = newService(mock(TechnicalIndicatorService.class),
                 new LocalMarketAnalysisEngine(), "");
 
@@ -468,7 +473,7 @@ class MarketAnalysisServiceLocalEngineTest {
                 .thenReturn(new MarketAnalysisResult("NEUTRAL", 0, "s", List.of(), List.of(), "tw", "us", null));
 
         MarketAnalysisService svc = newService(technical, engine, "");
-        svc.generate(DATE, "test");
+        svc.generate(today, "test");
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<double[]>> closesCaptor = ArgumentCaptor.forClass(List.class);

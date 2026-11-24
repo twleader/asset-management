@@ -205,6 +205,7 @@ public class MarketAnalysisService {
     private final TechnicalIndicatorService technicalIndicatorService;
     private final TwseInstitutionalDailyRepository institutionalRepo;
     private final LocalMarketAnalysisEngine localEngine;
+    private final MarketAnalysisOvernightEvidence overnightEvidence;
 
     @Value("${anthropic.api-key:}")
     private String apiKey;
@@ -456,7 +457,8 @@ public class MarketAnalysisService {
             // 合成一列今日 bar 併入，盤中觸發（每分鐘 tick 的多個寄送時點／管理者手動）時就會變成
             // 「今天的指標配昨天的收盤」，同一份判斷混用兩個價基。
             LocalDate since = date.minusYears(LOCAL_SERIES_LOOKBACK_YEARS);
-            List<TwseIndexDailyHistory> twseRows = tailOf(twseRows(since), LOCAL_TAIEX_SERIES_MAX);
+            List<TwseIndexDailyHistory> twseRows = tailOf(twseRows(since).stream()
+                    .filter(r -> r.getTradingDate().isBefore(date)).toList(), LOCAL_TAIEX_SERIES_MAX);
             List<double[]> closes = closesOf(twseRows);
             List<double[]> tradeValues = tradeValuesOf(twseRows);
             List<StockPriceHistory> desc = taiexSeriesDesc(twseRows);
@@ -477,7 +479,8 @@ public class MarketAnalysisService {
 
             Map<String, List<double[]>> us = new LinkedHashMap<>();
             for (String code : US_INDEX_CODES) {
-                us.put(code, usCloses(code, since));
+                us.put(code, usCloses(code, since).stream()
+                        .filter(close -> close[0] < date.toEpochDay()).toList());
             }
 
             List<LocalMarketAnalysisEngine.InstitutionalNet> institutional = institutionalRecent(date);
@@ -491,7 +494,7 @@ public class MarketAnalysisService {
             MarketAnalysisResult result = localEngine.evaluate(date, closes, tradeValues, us,
                     indicators, previousIndicators, latestNet, institutional, recentNews);
             // 不得用既有 applyResult(...)——它內含 sanitizeNews()，會對非白名單網域發 outbound HTTP 回抓原文
-            applyLocalResult(row, result);
+            applyLocalResult(row, result, overnightEvidence.describe(date, row.getGeneratedAt()));
             row.setStatus(DailyMarketAnalysis.STATUS_OK);
             row.setErrorMessage(null);
             log.info("今日股市分析：本機規則引擎完成（date={}, bias={}, confidence={}）",
@@ -532,14 +535,19 @@ public class MarketAnalysisService {
      * 宣稱「100% 本地 DB、零外部呼叫」的路徑偷偷發 outbound HTTP，並以 {@code date.toString()}
      * 覆寫 {@code publishedAt}、甚至整筆剔除。既有 {@link #applyResult} 保持原樣供 LLM 路徑使用。</p>
      */
-    private void applyLocalResult(DailyMarketAnalysis row, MarketAnalysisResult r) throws Exception {
+    private void applyLocalResult(DailyMarketAnalysis row, MarketAnalysisResult r, String opening) throws Exception {
         row.setBias(normalizeBias(r.bias()));
         row.setConfidence(clampConfidence(r.confidence()));
-        row.setSummary(r.summary());
+        String summary = r.summary() == null ? "" : r.summary();
+        String prefix = LocalMarketAnalysisEngine.SUMMARY_PREFIX;
+        String trend = summary.startsWith(prefix) ? summary.substring(prefix.length()) : summary;
+        row.setSummary(prefix + opening + trend);
         row.setTwContext(r.twContext());
         row.setUsContext(r.usContext());
-        row.setKeyFactors(objectMapper.writeValueAsString(
-                r.keyFactors() != null ? r.keyFactors() : List.of()));
+        List<String> factors = new ArrayList<>();
+        factors.add(opening);
+        if (r.keyFactors() != null) factors.addAll(r.keyFactors());
+        row.setKeyFactors(objectMapper.writeValueAsString(factors));
         row.setNewsHighlights(objectMapper.writeValueAsString(
                 r.newsHighlights() != null ? r.newsHighlights() : List.of()));
         row.setFactorGroups(r.factorGroups() == null
