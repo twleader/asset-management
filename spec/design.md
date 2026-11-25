@@ -14375,3 +14375,18 @@ BFF validator 對 ACTIONABLE 債券／VT 腿要求 D215_FX PASS，並核對精�
 ### Task 631 事件反彈退潮 authority 發布
 
 SRPP 台股與美股事件反彈退潮提示只供日報風險說明，原交易雷達 action、交易閘門、資金及限價規則維持；資產端只發布對應 authority 身分，不新增 API、計算公式、producer、DB schema、排程或交易權限。model_inputs、Swagger、formula manifest 與 calculator hashes 應保持原 bytes。以凍結 SRPP manifest 原 bytes 同步 backend，由既有 generator 重產 SQL 與 golden，golden 金融輸出保持不變。兩 repo feature commit、main no-ff merge、push 並精確 remote readback 後才執行 insert-only registry；舊 rows 不更新或刪除。之後由乾淨 main rebuild/recreate business-services、驗 healthy、新 image 與 JAR authority bytes，再從 SRPP host 對 9090 作唯讀 GET 實測。夜間不補造正式日報採用，report-calculations 合法時窗驗收保留 NOT_YET_EXECUTED。
+
+
+### Task 633：D235 2881 還原權息高檔分批退出（延伸 Requirements 187／193）
+
+**設計目標：** 作為SRPP日報使用者，我需要2881在還原權息後52週位置≥95%時，即使雷達HOLD或HOLD_CAUTION也完成首批退出評估；首批不得因D152小額例外一次清零，離開高檔暫停此新路徑。
+
+1. execution_policy.named_high_zone_exit_d235按正式D235政策、2026-11-26生效；position採同輪exact radar的week52Position（有限[0,1]）且distributionAdjusted精確true，門檻包含0.95。新strategy NAMED_HIGH_ZONE_EXIT_D235沿用CORE_D226帳戶及D223計畫baseline/fills，接受HOLD/HOLD_CAUTION/EXIT_CANDIDATE/REDUCE_CANDIDATE；其他action不授權賣出。新舊同輪只一條SELL腿。
+2. 有效高檔優先新路徑且其BLOCKED不回退舊路徑；離高HOLD兩態為新路徑暫停，缺證為UNAVAILABLE。既有EXIT/REDUCE尚未被有效高檔選中新路徑時，D226獨立資格仍按原規評估，不新增全域52週欄位依賴。
+3. 新路徑14 gates為D235_HIGH_ZONE_PATH替換原D226_SELL_PATH，其餘QUOTE/RADAR/POSITION/PENDING/RESERVATIONS/DEDUPLICATION/CORE_RETENTION/D152_BATCH/COOLDOWN/DEPTH/EXECUTION_ACCOUNT/COSTS/TRADABILITY原意不變。新gate refs恰policy與market:台股:2881，EXACT values d235Week52Position RATIO、d235Threshold RATIO=0.95、d235DistributionAdjusted BOOLEAN=1。固定同run/owner/來源hash與原始身分。
+4. 新路徑首批confirmedBatches=0禁止小額清零，baseline/3向下整張，baseline<3000股用整股；原生零股五檔必須匹配單位。首批必留餘量，baseline=1等不能留餘量則BLOCKED。例3000股首批1000、500股166；後續保留原批數與尾量規則。D152_BATCH保留baselineShares/confirmedBatches/openingValueTwd，另firstBatchSmallClearAllowed BOOLEAN=0。既有D226小額語義不改。
+5. 保留同輪報價與最終直接quote、五檔深度、正式可賣/交割量、同帳持股、掛單及linked預留去重、股票費稅、D144窄限價例外、所有券商同方向已成交後五個完成交易日冷卻；未知不當零，不本地resize或解BLOCKED。LLM逐腿採納/等待/否決，永不下單。
+6. SRPP、BFF封閉response validator同步strategy、14gate精確refs及values；完整publisher正腿/零腿、缺失重複receipt、錯身分/refs、門檻或首批清零竄改均測試。OpenAPI同步D235描述，renderer/identity/consumer schema/runtime/manifest/bundle、formula V3 mirrors/goldens/authority/insert-only SQL完整發布鏈依最後同一身分驗證；乾淨main重建/recreate business-services及bff，JAR位元組比對與SRPP host 9090驗收。正式日報採用另按合法時窗/完整required reads/L0驗證，不由維護測試宣稱。
+7. 10/27、11/13、11/16留存raw只讀且保留hash/consumer/slot/原日期，以明示離線反事實評估回放；高檔與離高資格分開於完整交易可用性，缺可賣量/帳本/費稅等維持UNAVAILABLE，不補造PASS。測試門檻邊界、還原標記、四action、首批/尾量、冷卻、深度、去重、費稅與單腿優先/不回退。
+
+計算保持pure calculator：SrppNamedRadarSellCalculator在入口先固定策略，Data共用原凍結帳戶/計畫/容量等讀取；D235 gate獨立驗證新policy及高檔事實，首批量函式禁small-clear且不得全清；BFF只驗證新策略契約，不重算或擴張交易授權。
