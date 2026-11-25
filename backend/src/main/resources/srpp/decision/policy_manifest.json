@@ -8,7 +8,7 @@
     "README.md": "544dda0a280a6993102f4924f750c26b9ba16b1477ce90655e3f728b6b3c0ed3",
     "assumptions/bond_forward_yields.json": "1cb1e2ae47f25c247bd796801c3390b5cdd5b0927593b7962c3411db62fa7ccd",
     "assumptions/core_sell_watch_legacy_policies.json": "9806bd6d5a84f3ecf07ebba6f84be6eb098e939382ff0ec756b495e15eea9da9",
-    "assumptions/daily_runtime_contract.json": "7168a204e29aba785c63b423384952764035dd4df8223b5bb8dce0b0185b9794",
+    "assumptions/daily_runtime_contract.json": "2bd10df3e4a8acd37ad171e072352b995fd2597ef78d295c3db56b6e26c264bc",
     "assumptions/financial.md": "cb4313c74f584877d16adc2c62b7eb07bfbf7503d3ff93ff0493914d0ac856ab",
     "assumptions/market.md": "48942a68a9c1a1b3b50aa02fe22632bada67e63757c06127fdc08da73bb2836b",
     "assumptions/model_inputs.json": "e9e561a9fe5d8febffc480a20b2b2c013bf9c0d1469e9f37a000978e60c7f46d",
@@ -101,7 +101,7 @@
     "scripts/correction_dip.py": "1b94ffa30ed6f1a24974f1781c73147a8da52dd5ed51f03f199e18ebdff657f4",
     "scripts/cross_market_context.py": "53ade3f80c08d864d633c10d3c38dfc0e406a41d9a47e4d9afed140b6eaa30a0",
     "scripts/current_cash_income.py": "84bde1a1876e597a49e66a9dfb894b473e99aac2cd37259b87c596d74b21d5fb",
-    "scripts/daily_authority_packet.py": "97917fb5de4cf74d67c9726f8b78f57b9e880976d526ad192fcada5ee5568aa6",
+    "scripts/daily_authority_packet.py": "183b314af1dff60d80e65821a6932a34b9de0375283f2a5576eb5562e7107d68",
     "scripts/daily_decision_engine.py": "ab16d26a347ee9b0a8a0c8f258718899b8af7e19a97d559d87b35924d364a0e6",
     "scripts/daily_report_preflight.py": "748a51fdda30475fe38a9fbde15e721ed9139c1770f33191949c9e7ca2a754b4",
     "scripts/daily_runtime_contract.py": "42bb830c7dcd91ab542210acd60c402d950f58381d467ac16a2a12d8783a22d6",
@@ -176,7 +176,7 @@
     "scripts/test_d209_00919_high_zone_reversal.py": "a9866d82fb1f6771c01d66f00b1033c5af5349a8ac1d8ca7ab79efe5719edfd2",
     "scripts/test_d211_cash_first_high_sell.py": "78a4f3749ae41b8cbef79f5817928f898287b93ec722a05daa6fba144a03fe85",
     "scripts/test_d222_report_compatibility.py": "eaff02f61f0838c2726d98c9bfad9f205093d020070758c6232293861aa138e5",
-    "scripts/test_daily_runtime.py": "5ef5d9f7097d32ad1581ae2eb3590630aeffbfd6940b35c5533d1b38657bf691",
+    "scripts/test_daily_runtime.py": "0954a100dd3080c903e390961e8c519465bc8ea6af0c3d49399c2a1d179cf153",
     "scripts/test_daily_timing.py": "1fc12aeee7e88a608f67f506f4df0c3d97df72b305341d4946118b365a68b786",
     "scripts/test_data_tools.py": "652022841cb8aac833faf2629d7082a1edb7c349f2005fd70a3729c4808b963e",
     "scripts/test_deep_drawdown.py": "3cbb7a36721894f9dfb3438a1018c1bdff83a1ffbf0af1b0deffc0681ed4cdc6",
@@ -206,7 +206,7 @@
     "scripts/test_retirement_allocation_audit.py": "00068db19765d141b7e1b77ffb53b366e459b3ca8ffb645c1eb5fcacf87a860a",
     "scripts/test_risk_evidence_evaluator.py": "69b7e0937df976ad4c53743f19b91632a557a4a74377ff0145a4b580db44ed74",
     "scripts/test_rule_cleanup.py": "f85bd75c7691db6769b648328a75e4e3e2c5f9ad23b4717b0931023bbf569d6f",
-    "scripts/test_rule_packs.py": "e696d63448161ea96c6b564071bbbf4af93ce169a89237e599aa3f8d8c5105c5",
+    "scripts/test_rule_packs.py": "0eb0977fb9736186534790126cfe6edda39640853b8fc78bc678a761d1369cbb",
     "scripts/test_rule_query.py": "50d4d8e89d908f8f753483fb4a176769fda679cb44f0f0dbb60e1f2f3b2c49ff",
     "scripts/test_scenario_income_tax.py": "840870e5e332c3d8c1e4a60ec7d253ca46e60fe3aeb173b36967f0089ff0ac0d",
     "scripts/test_scheduled_report_watchdog.py": "2a59b7bd27743fa66b3a32ab3115cb8d810ea83ea334129522969cf16edefcaa",
@@ -261,5 +261,5 @@
     "scripts/voo_bridge.py": "dc1735c2d35b2bcc7fbdd087175c945406986a05d42c594c694ae5bd6972d6bd",
     "scripts/voo_bridge_proxy.py": "3a7bd68cc8202bbf039641afa13dac5a4b228cf04e7c63159cf1ffa9b2ddf590"
   },
-  "POLICY_BUNDLE_SHA256": "da1a1dadcecea13671f687d90e92232bb7e3c2547eeadb34e0690c312f4965b6"
+  "POLICY_BUNDLE_SHA256": "a8d0e6d7d7e5fd7501cf1f668038cba9c1973b37be207f1bf1d740e2e866356d"
 }
