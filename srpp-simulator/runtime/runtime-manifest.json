@@ -1,8 +1,8 @@
 {
-  "baseBundleSha256": "d86ee3266a191027fd61004130f1e99bbe6ccbb34b6bd88274cbc4668bdee554",
+  "baseBundleSha256": "981a3ba582f2f49f12512e398b2c0ca1383f2dd57d1993f5c7ac216cfad79d6c",
   "files": {
     "assumptions/model_inputs.json": "e9e561a9fe5d8febffc480a20b2b2c013bf9c0d1469e9f37a000978e60c7f46d",
-    "assumptions/policy_manifest.json": "096f2d44b196fe8bcc21db5e1f2c72b75fec617edc9e48f9e1b045fef70d20c3",
+    "assumptions/policy_manifest.json": "5c343e147567edc6c1407d6682e9ab9c3d483aaf475e5e42cabb4f071e544c3e",
     "assumptions/pre_retirement_payroll.json": "c146cb1f0fb9c19778075a376bb7e08a7f501e4e5839da594c19e5c3948637e5",
     "assumptions/settings_catalog.json": "730db3b0743b0b71df5e20274951c91eab1ca3325b964b67c939b9aada3bb3e3",
     "scripts/bear_ladder.py": "c299f52e4cb8162548b4cc1e768b891e7140ebc3f21c7dfb18656c2b1efa3f84",
