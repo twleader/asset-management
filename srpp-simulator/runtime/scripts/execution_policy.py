@@ -751,6 +751,137 @@ def global_build_009826(quote, *, trading_date, held_value_twd, total_assets_twd
                          "max_lots_per_week": policy["max_lots_per_week"]}}
 
 
+def load_global_build_vt_policy(root=ROOT):
+    cadence = json.loads((Path(root) / "assumptions/model_inputs.json").read_text())[
+        "execution_policy_overrides"]["global_equity_build_cadence_d141"]
+    return {**cadence["VT"], "fx_halving_threshold": cadence["fx_halving_threshold"]}
+
+
+def global_build_vt_api_inputs(assets, fx, trading_date):
+    """VT holding value (all accounts), total assets, month mids and the live spot selling rate."""
+    base = global_build_api_inputs(assets, fx, trading_date)
+    live = assets.get("liveAssets") if isinstance(assets, dict) else None
+    stocks = live.get("stocks") if isinstance(live, dict) else None
+    held = None
+    if isinstance(stocks, list):
+        rows = [r.get("liveValue") for r in stocks
+                if isinstance(r, dict) and r.get("stockCode") == "VT" and r.get("market") == "美股"]
+        if all(_finite_positive(v) or v == 0 for v in rows) and not any(isinstance(v, bool) for v in rows):
+            held = float(sum(rows))
+    spot = fx.get("spot") if isinstance(fx, dict) else None
+    selling = (spot.get("sellRate") if isinstance(spot, dict) and spot.get("date") == trading_date
+               and spot.get("quoteStatus") == "LIVE" and _finite_positive(spot.get("sellRate")) else None)
+    return {**base, "held_value_twd": held, "spot_selling_rate": selling}
+
+
+def global_build_vt(quote, *, trading_date, us_session_date, held_value_twd, total_assets_twd, transactions,
+                    usd_twd_rates, spot_selling_rate, policy):
+    """D-234: the deterministic VT build-share ceiling for one Taiwan report round.
+
+    Same mechanics as D-143 009826 (confirmed fills only, day/week/month room,
+    month FX halving, stop weight, whichever binds first), in whole US shares:
+    room in TWD converts at reference price x verified live bank spot selling
+    rate. Every confirmed VT buy, including the D-182 debit, consumes pace. A
+    ceiling below min_shares_per_order (5) is 0 (one US$3 fee per trade). This is a
+    ceiling, never an order; the caller keeps D-188, D-215 FX preference, D-152
+    funding, radar, depth and dedupe gates, and the LLM may WAIT/VETO only.
+    """
+    code = "VT"
+    blocks, today = [], dt.date.fromisoformat(trading_date)
+    month_start, week_start = today.replace(day=1), today - dt.timedelta(days=today.weekday())
+    window_end = policy["window"].split(" to ")[1]
+    if trading_date < policy["earliest_buy_date"]:
+        blocks.append("BEFORE_EARLIEST_BUY_DATE")
+    if trading_date > window_end:
+        blocks.append("BUILD_WINDOW_CLOSED")
+
+    identity = (isinstance(quote, dict) and quote.get("stockCode") == code and quote.get("market") == "美股"
+                and _iso_date(us_session_date) and quote.get("tradingDate") == us_session_date)
+    ask = quote.get("sellPrice") if isinstance(quote, dict) else None
+    basis, reference = ("ASK1", ask) if identity and _finite_positive(ask) else (
+        "LAST_PRICE", quote.get("price") if identity else None)
+    if not identity or not _finite_positive(reference):
+        blocks.append("QUOTE_UNVERIFIED")
+        reference = None
+    if not _finite_positive(spot_selling_rate):
+        blocks.append("FX_CONVERSION_UNVERIFIED")
+    if not _finite_positive(total_assets_twd):
+        blocks.append("TOTAL_ASSETS_UNVERIFIED")
+    if not (isinstance(held_value_twd, (int, float)) and not isinstance(held_value_twd, bool)
+            and bool(np.isfinite(held_value_twd)) and held_value_twd >= 0):
+        blocks.append("HOLDING_UNVERIFIED")
+
+    selection = transactions.get("selection") if isinstance(transactions, dict) else None
+    records = transactions.get("records") if isinstance(transactions, dict) else None
+    start, end = (selection.get("start"), selection.get("end")) if isinstance(selection, dict) else (None, None)
+    day_shares = week_shares = month_amount = 0.
+    pace_ok = (_iso_date(start) and _iso_date(end) and start <= min(month_start, week_start).isoformat()
+               and end >= trading_date and isinstance(records, list))
+    for r in (records if pace_ok else []):
+        if not isinstance(r, dict):
+            pace_ok = False
+            continue
+        if r.get("assetCode") != code or r.get("market") != "美股" or r.get("transactionType") != "買":
+            continue
+        shares, amount, date = r.get("shares"), r.get("amountTwd"), r.get("tradeDate")
+        # amountTwd falls back to the USD amount when a USD fill has no exchange
+        # rate; that would understate pace, so such a fill is unverifiable.
+        usd_rate_ok = r.get("currency") != "USD" or _finite_positive(r.get("exchangeRate"))
+        if not (_finite_positive(shares) and _finite_positive(amount) and _iso_date(date) and usd_rate_ok):
+            pace_ok = False
+            continue
+        if date > trading_date:
+            continue
+        month_amount += amount if date >= month_start.isoformat() else 0.
+        week_shares += shares if date >= week_start.isoformat() else 0.
+        day_shares += shares if date == trading_date else 0.
+    if not pace_ok:
+        blocks.append("PACE_STATE_UNVERIFIED")
+
+    rates = [x for x in usd_twd_rates or [] if _finite_positive(x)]
+    halved = max(rates) > policy["fx_halving_threshold"] if rates else True
+    factor = .5 if halved else 1.
+    cap, baseline = policy["monthly_cap_twd"] * factor, policy["monthly_baseline_twd"] * factor
+    minimum = policy["min_shares_per_order"]
+    room = {}
+    if pace_ok:
+        room["day"] = policy["max_shares_per_day"] - day_shares
+        room["week"] = policy["max_shares_per_week"] - week_shares
+    share_twd = post_buy_weight = None
+    if reference is not None and _finite_positive(spot_selling_rate):
+        share_twd = reference * spot_selling_rate
+        room["month"] = (cap - month_amount) / share_twd
+        if _finite_positive(total_assets_twd) and "HOLDING_UNVERIFIED" not in blocks:
+            room["weight"] = (policy["stop_at_weight"] * total_assets_twd - held_value_twd) / share_twd
+            post_buy_weight = held_value_twd / total_assets_twd
+    ceiling = max(min(int(np.floor(v + 1e-9)) for v in room.values()), 0) if room and not blocks else 0
+    if not blocks:
+        names = {"day": "DAILY_SHARE_LIMIT", "week": "WEEKLY_SHARE_LIMIT", "month": "MONTHLY_CAP",
+                 "weight": "TARGET_WEIGHT_REACHED"}
+        blocks.extend(names[k] for k, v in room.items() if v < minimum - 1e-9)
+        if not blocks and ceiling < minimum:
+            blocks.append("BELOW_MIN_ORDER_SHARES")
+    shares = 0 if blocks else ceiling
+    if shares and _finite_positive(total_assets_twd):
+        post_buy_weight = (held_value_twd + shares * share_twd) / total_assets_twd
+    return {"decision": "D-234", "stock_code": code, "trading_date": trading_date, "places_orders": False,
+            "status": "BUILD_SHARE_CEILING" if shares else "BUILD_ZERO", "shares": shares,
+            "reasons": blocks or ["WITHIN_PACE_AND_TARGET"],
+            "evidence": {"reference_price_usd": reference, "reference_basis": basis,
+                         "us_session_date": us_session_date, "spot_selling_rate": spot_selling_rate,
+                         "share_value_twd": share_twd, "day_shares": day_shares, "week_shares": week_shares,
+                         "month_amount_twd": month_amount, "week_start": week_start.isoformat(),
+                         "month_start": month_start.isoformat(), "fx_halved": halved,
+                         "fx_status": "VERIFIED" if rates else "UNVERIFIED_ASSUMED_HALVED",
+                         "fx_month_max_mid": max(rates) if rates else None,
+                         "monthly_cap_twd_effective": cap, "monthly_baseline_twd_effective": baseline,
+                         "held_value_twd": held_value_twd, "total_assets_twd": total_assets_twd,
+                         "post_buy_weight": post_buy_weight, "stop_at_weight": policy["stop_at_weight"],
+                         "max_shares_per_day": policy["max_shares_per_day"],
+                         "max_shares_per_week": policy["max_shares_per_week"],
+                         "min_shares_per_order": minimum}}
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path, help="JSON sell request, saved /api/quotes/one response with --topup-tier, or D-195 request with --bond-price-select")
@@ -759,6 +890,8 @@ if __name__ == "__main__":
                         help="D-195 price-based D-130 strategic pick and emergency 00865B lots; input is a JSON request")
     parser.add_argument("--global-build-009826", action="store_true",
                         help="D-143 009826 build-lot ceiling; input is a JSON request naming saved quote/assets/transactions/fx files")
+    parser.add_argument("--global-build-vt", action="store_true",
+                        help="D-234 VT build-share ceiling; JSON request names saved quote/assets/transactions/fx files and us_session_date")
     parser.add_argument("--stock-code")
     parser.add_argument("--market")
     parser.add_argument("--trading-date", help="today's calendar-verified Taiwan trading date")
@@ -788,6 +921,19 @@ if __name__ == "__main__":
                                      held_value_twd=api["held_value_twd"], total_assets_twd=api["total_assets_twd"],
                                      transactions=saved["transactions"], usd_twd_rates=api["usd_twd_rates"],
                                      policy=load_global_build_policy())
+    elif args.global_build_vt:
+        if any(selectors):
+            parser.error("--global-build-vt takes all selectors from the JSON request")
+        request = json.loads(args.input.read_text())
+        base_dir = args.input.parent
+        saved = {key: json.loads((base_dir / request[f"{key}_file"]).read_text())
+                 for key in ("quote", "assets", "transactions", "fx")}
+        api = global_build_vt_api_inputs(saved["assets"], saved["fx"], request["trading_date"])
+        result = global_build_vt(saved["quote"], trading_date=request["trading_date"],
+                                 us_session_date=request["us_session_date"],
+                                 held_value_twd=api["held_value_twd"], total_assets_twd=api["total_assets_twd"],
+                                 transactions=saved["transactions"], usd_twd_rates=api["usd_twd_rates"],
+                                 spot_selling_rate=api["spot_selling_rate"], policy=load_global_build_vt_policy())
     elif args.topup_tier:
         if not all(selectors):
             parser.error("--topup-tier requires --stock-code, --market, --trading-date and --completed-session")

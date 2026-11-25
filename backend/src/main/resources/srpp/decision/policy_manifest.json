@@ -59,7 +59,7 @@
     "docs/US_TECH_DIP_REVIEW.md": "c5cae25381ebbf485d7b778a6b73203411143b161f20983417bd9810b43eee90",
     "docs/VOO_TAIWAN_BRIDGE.md": "42b1b9999af7f5cdcb29c77ffac92dfe7336447046aeb9332a291863537cbd77",
     "docs/WEEKLY_MARKET_OUTLOOK_AUTOMATION.md": "f6649f3de7b2f491fb199f1671af1c144577bb23e8e0c76533b9aa82c10a973c",
-    "docs/schedule_entries/README.md": "cba76e98535accf152137e5bc83b6fd8a6d3064e8eced9a807e6e4ff4b920a50",
+    "docs/schedule_entries/README.md": "b8836843a9ab870a98655917cd52af0b8d3ee4343db522d5ea4605cd89adc1b9",
     "docs/schedule_entries/retired/CLAUDE_SCHEDULES_RETIRED.md": "e818c758ab0c1eb067971f18819f8af6c76f30895a5cbf3c85d93056062201ff",
     "docs/schedule_entries/retired/claude-srpp--0930.ENTRY.md": "e818c758ab0c1eb067971f18819f8af6c76f30895a5cbf3c85d93056062201ff",
     "docs/schedule_entries/retired/claude-srpp--0930.SKILL.md": "e818c758ab0c1eb067971f18819f8af6c76f30895a5cbf3c85d93056062201ff",
@@ -68,6 +68,7 @@
     "docs/schedule_entries/srpp-0905-claude.SKILL.md": "cb9d1cec8b7fd3bad0ad17cdac685ac8afbef7af6186b360f62885ab912b0bba",
     "docs/schedule_entries/srpp-1150-claude.SKILL.md": "c335304f9b1434daf9a8574859fee4187339591d58a828fa3d5cd7196711c810",
     "docs/schedule_entries/srpp-daily.ENTRY.md": "43315a273894da070bc1cdd42d86ae8a19e087dd79cdaa265d0553cc20daf227",
+    "docs/schedule_entries/srpp-us-watchdog.ENTRY.md": "41f35cd4bc2c22b5f6a5b276882eea413703ce0633f7a9c0bca01139b504f124",
     "docs/schedule_entries/srpp-watchdog.ENTRY.md": "908db57ba8a9e85dda7c932e43a0f2f9f25271093e9cf2295a6216ea9ce1ccd1",
     "docs/schedule_entries/us-22-00.EVIDENCE.md": "007073efb68cc29b0aa34578117646a36f4abeb9a93aef43c94141309798dfa6",
     "docs/schedule_entries/us-22-00.PUBLIC_DECISIONS.md": "5e1354813b6e7c8e724a6367456078cfdf49a071fad057cb4354ed1ab5fde64d",
@@ -89,7 +90,7 @@
     "review/OPEN_ISSUES.md": "cd700d27e814e86d86d4d92aaa6c2c33cecd2fb96daa7833389be4f8067b4f0e",
     "review/QUARTERLY_REVIEW.md": "311dcf4fcc187d27b1b2ad250a311a7e547a736ddfc8e78123ecb193452a0514",
     "review/REVIEW_TIMESLOT_D145_2026-09-05.md": "f27e9bc07d344c4ad6487372de2ed870e16e30f9f9dae2d019f7b7531804822c",
-    "scripts/README.md": "1f2ee4358406e1fcb974b5e8997370a55865ec6a7b4a559c9754e4307c212f80",
+    "scripts/README.md": "ce006afe09abd5ab05bfa16c232844d7d5930fa387bf57a493a2e77e546ac06b",
     "scripts/asset_reconciliation.py": "eefb6e153f6d087618293f8f5181e4089e3bc2bbe092d86de6e42ea9704e7a69",
     "scripts/bear_ladder.py": "c299f52e4cb8162548b4cc1e768b891e7140ebc3f21c7dfb18656c2b1efa3f84",
     "scripts/budget_accounting.py": "070e40f2168025398b227c84cfd94baab5cd36d09a1a24fabb25a0bf86dd2268",
@@ -178,7 +179,7 @@
     "scripts/test_d222_report_compatibility.py": "eaff02f61f0838c2726d98c9bfad9f205093d020070758c6232293861aa138e5",
     "scripts/test_daily_runtime.py": "0954a100dd3080c903e390961e8c519465bc8ea6af0c3d49399c2a1d179cf153",
     "scripts/test_daily_timing.py": "9aeb018962be4084aa7fb43d0395f022d4385485c1bbe68e0902531bacb2b012",
-    "scripts/test_data_tools.py": "652022841cb8aac833faf2629d7082a1edb7c349f2005fd70a3729c4808b963e",
+    "scripts/test_data_tools.py": "9be77bf26b9e82c5bb459da03afab75f8132efa3913cd9d9fe7f9d65e0a06ebc",
     "scripts/test_deep_drawdown.py": "3cbb7a36721894f9dfb3438a1018c1bdff83a1ffbf0af1b0deffc0681ed4cdc6",
     "scripts/test_dividend_stabilization.py": "8152d070d4524645eb081c27a8f096cf7874ab1373275626916ca89f3ec436ae",
     "scripts/test_dividend_stabilization_consumer.py": "61a4d5161ae5a015299dfecac167d2f7ba80fa0e8da2682e52954a5f9935320e",
@@ -224,6 +225,7 @@
     "scripts/test_us_report_api.py": "beab0323e847a8c1628ccd2750f826898a30b1a8874036ded57f3a05f3bb60e3",
     "scripts/test_us_session.py": "215cb2ca95bfa6ee6f9a2d84972763ffb2576d57c9da26d83f7f9dbc412acf89",
     "scripts/test_us_tactical_order_check.py": "e63b8dd3d3e9a502d29c2f87f54f789a71e360c04ef8d611aadb2bf922ce6168",
+    "scripts/test_us_watchdog_entry.py": "77922d09d04e94cf0cf71fb3a89c674e88e9627efcda1761e9242fab0dfd1e20",
     "scripts/test_usd_asset_fx_preference.py": "a113167f251364894a1fb6cafd92fe59cfefa602170de0ce7609329e930d430c",
     "scripts/test_usd_fx_report_composition.py": "289d4767c37d30cd441156f7f435302a0e1ebe27570f7e72af3b509cb1c47a5f",
     "scripts/test_verify_completed_technicals.py": "a903d7a43c46f49337b266ec12b58ec2d4b4eb40a17ffe31977e0d77f8ff2922",
@@ -243,6 +245,7 @@
     "scripts/us_report_api.py": "34378df2af18e2f0d2b096ff126818b0f3ed3f39a92f363b2115c4b488e72f53",
     "scripts/us_session.py": "b066955b98e50b46885d99aa3e7c7725ae3862e88ea585898b7623a9e3fc9b7f",
     "scripts/us_tactical_order_check.py": "931aedbef8b7970a7996af1af80dfd70448a4c24e64c16fd5b3b495a801fb86d",
+    "scripts/us_watchdog_entry.py": "143d1614086694fae16200ed5caf83878b3b55393854b1505bb55b8d001ca5c8",
     "scripts/usd_asset_fx_preference.py": "d5ac579938a7cf529b3a44d19bb6488a2f3c83b5e825d5c6d02b7c04e2330af7",
     "scripts/verify_completed_technicals.py": "3b77fb8b31c0b3228fcf71460c6d435c91085dfd6e23844f8a05f80e99f8a2dd",
     "scripts/verify_email_html.mjs": "8c8321957f8de5042de30823163b233c4b1c6920ea02d35e5b1718e4a0731d87",
@@ -261,5 +264,5 @@
     "scripts/voo_bridge.py": "dc1735c2d35b2bcc7fbdd087175c945406986a05d42c594c694ae5bd6972d6bd",
     "scripts/voo_bridge_proxy.py": "3a7bd68cc8202bbf039641afa13dac5a4b228cf04e7c63159cf1ffa9b2ddf590"
   },
-  "POLICY_BUNDLE_SHA256": "2d86981102ff814d9bc150058c7e707e52486bc1ccaa6a090a7683ad8d604770"
+  "POLICY_BUNDLE_SHA256": "d86ee3266a191027fd61004130f1e99bbe6ccbb34b6bd88274cbc4668bdee554"
 }
