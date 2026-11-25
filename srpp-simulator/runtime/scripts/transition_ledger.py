@@ -22,7 +22,7 @@ class TransitionLedger:
         self.target = inputs["detailed_target_allocation_2027"]
         # 24B2 is the Schroder global income bond fund. It is held in the bond
         # bucket for valuation and redemption ordering, but it is NOT one of the
-        # 56.53/26.47/17 target-table securities (D-143 §2 lists only 00865B, 00719B,
+        # 59.5/23.5/17 (D-224) target-table securities (D-143 §2 lists only 00865B, 00719B,
         # SGOV and 00697B with bond targets), so it carries no target weight.
         self.bond_codes = {"00865B", "00719B", "00697B", "SGOV", "00679B", "00751B", "24B2"}
         holdings = {}
