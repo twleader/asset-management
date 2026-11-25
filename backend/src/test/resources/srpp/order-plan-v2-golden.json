@@ -323,7 +323,7 @@
   "srppSources": {
     "execution_policy.py": "16fb30de344493be599d89541f0f76ee985bcd64996dada819bf0f701aad4a2d",
     "risk_evidence_evaluator.py": "bb8f3e765480706e575814a5f8c30a9d0d4074a97ebdc3e2a15bb37fecaa9d5e",
-    "trade_blocker_policy.py": "c4c51f95f06604d5bd690472324e5b01dcd49812439c8d6d5ef76f205097d80a"
+    "trade_blocker_policy.py": "2d8b1ebde0fb95340f0bd937985a702e8c8b95836e1c8b5d3f221311e27b53b4"
   },
   "tradingDate": "2026-10-08"
 }

@@ -159,7 +159,8 @@ final class SrppReportResponseValidator {
                 }
                 if(!bondLegs.equals(Set.of("00697B:STRATEGIC_FUBON","00719B:STRATEGIC_FUBON","00865B:STRATEGIC_FUBON","00865B:EMERGENCY_CATHAY")))fail();
             }
-            for(JsonNode leg:data.get("legs")){leg(id,leg,sourceIds,verifiedSources,model);if(index>=2 && "ACTIONABLE_FOR_REPORT".equals(text(leg,"status")))fail();}
+            int namedExitCount=0;for(JsonNode candidate:data.get("legs"))if(Set.of("NAMED_RADAR_ROTATION_D226","NAMED_HIGH_ZONE_EXIT_D235").contains(candidate.path("strategy").asText())&&++namedExitCount>1)fail();
+            for(JsonNode leg:data.get("legs")){leg(id,leg,sourceIds,verifiedSources,model,sources,q.tradingDate());if(index>=2 && "ACTIONABLE_FOR_REPORT".equals(text(leg,"status")))fail();}
         }
         JsonNode coverage=root.get("coverage");fields(coverage,"requestedCount","completeCount","partialCount","unavailableCount","notEvaluatedCount");
         if(integer(coverage,"requestedCount")!=12 || integer(coverage,"completeCount")!=counts[0]
@@ -192,7 +193,7 @@ final class SrppReportResponseValidator {
         if(name.equals("referenceCashDelta"))return;
         if(value.signum()<0 || range&&value.signum()==0 || ratio&&value.compareTo(BigDecimal.ONE)>0)fail();
     }
-    private static void leg(String moduleId,JsonNode leg,Set<String> sources,Set<String> verifiedSources,JsonNode model){
+    private static void leg(String moduleId,JsonNode leg,Set<String> sources,Set<String> verifiedSources,JsonNode model,JsonNode rawSources,String tradingDate){
         fields(leg,"symbol","market","broker","subaccount","strategy","status","action","lots","units","limitPrice","amount","currency","fees","netProfitSpace","rankingReason","blockingReasons","receipts");
         text(leg,"symbol");text(leg,"market");text(leg,"strategy");text(leg,"currency");
         for(String key:Set.of("broker","subaccount","rankingReason"))nullableText(leg,key);
@@ -202,7 +203,8 @@ final class SrppReportResponseValidator {
         boolean satelliteVt="GLOBAL_EQUITY_PACE".equals(moduleId)&&"SATELLITE_BUILD_D234".equals(strategy)&&"VT".equals(symbol)&&"美股".equals(market)&&"USD".equals(currency);
         // These 09:05/12:00 Taiwan report slots expose no individual US leg except the D-234 VT build ceiling (TWD-funded sub-brokerage).
         if(!"台股".equals(market)&&!satelliteVt)fail();
-        boolean planBuy="NAMED_CASH_BUY_D226".equals(strategy),shortStrategy=SHORT_STRATEGIES.contains(strategy),namedSell="NAMED_RADAR_ROTATION_D226".equals(strategy);
+        boolean highSell="NAMED_HIGH_ZONE_EXIT_D235".equals(strategy);
+        boolean planBuy="NAMED_CASH_BUY_D226".equals(strategy),shortStrategy=SHORT_STRATEGIES.contains(strategy),namedSell=highSell||"NAMED_RADAR_ROTATION_D226".equals(strategy);
         boolean boundStrategy=switch(moduleId){
             case "BOND_D130_D195" -> Set.of("STRATEGIC_FUBON","EMERGENCY_CATHAY").contains(strategy);
             case "DIVIDEND_TOPUP" -> "DIVIDEND_TOPUP".equals(strategy);
@@ -212,6 +214,7 @@ final class SrppReportResponseValidator {
             default -> false;
         };
         if(!boundStrategy)fail();
+        if(highSell&&(!"SELL".equals(action)||!"CORE_D226".equals(text(leg,"subaccount"))))fail();
         if(!Set.of("ACTIONABLE_FOR_REPORT","BLOCKED","NOT_EVALUATED").contains(status)||!Set.of("BUY","SELL","NONE").contains(action))fail();
         JsonNode lots=leg.get("lots");if(!lots.isNull() && integer(leg,"lots")<0)fail();
         for(String key:Set.of("units","limitPrice","amount","fees","netProfitSpace"))decimal(leg.get(key));
@@ -220,6 +223,7 @@ final class SrppReportResponseValidator {
         boolean d215=d215(model);
         d215Receipt(leg,"BOND_D130_D195".equals(moduleId)||satelliteVt,d215,satelliteVt,active);
         if(active){
+            if(namedSell&&!highSell&&highRouteExpected(model,rawSources,tradingDate))fail();
             boolean positiveLots=!lots.isNull() && lots.longValue()>0;
             boolean positiveUnits=positive(leg.get("units"));
             if(positiveLots==positiveUnits || !positive(leg.get("limitPrice")) || !positive(leg.get("amount"))
@@ -284,13 +288,15 @@ final class SrppReportResponseValidator {
                 }
             }
             if(namedSell){
-                Set<String> required=Set.of("D226_SELL_PATH","QUOTE","RADAR","POSITION","PENDING","RESERVATIONS","DEDUPLICATION","CORE_RETENTION","D152_BATCH","COOLDOWN","DEPTH","EXECUTION_ACCOUNT","COSTS","TRADABILITY");
+                Set<String> required=new HashSet<>(Set.of("D226_SELL_PATH","QUOTE","RADAR","POSITION","PENDING","RESERVATIONS","DEDUPLICATION","CORE_RETENTION","D152_BATCH","COOLDOWN","DEPTH","EXECUTION_ACCOUNT","COSTS","TRADABILITY"));
+                if(highSell){required.remove("D226_SELL_PATH");required.add("D235_HIGH_ZONE_PATH");}
                 if(!gates.equals(required)||!"SELL".equals(action)||!"CORE_D226".equals(text(leg,"subaccount"))||!lots.isNull()||!positiveUnits||!leg.get("units").textValue().matches("[1-9][0-9]*")||new BigDecimal(leg.get("units").textValue()).compareTo(BigDecimal.valueOf(9007199254740991L))>0)fail();text(leg,"broker");
                 for(JsonNode receipt:leg.get("receipts")){
-                    String rule=text(receipt,"ruleId");Set<String> expected=Set.of("QUOTE","RADAR","DEPTH").contains(rule)?Set.of("policy","market:台股:2881"):"TRADABILITY".equals(rule)?Set.of("policy","market:台股:2881","topup-state"):Set.of("assets","policy","topup-state","report-reservations","classifications","market:台股:2881");
+                    String rule=text(receipt,"ruleId");Set<String> expected=Set.of("QUOTE","RADAR","DEPTH","D235_HIGH_ZONE_PATH").contains(rule)?Set.of("policy","market:台股:2881"):"TRADABILITY".equals(rule)?Set.of("policy","market:台股:2881","topup-state"):Set.of("assets","policy","topup-state","report-reservations","classifications","market:台股:2881");
                     Set<String> actual=new HashSet<>();receipt.get("inputRefs").forEach(r->actual.add(r.asText()));if(!actual.equals(expected))fail();
                 }
             }
+            if(highSell)highZoneFacts(leg,rawSources,model,tradingDate);
             if(satelliteLots||satelliteVt)satellite(leg,gates,satelliteVt,positiveLots,positiveUnits,verifiedSources,d215);
             if(shortStrategy){
                 if(!lots.isNull() || !positiveUnits || !leg.get("units").textValue().matches("[1-9][0-9]*")
@@ -346,6 +352,47 @@ final class SrppReportResponseValidator {
         }
     }
     private static boolean positive(JsonNode n){return n!=null && !n.isNull() && new BigDecimal(n.textValue()).signum()>0;}
+    private static boolean validHighPolicy(JsonNode c){
+        try{
+            if(!c.isObject()||!c.path("enabled").isBoolean()||!c.path("enabled").asBoolean()||!"D-235".equals(c.path("decision").asText())||!"2881".equals(c.path("symbol").asText())||!"台股".equals(c.path("market").asText())||c.path("minimum_week52_position_inclusive").isBoolean()||new BigDecimal(c.path("minimum_week52_position_inclusive").asText()).compareTo(new BigDecimal("0.95"))!=0)return false;
+            java.time.LocalDate.parse(c.path("effective_date").asText());
+            for(String flag:Set.of("require_distribution_adjusted","first_batch_disallow_small_clear","pause_outside_high_zone","requires_llm_adoption"))if(!c.path(flag).isBoolean()||!c.path(flag).asBoolean())return false;
+            if(!c.path("radar_actions").isArray())return false;Set<String> actions=new HashSet<>();for(JsonNode a:c.path("radar_actions"))if(!a.isTextual()||!actions.add(a.asText()))return false;
+            return actions.equals(Set.of("HOLD","HOLD_CAUTION","EXIT_CANDIDATE","REDUCE_CANDIDATE"));
+        }catch(IllegalArgumentException invalid){return false;}
+    }
+    private static boolean highRouteExpected(JsonNode model,JsonNode sources,String tradingDate){
+        JsonNode cfg=model.path("execution_policy").path("named_high_zone_exit_d235");boolean valid=validHighPolicy(cfg);
+        if("D-235".equals(model.path("decision").asText())&&!valid)return true;
+        if(!valid||java.time.LocalDate.parse(tradingDate).isBefore(java.time.LocalDate.parse(cfg.path("effective_date").asText())))return false;
+        JsonNode stock=sources.path("market:台股:2881").path("radar").path("stock");
+        if(Set.of("HOLD","HOLD_CAUTION").contains(stock.path("action").asText()))return true;
+        try{BigDecimal position=new BigDecimal(stock.path("week52Position").asText());return stock.path("distributionAdjusted").isBoolean()&&stock.path("distributionAdjusted").asBoolean()&&position.compareTo(new BigDecimal("0.95"))>=0&&position.compareTo(BigDecimal.ONE)<=0;}catch(IllegalArgumentException invalid){return false;}
+    }
+    private static BigDecimal exactValue(JsonNode leg,String rule,String name,String unit){
+        JsonNode match=null;int count=0;
+        for(JsonNode r:leg.path("receipts"))if(rule.equals(r.path("ruleId").asText()))for(JsonNode value:r.path("values"))if(name.equals(value.path("name").asText())){count++;match=value;}
+        if(count!=1||!"2881".equals(match.path("subject").asText())||!unit.equals(match.path("unit").asText())||!"EXACT".equals(match.path("quality").asText())||match.path("value").isNull())fail();
+        return new BigDecimal(match.path("value").asText());
+    }
+    private static void highZoneFacts(JsonNode leg,JsonNode sources,JsonNode model,String tradingDate){
+        JsonNode stock=sources.path("market:台股:2881").path("radar").path("stock"),cfg=model.path("execution_policy").path("named_high_zone_exit_d235");
+        if(!validHighPolicy(cfg))fail();
+        BigDecimal position=exactValue(leg,"D235_HIGH_ZONE_PATH","d235Week52Position","RATIO"),threshold=exactValue(leg,"D235_HIGH_ZONE_PATH","d235Threshold","RATIO");
+        if(!stock.path("distributionAdjusted").isBoolean()||!stock.path("distributionAdjusted").asBoolean()||!stock.path("week52Position").isNumber()&&!stock.path("week52Position").isTextual()||position.compareTo(new BigDecimal(stock.path("week52Position").asText()))!=0||position.compareTo(new BigDecimal("0.95"))<0||position.compareTo(BigDecimal.ONE)>0||threshold.compareTo(new BigDecimal("0.95"))!=0||exactValue(leg,"D235_HIGH_ZONE_PATH","d235DistributionAdjusted","BOOLEAN").compareTo(BigDecimal.ONE)!=0)fail();
+        if(!"D-235".equals(cfg.path("decision").asText())||!cfg.path("enabled").isBoolean()||!cfg.path("enabled").asBoolean()||!"2881".equals(cfg.path("symbol").asText())||!"台股".equals(cfg.path("market").asText())||new BigDecimal(cfg.path("minimum_week52_position_inclusive").asText()).compareTo(threshold)!=0)fail();
+        if(java.time.LocalDate.parse(tradingDate).isBefore(java.time.LocalDate.parse(cfg.path("effective_date").asText())))fail();
+        for(String flag:Set.of("require_distribution_adjusted","first_batch_disallow_small_clear","pause_outside_high_zone","requires_llm_adoption"))if(!cfg.path(flag).isBoolean()||!cfg.path(flag).asBoolean())fail();
+        if(!Set.of("HOLD","HOLD_CAUTION","EXIT_CANDIDATE","REDUCE_CANDIDATE").contains(stock.path("action").asText()))fail();
+        long baseline=exactValue(leg,"D152_BATCH","baselineShares","SHARES").longValueExact(),batches=exactValue(leg,"D152_BATCH","confirmedBatches","COUNT").longValueExact();
+        if(baseline<=0||batches<0||exactValue(leg,"D152_BATCH","firstBatchSmallClearAllowed","BOOLEAN").signum()!=0)fail();
+        JsonNode state=sources.path("topup-state"),plan=state.path("rotationExit").path("2881");String broker=state.path("executionAccounts").path("CORE_D226").path("brokerId").asText();
+        if(!plan.path("verified").isBoolean()||!plan.path("verified").asBoolean()||!plan.path("baselineSnapshot").path("stocks").isArray()||!plan.path("fills").path("rows").isArray()||!plan.path("fills").path("verified").asBoolean())fail();
+        long rawBaseline=0;for(JsonNode row:plan.path("baselineSnapshot").path("stocks"))if("2881".equals(row.path("stockCode").asText())&&"台股".equals(row.path("market").asText())&&broker.equals(row.path("brokerId").asText()))rawBaseline=Math.addExact(rawBaseline,new BigDecimal(row.path("shares").asText()).longValueExact());
+        Set<String> rawBatches=new HashSet<>();for(JsonNode fill:plan.path("fills").path("rows"))if(fill.path("confirmed").isBoolean()&&fill.path("confirmed").asBoolean())rawBatches.add(text(fill,"batchId"));else fail();
+        if(baseline!=rawBaseline||batches!=rawBatches.size())fail();
+        if(batches==0){long units=new BigDecimal(leg.path("units").asText()).longValueExact(),step=baseline<3000?1:1000,ceiling=Math.max(baseline/3/step*step,step);if(units>=baseline||units>ceiling||units%step!=0)fail();}
+    }
     private static boolean d215(JsonNode model){return model!=null && model.path("execution_policy").has("usd_asset_fx_preference_d215");}
     /**
      * Task 625: with a D-215 bundle every bond leg and the VT build leg carries exactly one D215_FX receipt with refs

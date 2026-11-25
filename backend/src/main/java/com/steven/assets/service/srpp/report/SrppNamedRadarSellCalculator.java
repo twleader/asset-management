@@ -13,6 +13,10 @@ import static com.steven.assets.service.srpp.report.SrppReportModuleCalculator.*
 /** D226 named zero-target exit ceiling from frozen originals. No IO, order, or LLM timing adoption. */
 public final class SrppNamedRadarSellCalculator {
     public static final String STRATEGY="NAMED_RADAR_ROTATION_D226";
+    public static final String HIGH_STRATEGY="NAMED_HIGH_ZONE_EXIT_D235";
+    public static final String HIGH_GATE="D235_HIGH_ZONE_PATH";
+    private static final Set<String> HIGH_ACTIONS=Set.of("HOLD","HOLD_CAUTION","EXIT_CANDIDATE","REDUCE_CANDIDATE");
+    private static final BigDecimal HIGH_THRESHOLD=new BigDecimal("0.95");
     public static final String SYMBOL="2881";
     public static final String SUBACCOUNT="CORE_D226";
     public static final String PLAN_ID="D223_00881_CASH_2881_EXIT_20261118";
@@ -35,13 +39,13 @@ public final class SrppNamedRadarSellCalculator {
     private static String text(JsonNode row,String key){JsonNode value=row.path(key);require(value.isTextual()&&!value.asText().isBlank(),"D226_SOURCE_IDENTITY_UNAVAILABLE:"+key);return value.asText();}
     private static String id(JsonNode value){require((value.isIntegralNumber()||value.isTextual())&&value.asText().matches("[1-9][0-9]*"),"D226_HOLDING_OR_BROKER_ID_UNVERIFIED");return value.asText();}
     public static List<String> refs(String rule){
-        if(Set.of("QUOTE","RADAR","DEPTH").contains(rule))return List.of("policy","market:台股:2881");
+        if(Set.of("QUOTE","RADAR","DEPTH",HIGH_GATE).contains(rule))return List.of("policy","market:台股:2881");
         if(rule.equals("TRADABILITY"))return List.of("policy","market:台股:2881","topup-state");
         return List.of("assets","policy","topup-state","report-reservations","classifications","market:台股:2881");
     }
     private interface Check {void run();}
     private static void gate(M module,ObjectNode leg,String rule,Check check){
-        String status="PASS",reason="D226_"+rule+"_SOURCE_VERIFIED";
+        String status="PASS",reason=HIGH_GATE.equals(rule)?"D235_HIGH_ZONE_SOURCE_VERIFIED":"D226_"+rule+"_SOURCE_VERIFIED";
         try{check.run();}catch(IllegalArgumentException|ArithmeticException invalid){reason=invalid.getMessage()==null?"D226_SOURCE_UNVERIFIED":invalid.getMessage();status=unavailable(reason)?"UNAVAILABLE":"BLOCK";((ArrayNode)leg.path("blockingReasons")).add(reason);if(status.equals("UNAVAILABLE"))module.missing(reason+":2881");}
         module.refs.addAll(refs(rule));((ArrayNode)leg.path("receipts")).add(receipt(rule,status,reason,refs(rule)));
     }
@@ -68,6 +72,30 @@ public final class SrppNamedRadarSellCalculator {
         if(finalBatch&&available>=holdings)return holdings;
         return Math.min(requested,available)/step*step;
     }
+    static long highZoneQuantity(long holdings,long capacity,long baseline,int batches,BigDecimal value){
+        if(batches!=0)return sellQuantity(holdings,capacity,baseline,batches,value);
+        require(holdings>1&&baseline>1,"D235_FIRST_BATCH_MUST_RETAIN_SHARES");
+        long step=baseline<3000?1:1000;
+        long quantity=Math.min(Math.min(holdings,capacity),Math.max(baseline/3/step*step,step))/step*step;
+        require(quantity<holdings,"D235_FIRST_BATCH_MUST_RETAIN_SHARES");return quantity;
+    }
+    private static boolean validHighPolicy(JsonNode cfg){
+        try{
+            require(cfg.isObject()&&cfg.path("enabled").isBoolean()&&cfg.path("enabled").asBoolean()&&"D-235".equals(cfg.path("decision").asText())&&SYMBOL.equals(cfg.path("symbol").asText())&&"台股".equals(cfg.path("market").asText()),"D235_POLICY_UNVERIFIED");
+            require(number(cfg.path("minimum_week52_position_inclusive")).compareTo(HIGH_THRESHOLD)==0,"D235_POLICY_UNVERIFIED");date(cfg.path("effective_date"));
+            for(String flag:List.of("require_distribution_adjusted","first_batch_disallow_small_clear","pause_outside_high_zone","requires_llm_adoption"))require(cfg.path(flag).isBoolean()&&cfg.path(flag).asBoolean(),"D235_POLICY_UNVERIFIED");
+            Set<String> actions=new HashSet<>();require(cfg.path("radar_actions").isArray(),"D235_POLICY_UNVERIFIED");for(JsonNode a:cfg.path("radar_actions"))require(a.isTextual()&&actions.add(a.asText()),"D235_POLICY_UNVERIFIED");return actions.equals(HIGH_ACTIONS);
+        }catch(IllegalArgumentException invalid){return false;}
+    }
+    private static boolean highRoute(Frozen f,JsonNode model){
+        JsonNode cfg=model.path("execution_policy").path("named_high_zone_exit_d235");
+        if("D-235".equals(model.path("decision").asText())&&!validHighPolicy(cfg))return true;
+        if(cfg.isMissingNode()||cfg.path("enabled").isBoolean()&&!cfg.path("enabled").asBoolean())return false;
+        try{if(f.facts().date().isBefore(date(cfg.path("effective_date"))))return false;}catch(IllegalArgumentException invalid){return true;}
+        JsonNode stock=f.input().path("sources").path("market:台股:2881").path("radar").path("stock");
+        if(Set.of("HOLD","HOLD_CAUTION").contains(stock.path("action").asText()))return true;
+        try{return stock.path("distributionAdjusted").isBoolean()&&stock.path("distributionAdjusted").asBoolean()&&number(stock.path("week52Position")).compareTo(HIGH_THRESHOLD)>=0&&number(stock.path("week52Position")).compareTo(ONE)<=0;}catch(IllegalArgumentException invalid){return false;}
+    }
     private static final class Data {
         final Frozen frame;final Policy policy;final JsonNode model;
         Data(Frozen f,Policy p,JsonNode m){frame=f;policy=p;model=m;}
@@ -75,6 +103,15 @@ public final class SrppNamedRadarSellCalculator {
         JsonNode market(){return source(frame,"market:台股:2881");}
         JsonNode assets(){JsonNode a=source(frame,"assets");require(a.path("targetPriceComplete").asBoolean()&&a.path("snapshot").path("id").equals(a.path("liveAssets").path("snapshotId")),"D226_ASSETS_UNVERIFIED");Instant generated=instant(a.path("generatedAt"));require(!generated.isAfter(frame.facts().capturedAt())&&generated.atZone(ZoneId.of("Asia/Taipei")).toLocalDate().equals(frame.facts().date()),"D226_ASSET_TIME_UNVERIFIED");return a;}
         void path(){JsonNode c=model.path("execution_policy").path("named_cash_rotation_d223");Set<String> actions=new HashSet<>();for(JsonNode a:c.path("sell_radar_actions"))require(a.isTextual()&&actions.add(a.asText()),"D226_SELL_POLICY_UNVERIFIED");require(c.path("enabled").isBoolean()&&c.path("enabled").asBoolean()&&"D-226".equals(c.path("entry_rule_decision").asText())&&SYMBOL.equals(c.path("sell_symbol").asText())&&PLAN_ID.equals(c.path("plan_id").asText())&&c.path("sell_requires_llm_adoption").isBoolean()&&c.path("sell_requires_llm_adoption").asBoolean()&&actions.equals(SELL_ACTIONS)&&!c.has("sell_price_exclusive_lower_twd")&&!frame.facts().date().isBefore(date(c.path("effective_date"))),"D226_SELL_POLICY_UNVERIFIED");}
+        BigDecimal highZone(){
+            path();JsonNode c=model.path("execution_policy").path("named_high_zone_exit_d235");
+            require(validHighPolicy(c),"D235_POLICY_UNVERIFIED");
+            require(!frame.facts().date().isBefore(date(c.path("effective_date"))),"D235_POLICY_NOT_EFFECTIVE");
+            JsonNode body=market();verifyExactRadar(body,frame);JsonNode stock=body.path("radar").path("stock");
+            require(stock.path("distributionAdjusted").isBoolean()&&stock.path("distributionAdjusted").asBoolean(),"D235_DISTRIBUTION_ADJUSTMENT_UNVERIFIED");
+            BigDecimal position=number(stock.path("week52Position"));require(position.signum()>=0&&position.compareTo(ONE)<=0,"D235_POSITION_UNVERIFIED");
+            require(position.compareTo(HIGH_THRESHOLD)>=0,"D235_OUTSIDE_HIGH_ZONE_PAUSED");return position;
+        }
         Account account(){JsonNode a=state().path("executionAccounts").path(SUBACCOUNT);require(a.path("verified").isBoolean()&&a.path("verified").asBoolean()&&a.path("ownerUserId").asLong(-1)==frame.input().path("ownerUserId").asLong()&&SUBACCOUNT.equals(a.path("subaccount").asText()),"D226_EXECUTION_ACCOUNT_UNAVAILABLE");return new Account(id(a.path("brokerId")),text(a,"broker"),text(a,"accountFingerprint"),a.path("costs"));}
         Map<String,Holding> holdings(){
             JsonNode a=assets(),snapshot=a.path("snapshot"),live=a.path("liveAssets");require(snapshot.path("stocks").isArray()&&live.path("stocks").isArray(),"D226_HOLDINGS_UNAVAILABLE");Map<String,JsonNode> old=new HashMap<>();for(JsonNode row:snapshot.path("stocks"))require(old.put(id(row.path("id")),row)==null,"D226_DUPLICATE_HOLDING");Map<String,Holding> selected=new TreeMap<>();Set<String> seen=new HashSet<>();
@@ -118,16 +155,18 @@ public final class SrppNamedRadarSellCalculator {
     private static void revoke(ObjectNode leg,M module,String rule,String reason){((ArrayNode)leg.path("blockingReasons")).add(reason);if(unavailable(reason))module.missing(reason+":2881");for(JsonNode r:leg.path("receipts"))if(rule.equals(r.path("ruleId").asText()))((ObjectNode)r).put("status",unavailable(reason)?"UNAVAILABLE":"BLOCK").put("reason",reason);}
     public static void append(M module,Frozen f,Policy p,JsonNode model){
         JsonNode cfg=model.path("execution_policy").path("named_cash_rotation_d223");if(!"D-226".equals(cfg.path("entry_rule_decision").asText())||!cfg.has("sell_radar_actions"))return;
-        Data data=new Data(f,p,model);ObjectNode leg=leg(SYMBOL,"台股",STRATEGY,"BLOCKED","SELL",null);leg.put("subaccount",SUBACCOUNT);
-        for(String rule:ORDERED){
+        boolean high=highRoute(f,model);Data data=new Data(f,p,model);ObjectNode leg=leg(SYMBOL,"台股",high?HIGH_STRATEGY:STRATEGY,"BLOCKED","SELL",null);leg.put("subaccount",SUBACCOUNT);
+        for(String original:ORDERED){
+            String rule=high&&original.equals("D226_SELL_PATH")?HIGH_GATE:original;
             if(rule.equals("TRADABILITY")){
                 try{if(data.banned()){gate(module,leg,rule,()->{throw new Gap("D226_OFFICIAL_SELL_PROHIBITED");});continue;}if(data.officialTradability()){gate(module,leg,rule,()->{});continue;}}catch(IllegalArgumentException invalid){/* The original D144 missing-source rule remains L2. */}
                 module.refs.addAll(refs(rule));module.missing(D144_FALLBACK+":2881");((ArrayNode)leg.path("receipts")).add(receipt(rule,"UNAVAILABLE",D144_FALLBACK,refs(rule)));continue;
             }
             gate(module,leg,rule,()->{switch(rule){
                 case "D226_SELL_PATH" -> data.path();
+                case HIGH_GATE -> data.highZone();
                 case "QUOTE" -> quoteFreshness(data.market(),f,model,true);
-                case "RADAR" -> {JsonNode body=data.market();verifyExactRadar(body,f);require(SELL_ACTIONS.contains(body.path("radar").path("stock").path("action").asText()),"D226_EXACT_RADAR_NOT_SELL");}
+                case "RADAR" -> {JsonNode body=data.market();verifyExactRadar(body,f);require((high?HIGH_ACTIONS:SELL_ACTIONS).contains(body.path("radar").path("stock").path("action").asText()),"D226_EXACT_RADAR_NOT_SELL");}
                 case "POSITION" -> data.position();
                 case "PENDING" -> data.orders();
                 case "RESERVATIONS" -> data.reservations();
@@ -141,14 +180,16 @@ public final class SrppNamedRadarSellCalculator {
                 default -> throw new Gap("D226_UNSUPPORTED_SELL_GATE");
             }});
         }
+        if(high)for(JsonNode r:leg.path("receipts"))if(HIGH_GATE.equals(r.path("ruleId").asText())&&"PASS".equals(r.path("status").asText()))values(leg,HIGH_GATE,List.of(fact("d235Week52Position",SYMBOL,data.highZone(),"RATIO"),fact("d235Threshold",SYMBOL,HIGH_THRESHOLD,"RATIO"),fact("d235DistributionAdjusted",SYMBOL,ONE,"BOOLEAN")));
         if(leg.path("blockingReasons").isEmpty()){
             try{
-                Capacity cap=data.capacity();Plan plan=data.plan();long desired=sellQuantity(cap.held,cap.available,plan.baseline,plan.batches,plan.openingValue);require(desired>0,"D226_NO_UNCOMMITTED_SELL_CAPACITY");boolean odd=desired<1000;Book book=data.book(odd);long capacity=Math.min(cap.available,book.depth);if(!odd)capacity=Math.min(capacity,desired/1000*1000);long quantity=sellQuantity(cap.held,capacity,plan.baseline,plan.batches,plan.openingValue);require(quantity>0,"D226_NO_MATCHING_MARKET_DEPTH");if(odd)require(quantity<1000,"D226_ODD_LOT_QUANTITY_UNVERIFIED");else require(quantity%1000==0,"D226_REGULAR_LOT_QUANTITY_UNVERIFIED");
+                Capacity cap=data.capacity();Plan plan=data.plan();long desired=high?highZoneQuantity(cap.held,cap.available,plan.baseline,plan.batches,plan.openingValue):sellQuantity(cap.held,cap.available,plan.baseline,plan.batches,plan.openingValue);require(desired>0,"D226_NO_UNCOMMITTED_SELL_CAPACITY");boolean odd=desired<1000;Book book=data.book(odd);long capacity=Math.min(cap.available,book.depth);if(!odd)capacity=Math.min(capacity,desired/1000*1000);long quantity=high?highZoneQuantity(cap.held,capacity,plan.baseline,plan.batches,plan.openingValue):sellQuantity(cap.held,capacity,plan.baseline,plan.batches,plan.openingValue);require(quantity>0,"D226_NO_MATCHING_MARKET_DEPTH");if(odd)require(quantity<1000,"D226_ODD_LOT_QUANTITY_UNVERIFIED");else require(quantity%1000==0,"D226_REGULAR_LOT_QUANTITY_UNVERIFIED");
                 long depth=0;BigDecimal limit=null;for(JsonNode row:book.levels){long shares=whole(row.path(odd?"bidVolumeShares":"bidVolumeLots"));depth=Math.addExact(depth,odd?shares:Math.multiplyExact(shares,1000));limit=positive(row.path("bidPrice"));if(depth>=quantity)break;}require(depth>=quantity,"D226_NO_MATCHING_MARKET_DEPTH");boolean official=data.officialTradability();if(!official)limit=book.best;
                 Costs costs=data.costs();BigDecimal gross=limit.multiply(BigDecimal.valueOf(quantity)),commission=gross.multiply(costs.brokerage).setScale(2,RoundingMode.CEILING).max(costs.minimum),tax=gross.multiply(costs.tax).setScale(2,RoundingMode.CEILING),fees=commission.add(tax),net=gross.subtract(fees);require(net.signum()>0,"D226_COSTS_EXCEED_SELL_PROCEEDS");
-                leg.put("status","ACTIONABLE_FOR_REPORT").put("units",Long.toString(quantity)).put("limitPrice",decimal(limit)).put("amount",decimal(gross)).put("fees",decimal(fees)).put("rankingReason","D226_NAMED_SELL_CEILING_LLM_TIMING_STILL_REQUIRED");
+                leg.put("status","ACTIONABLE_FOR_REPORT").put("units",Long.toString(quantity)).put("limitPrice",decimal(limit)).put("amount",decimal(gross)).put("fees",decimal(fees)).put("rankingReason",high?"D235_HIGH_ZONE_SELL_CEILING_LLM_TIMING_STILL_REQUIRED":"D226_NAMED_SELL_CEILING_LLM_TIMING_STILL_REQUIRED");
                 values(leg,"POSITION",List.of(fact("settledShares",SYMBOL,BigDecimal.valueOf(cap.settled),"SHARES"),fact("officialSellableShares",SYMBOL,BigDecimal.valueOf(cap.brokerSellable),"SHARES"),fact("pendingSellShares",SYMBOL,BigDecimal.valueOf(cap.pending),"SHARES"),fact("unlinkedReservedSellShares",SYMBOL,BigDecimal.valueOf(cap.reserved),"SHARES")));
                 values(leg,"D152_BATCH",List.of(fact("baselineShares",SYMBOL,BigDecimal.valueOf(plan.baseline),"SHARES"),fact("confirmedBatches",SYMBOL,BigDecimal.valueOf(plan.batches),"COUNT"),fact("openingValueTwd",SYMBOL,plan.openingValue,"TWD")));
+                if(high)for(JsonNode r:leg.path("receipts"))if("D152_BATCH".equals(r.path("ruleId").asText()))((ArrayNode)r.path("values")).add(fact("firstBatchSmallClearAllowed",SYMBOL,ZERO,"BOOLEAN"));
                 values(leg,"COSTS",List.of(fact("sellCommissionTwd",SYMBOL,commission,"TWD"),fact("sellTaxTwd",SYMBOL,tax,"TWD"),fact("netProceedsTwd",SYMBOL,net,"TWD")));
             }catch(IllegalArgumentException|ArithmeticException invalid){String reason=invalid.getMessage()==null?"D226_SELL_CAPACITY_UNAVAILABLE":invalid.getMessage();String rule=reason.contains("BOOK")||reason.contains("DEPTH")||reason.contains("LOT")?"DEPTH":reason.contains("COST")?"COSTS":"POSITION";revoke(leg,module,rule,reason);}
         }
