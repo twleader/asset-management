@@ -8,7 +8,7 @@
     "README.md": "544dda0a280a6993102f4924f750c26b9ba16b1477ce90655e3f728b6b3c0ed3",
     "assumptions/bond_forward_yields.json": "1cb1e2ae47f25c247bd796801c3390b5cdd5b0927593b7962c3411db62fa7ccd",
     "assumptions/core_sell_watch_legacy_policies.json": "9806bd6d5a84f3ecf07ebba6f84be6eb098e939382ff0ec756b495e15eea9da9",
-    "assumptions/daily_runtime_contract.json": "2bd10df3e4a8acd37ad171e072352b995fd2597ef78d295c3db56b6e26c264bc",
+    "assumptions/daily_runtime_contract.json": "a6192d0131080acbd5ed1d89f2dc5f32056c41ba68512451155a25864afa073e",
     "assumptions/financial.md": "cb4313c74f584877d16adc2c62b7eb07bfbf7503d3ff93ff0493914d0ac856ab",
     "assumptions/market.md": "48942a68a9c1a1b3b50aa02fe22632bada67e63757c06127fdc08da73bb2836b",
     "assumptions/model_inputs.json": "e9e561a9fe5d8febffc480a20b2b2c013bf9c0d1469e9f37a000978e60c7f46d",
@@ -30,7 +30,7 @@
     "docs/CORE_TACTICAL_POLICY.md": "58c6e17e7860a1d2dc3a87a28d89a49aa86794a01d6d9b35326455cad0ab11f2",
     "docs/CURRENT_PLAN.md": "c4ee0168c1a848ffbd9d27356192975b27794e72daa36b620c36d0629f2a6b36",
     "docs/D107_LAYERED_SWAGGER_PROPOSAL.md": "a53252d72d02719a7e651c11f2e97d0a7cc45f50ff47deacb8db98e38a8c2ccf",
-    "docs/DAILY_TRADING_AUTOMATION.md": "a4d3f78b773b0224a343e63156bc7e97ee6735328387b1792db7f46e29372884",
+    "docs/DAILY_TRADING_AUTOMATION.md": "7a2ac66633c991475a710a4c666e54b8be3a4a7b1bda21715ec16c97ec370637",
     "docs/DATA_FETCH_RULES.md": "edeb64fe189c1a006cd56df46d75748600b5afb56b97faf91177ded336be5c50",
     "docs/DECISION_LOG.md": "b5f631975bbe772d0b00e5401fe9dc09ba09763ed71c3774e93347bf77ca5355",
     "docs/EMAIL_CORE_TEMPLATE_SAMPLE.html": "94ba972851a025e4be88d21002c884a7705d643c2fb08dba7499706600322e09",
@@ -67,7 +67,7 @@
     "docs/schedule_entries/retired/claude-srpp-12-10.SKILL.md": "e818c758ab0c1eb067971f18819f8af6c76f30895a5cbf3c85d93056062201ff",
     "docs/schedule_entries/srpp-0905-claude.SKILL.md": "cb9d1cec8b7fd3bad0ad17cdac685ac8afbef7af6186b360f62885ab912b0bba",
     "docs/schedule_entries/srpp-1150-claude.SKILL.md": "c335304f9b1434daf9a8574859fee4187339591d58a828fa3d5cd7196711c810",
-    "docs/schedule_entries/srpp-daily.ENTRY.md": "cd1dc9a8a282ae11783d17c4e825a248388d9bd8c628b0390ca621e728021dc7",
+    "docs/schedule_entries/srpp-daily.ENTRY.md": "43315a273894da070bc1cdd42d86ae8a19e087dd79cdaa265d0553cc20daf227",
     "docs/schedule_entries/srpp-watchdog.ENTRY.md": "908db57ba8a9e85dda7c932e43a0f2f9f25271093e9cf2295a6216ea9ce1ccd1",
     "docs/schedule_entries/us-22-00.EVIDENCE.md": "007073efb68cc29b0aa34578117646a36f4abeb9a93aef43c94141309798dfa6",
     "docs/schedule_entries/us-22-00.PUBLIC_DECISIONS.md": "5e1354813b6e7c8e724a6367456078cfdf49a071fad057cb4354ed1ab5fde64d",
@@ -105,7 +105,7 @@
     "scripts/daily_decision_engine.py": "ab16d26a347ee9b0a8a0c8f258718899b8af7e19a97d559d87b35924d364a0e6",
     "scripts/daily_report_preflight.py": "748a51fdda30475fe38a9fbde15e721ed9139c1770f33191949c9e7ca2a754b4",
     "scripts/daily_runtime_contract.py": "42bb830c7dcd91ab542210acd60c402d950f58381d467ac16a2a12d8783a22d6",
-    "scripts/daily_timing.py": "53b3edf2efcd66c0f6ac36b3f29082eee27996bc1d01f118d1f07b5909bc206c",
+    "scripts/daily_timing.py": "edd2c8fcfae3397aeb7899923949568e49402f1fdd3082d862f43b70e76a9a27",
     "scripts/deep_drawdown.py": "19ce6514d551ba40b1e6cc55c8e4e0962a6057249d79830a3731c1c7c618dae5",
     "scripts/deploy_schedule_entries.sh": "4306b66031a6d4c84770994eb9c47159b50ab27dd1b78f0ff1f6ff2692db9607",
     "scripts/dividend_stabilization.py": "2a5c47e261eb83d560ace9a37591d5e958423e0447ec9c9dd896823972a19f5e",
@@ -177,7 +177,7 @@
     "scripts/test_d211_cash_first_high_sell.py": "78a4f3749ae41b8cbef79f5817928f898287b93ec722a05daa6fba144a03fe85",
     "scripts/test_d222_report_compatibility.py": "eaff02f61f0838c2726d98c9bfad9f205093d020070758c6232293861aa138e5",
     "scripts/test_daily_runtime.py": "0954a100dd3080c903e390961e8c519465bc8ea6af0c3d49399c2a1d179cf153",
-    "scripts/test_daily_timing.py": "1fc12aeee7e88a608f67f506f4df0c3d97df72b305341d4946118b365a68b786",
+    "scripts/test_daily_timing.py": "9aeb018962be4084aa7fb43d0395f022d4385485c1bbe68e0902531bacb2b012",
     "scripts/test_data_tools.py": "652022841cb8aac833faf2629d7082a1edb7c349f2005fd70a3729c4808b963e",
     "scripts/test_deep_drawdown.py": "3cbb7a36721894f9dfb3438a1018c1bdff83a1ffbf0af1b0deffc0681ed4cdc6",
     "scripts/test_dividend_stabilization.py": "8152d070d4524645eb081c27a8f096cf7874ab1373275626916ca89f3ec436ae",
@@ -261,5 +261,5 @@
     "scripts/voo_bridge.py": "dc1735c2d35b2bcc7fbdd087175c945406986a05d42c594c694ae5bd6972d6bd",
     "scripts/voo_bridge_proxy.py": "3a7bd68cc8202bbf039641afa13dac5a4b228cf04e7c63159cf1ffa9b2ddf590"
   },
-  "POLICY_BUNDLE_SHA256": "a8d0e6d7d7e5fd7501cf1f668038cba9c1973b37be207f1bf1d740e2e866356d"
+  "POLICY_BUNDLE_SHA256": "2d86981102ff814d9bc150058c7e707e52486bc1ccaa6a090a7683ad8d604770"
 }
