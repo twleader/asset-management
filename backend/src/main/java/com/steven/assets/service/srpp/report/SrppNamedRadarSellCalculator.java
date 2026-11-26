@@ -155,6 +155,7 @@ public final class SrppNamedRadarSellCalculator {
     private static void revoke(ObjectNode leg,M module,String rule,String reason){((ArrayNode)leg.path("blockingReasons")).add(reason);if(unavailable(reason))module.missing(reason+":2881");for(JsonNode r:leg.path("receipts"))if(rule.equals(r.path("ruleId").asText()))((ObjectNode)r).put("status",unavailable(reason)?"UNAVAILABLE":"BLOCK").put("reason",reason);}
     public static void append(M module,Frozen f,Policy p,JsonNode model){
         JsonNode cfg=model.path("execution_policy").path("named_cash_rotation_d223");if(!"D-226".equals(cfg.path("entry_rule_decision").asText())||!cfg.has("sell_radar_actions"))return;
+        if(SrppZeroTargetHighZoneExitCalculator.claimsLegacy(SrppZeroTargetExitContext.taiwan(f,model,p.bundleHash()),SYMBOL))return;
         boolean high=highRoute(f,model);Data data=new Data(f,p,model);ObjectNode leg=leg(SYMBOL,"台股",high?HIGH_STRATEGY:STRATEGY,"BLOCKED","SELL",null);leg.put("subaccount",SUBACCOUNT);
         for(String original:ORDERED){
             String rule=high&&original.equals("D226_SELL_PATH")?HIGH_GATE:original;

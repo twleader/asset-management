@@ -1,0 +1,354 @@
+{
+  "synthetic": true,
+  "provenance": "HAND_AUTHORED_SYNTHETIC; adapted canonical identity and actual local trading-calendar flags; no API/market observation",
+  "purpose": "Backend calculator starting inputs; regenerate recommendations through actual calculator/publisher before integration acceptance",
+  "capturedAt": "2026-11-26T04:00:00Z",
+  "sources": {
+    "zero-target-exit-state": {
+      "verified": true,
+      "coverage": "COMPLETE",
+      "ownerUserId": 7,
+      "tradingDate": "2026-11-26",
+      "policyBundleSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source_ref": "SYNTHETIC_ONLY",
+      "positionAttributions": {
+        "verified": true,
+        "coverage": "COMPLETE",
+        "rows": [
+          {
+            "symbol": "2881",
+            "market": "台股",
+            "brokerId": 3,
+            "accountFingerprint": "A",
+            "holdingId": 1,
+            "subaccount": "CORE",
+            "coreShares": "900",
+            "protectedShares": "0",
+            "source_ref": "ATTR"
+          }
+        ]
+      },
+      "sellablePositions": {
+        "verified": true,
+        "coverage": "COMPLETE",
+        "rows": [
+          {
+            "symbol": "2881",
+            "market": "台股",
+            "brokerId": 3,
+            "accountFingerprint": "A",
+            "holdingId": 1,
+            "settledShares": "900",
+            "sellableShares": "900",
+            "source_ref": "SELLABLE"
+          }
+        ]
+      },
+      "pending": {
+        "verified": true,
+        "coverage": "COMPLETE",
+        "orders": []
+      },
+      "executionAccounts": [
+        {
+          "symbol": "2881",
+          "market": "台股",
+          "brokerId": 3,
+          "accountFingerprint": "A",
+          "verified": true,
+          "ownerUserId": 7,
+          "broker": "FUBON",
+          "subaccount": "CORE",
+          "source_ref": "ACCOUNT",
+          "costsByInstrument": {
+            "台股:2881": {
+              "verified": true,
+              "coverage": "COMPLETE",
+              "symbol": "2881",
+              "market": "台股",
+              "currency": "TWD",
+              "securityType": "COMMON_STOCK",
+              "source_ref": "COST",
+              "effectiveFrom": "2026-01-01",
+              "validUntil": "2026-12-31",
+              "brokerageRate": "0",
+              "minimumFee": "0",
+              "sellTaxRate": "0.003",
+              "regulatoryRate": "0",
+              "regulatoryPerShare": "0",
+              "minimumRegulatoryFee": "0",
+              "maximumRegulatoryFee": null
+            }
+          }
+        }
+      ],
+      "plans": [
+        {
+          "symbol": "2881",
+          "market": "台股",
+          "brokerId": 3,
+          "accountFingerprint": "A",
+          "planId": "PLAN",
+          "verified": true,
+          "subaccount": "CORE",
+          "source_ref": "PLAN",
+          "instrument": {
+            "verified": true,
+            "securityType": "COMMON_STOCK",
+            "regularLotSize": 1000,
+            "minimumShareStep": 1,
+            "source_ref": "INSTRUMENT"
+          },
+          "baselineSnapshot": {
+            "id": 99,
+            "snapshotDate": "2026-10-01",
+            "stocks": [
+              {
+                "id": 1,
+                "stockCode": "2881",
+                "market": "台股",
+                "brokerId": 3,
+                "coreShares": "900",
+                "currentValueTwd": "90000"
+              }
+            ]
+          },
+          "fills": {
+            "verified": true,
+            "coverage": "COMPLETE",
+            "rows": []
+          }
+        }
+      ],
+      "cooldowns": [
+        {
+          "symbol": "2881",
+          "market": "台股",
+          "brokerId": 3,
+          "accountFingerprint": "A",
+          "verified": true,
+          "coverage": "COMPLETE",
+          "scope": "OWNER_ALL_BROKERS_SAME_SYMBOL_DIRECTION",
+          "side": "SELL",
+          "source_ref": "COOLDOWN",
+          "coverageStart": "2026-11-01",
+          "coverageEnd": "2026-11-26",
+          "rows": []
+        }
+      ],
+      "tradability": [
+        {
+          "symbol": "2881",
+          "market": "台股",
+          "brokerId": 3,
+          "accountFingerprint": "A",
+          "verified": true,
+          "status": "PASS",
+          "source_ref": "TRADABILITY"
+        }
+      ]
+    },
+    "report-reservations": {
+      "verified": true,
+      "coverage": "COMPLETE",
+      "ownerUserId": 7,
+      "tradingDate": "2026-11-26",
+      "policyBundleSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source_ref": "SYNTHETIC_ONLY",
+      "rows": []
+    },
+    "policy": {},
+    "classifications": {
+      "resolvedStockClasses": {
+        "2881:台股": "STOCK"
+      }
+    },
+    "assets": {
+      "snapshot": {
+        "funds": [],
+        "stocks": [
+          {
+            "id": 1,
+            "brokerId": 3,
+            "stockCode": "2881",
+            "market": "台股",
+            "shares": "900",
+            "brokerDisplayName": "FUBON",
+            "currentValue": "90000"
+          }
+        ],
+        "id": 1,
+        "snapshotDate": "2026-11-26"
+      },
+      "liveAssets": {
+        "liveTotalAssets": "100000",
+        "stocks": [
+          {
+            "holdingId": 1,
+            "stockCode": "2881",
+            "market": "台股",
+            "shares": "900",
+            "liveValue": "90000",
+            "tradingDate": "2026-11-26"
+          }
+        ],
+        "snapshotId": 1,
+        "snapshotDate": "2026-11-26"
+      },
+      "generatedAt": "2026-11-26T04:00:00Z",
+      "targetPriceComplete": true
+    },
+    "market:台股:2881": {
+      "symbol": "2881",
+      "market": "台股",
+      "volumeUnit": "SHARES",
+      "calendarVerified": true,
+      "calendarCoverageStart": "2026-11-01",
+      "calendarCoverageEnd": "2026-11-26",
+      "completedSessions": [
+        "2026-11-02",
+        "2026-11-03",
+        "2026-11-04",
+        "2026-11-05",
+        "2026-11-06",
+        "2026-11-09",
+        "2026-11-10",
+        "2026-11-11",
+        "2026-11-12",
+        "2026-11-13",
+        "2026-11-16",
+        "2026-11-17",
+        "2026-11-18",
+        "2026-11-19",
+        "2026-11-20",
+        "2026-11-23",
+        "2026-11-24",
+        "2026-11-25"
+      ],
+      "quote": {
+        "stockCode": "2881",
+        "market": "台股",
+        "price": "100",
+        "quoteStatus": "LIVE",
+        "source": "SYNTHETIC_ONLY",
+        "updatedAt": "2026-11-26T04:00:00Z",
+        "tradingDate": "2026-11-26",
+        "closed": false,
+        "volume": "2000000"
+      },
+      "radar": {
+        "ruleVersion": "TW_RULES_V28",
+        "actionPolicyVersion": "EVIDENCE_GATE_V1",
+        "generatedAt": "2026-11-26T04:00:00Z",
+        "stock": {
+          "stockCode": "2881",
+          "market": "台股",
+          "asOfDate": "2026-11-26",
+          "quoteStatus": "LIVE",
+          "dataComplete": true,
+          "distributionAdjusted": true,
+          "week52Position": "0.95",
+          "action": "HOLD"
+        }
+      },
+      "oddLotBook": {
+        "available": true,
+        "stockCode": "2881",
+        "market": "台股",
+        "marketStatus": "OPEN",
+        "source": "SYNTHETIC_ONLY",
+        "sourceTime": "2026-11-26T04:00:00Z",
+        "fetchedAt": "2026-11-26T04:00:00Z",
+        "bookType": "ODD_LOT",
+        "volumeUnit": "SHARES",
+        "levels": [
+          {
+            "bidPrice": "100",
+            "bidVolumeShares": 500
+          },
+          {
+            "bidPrice": "99",
+            "bidVolumeShares": 500
+          },
+          {
+            "bidPrice": "98",
+            "bidVolumeShares": 500
+          },
+          {
+            "bidPrice": "97",
+            "bidVolumeShares": 500
+          },
+          {
+            "bidPrice": "96",
+            "bidVolumeShares": 500
+          }
+        ]
+      }
+    }
+  },
+  "model": {
+    "decision": "D-236",
+    "zero_target_do_not_rebuy": {
+      "zero_target": [
+        "2881"
+      ]
+    },
+    "detailed_target_allocation_2027": {
+      "2881": 0
+    },
+    "execution_policy": {
+      "zero_target_high_zone_exit_d236": {
+        "enabled": true,
+        "decision": "D-236",
+        "effective_date": "2026-11-26",
+        "minimum_week52_position_inclusive": "0.95",
+        "require_distribution_adjusted": true,
+        "first_batch_disallow_small_clear": true,
+        "pause_outside_high_zone": true,
+        "requires_llm_adoption": true,
+        "eligible_asset_type": "STOCK",
+        "target_authority": "zero_target_do_not_rebuy.zero_target",
+        "eligible_markets": [
+          "台股",
+          "美股"
+        ],
+        "radar_actions": [
+          "HOLD",
+          "HOLD_CAUTION",
+          "EXIT_CANDIDATE",
+          "REDUCE_CANDIDATE"
+        ]
+      },
+      "zero_target_liquidation_d152": {
+        "minimum_batches": 3,
+        "large_share_threshold_lots": 5,
+        "large_market_value_twd": 1000000
+      },
+      "bond_trade_price_policy": {
+        "quote_freshness_policy": {
+          "default_final_limit_max_minutes": 5,
+          "early_volume_below_lots": 100,
+          "midday_volume_at_most_1000_max_minutes": 20,
+          "midday_volume_1001_through_1500_max_minutes": 15
+        }
+      }
+    },
+    "execution_policy_overrides": {
+      "rotation_equity_floor_d141": {
+        "pre_retirement_rotation_equity_floor": "0.4",
+        "ordinary_rebalancing_band": [
+          "0.5",
+          "0.6"
+        ]
+      }
+    }
+  },
+  "identity": {
+    "ownerUserId": 7,
+    "consumer": "Codex",
+    "reportSlot": "12:00",
+    "policyBundleSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "swaggerSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "tradingDate": "2026-11-26"
+  }
+}

@@ -7,7 +7,7 @@
 | 項目 | 值 |
 | --- | --- |
 | OpenAPI | `3.1.0` |
-| 契約版本 | `1.30.0` |
+| 契約版本 | `1.31.0` |
 | AI 流程觀測契約版本 | `1.4.0` |
 | 對外路徑 | 28 條：23 個 `GET`、5 個 `POST` |
 | Servers | `http://127.0.0.1:9090`、`https://mac-mini-2.tailccc7be.ts.net:9090` |
@@ -10644,18 +10644,18 @@ GET只讀背景已發布不可變包，零DB/Redis/觀察帳寫入、producer觸
         "type": "string",
         "description": "每項是可驗證的來源識別、政策 scope 或具名原因碼。"
       },
-      "description": "必須全部指向 inputSnapshot.sourceVector 中的來源 ID；不得引用另一 consumer 狀態。",
-      "uniqueItems": true
+      "uniqueItems": true,
+      "description": "必須全部指向 inputSnapshot.sourceVector 中的來源 ID；不得引用另一 consumer 狀態。"
     },
     "status": {
       "type": "string",
-      "description": "PASS gate通過、BLOCK正式政策阻擋、UNAVAILABLE必需來源缺少、NOT_EVALUATED未適用 scope；允許值：PASS, BLOCK, UNAVAILABLE, NOT_EVALUATED。",
       "enum": [
         "PASS",
         "BLOCK",
         "UNAVAILABLE",
         "NOT_EVALUATED"
-      ]
+      ],
+      "description": "PASS gate通過、BLOCK正式政策阻擋、UNAVAILABLE必需來源缺少、NOT_EVALUATED未適用 scope；允許值：PASS, BLOCK, UNAVAILABLE, NOT_EVALUATED。"
     },
     "reason": {
       "type": "string",
@@ -10674,11 +10674,13 @@ GET只讀背景已發布不可變包，零DB/Redis/觀察帳寫入、producer觸
         "string",
         "null"
       ],
-      "description": "INTRADAY gate 固定 SHORT_ONLY，表示短線確認不適用D130 MEDIUM；其他gate為null，保留原Task488 scope語意；未知或不適用為 null。",
       "enum": [
         "SHORT_ONLY",
+        "STOCK_ROTATION_RESERVE",
+        "BOND_ROTATION_RESERVE",
         null
-      ]
+      ],
+      "description": "收據保護範圍：null表示一般閘門；SHORT_ONLY限定既有短線帳；STOCK_ROTATION_RESERVE或BOND_ROTATION_RESERVE僅限D236 CORE_RETENTION，分別保留股票輪動或債券輪動淨款用途。"
     }
   },
   "description": "正式政策 gate 計算收據，保留版本、來源和數值。"
@@ -10693,11 +10695,11 @@ GET只讀背景已發布不可變包，零DB/Redis/觀察帳寫入、producer觸
 | `status` | 是 | `string` | 否 | enum: `PASS`, `BLOCK`, `UNAVAILABLE`, `NOT_EVALUATED` | PASS gate通過、BLOCK正式政策阻擋、UNAVAILABLE必需來源缺少、NOT_EVALUATED未適用 scope；允許值：PASS, BLOCK, UNAVAILABLE, NOT_EVALUATED。 |
 | `reason` | 是 | `string` | 否 |  | 此 gate 的判定或具名缺口原因，必須非空。 |
 | `values` | 是 | `array of SrppReportFact` | 否 | items: SrppReportFact<br>items 說明: 支撐 gate 判定的逐項具名計算量。 | 該 gate 實際使用的數值，不接受任意 JSON payload。 |
-| `scope` | 是 | `string | null` | 是 | enum: `SHORT_ONLY`, null | INTRADAY gate 固定 SHORT_ONLY，表示短線確認不適用D130 MEDIUM；其他gate為null，保留原Task488 scope語意；未知或不適用為 null。 |
+| `scope` | 是 | `string | null` | 是 | enum: `SHORT_ONLY`, `STOCK_ROTATION_RESERVE`, `BOND_ROTATION_RESERVE`, null | 收據保護範圍：null表示一般閘門；SHORT_ONLY限定既有短線帳；STOCK_ROTATION_RESERVE或BOND_ROTATION_RESERVE僅限D236 CORE_RETENTION，分別保留股票輪動或債券輪動淨款用途。 |
 
 ### `SrppReportLeg`
 
-凍結日報建議 leg；只有 eligible verified gate 全通過可產生正數，固定不執行交易。
+凍結日報建議 leg；只有 eligible verified gate 全通過可產生正數，固定不執行交易。 D236新增全部明示零目標STOCK庫存（含ETF/債券ETF）的ZERO_TARGET_HIGH_ZONE_EXIT_D236：台股、美股依原生session/五檔/費稅及immutable plan帳戶驗證。D236 leg必要planId，blocked缺真plan可null，positive必真plan；15 gates含D236_TARGET_ZERO與D236_HIGH_ZONE_PATH，還原權息52週>=95%、四radar action、首批禁小額全清、離高暫停。來源缺口逐腿保留，CORE_RETENTION須原日期股票floor及跨腿shared room，2330/D212與00882>16不解除；LLM仍逐腿採納，無下單。
 
 完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
 
@@ -10753,54 +10755,54 @@ GET只讀背景已發布不可變包，零DB/Redis/觀察帳寫入、producer觸
     },
     "status": {
       "type": "string",
-      "description": "ACTIONABLE_FOR_REPORT可列日報建議；BLOCKED政策或證據gate阻擋；NOT_EVALUATED不適用/未驗scope；允許值：ACTIONABLE_FOR_REPORT, BLOCKED, NOT_EVALUATED。",
       "enum": [
         "ACTIONABLE_FOR_REPORT",
         "BLOCKED",
         "NOT_EVALUATED"
-      ]
+      ],
+      "description": "ACTIONABLE_FOR_REPORT可列日報建議；BLOCKED政策或證據gate阻擋；NOT_EVALUATED不適用/未驗scope；允許值：ACTIONABLE_FOR_REPORT, BLOCKED, NOT_EVALUATED。"
     },
     "action": {
       "type": "string",
-      "description": "BUY/Sell方向僅作日報建議；SELL賣出；NONE無動作，永不下單；允許值：BUY, SELL, NONE。",
       "enum": [
         "BUY",
         "SELL",
         "NONE"
-      ]
+      ],
+      "description": "BUY/Sell方向僅作日報建議；SELL賣出；NONE無動作，永不下單；允許值：BUY, SELL, NONE。"
     },
     "lots": {
       "type": [
         "integer",
         "null"
       ],
-      "description": "一般台股策略（含GLOBAL_EQUITY_PACE的SATELLITE_BUILD_D143 009826建倉腿，TWD）用正安全integer張數，units=null；僅 SHORT_TERM_D173/BOND_SHORT_TERM_D185 與SATELLITE_BUILD_D234 VT建倉腿用units股數且lots=null。BLOCKED/NOT_EVALUATED只能0或null。",
       "minimum": 0,
-      "maximum": 9007199254740991
+      "maximum": 9007199254740991,
+      "description": "一般台股策略（含GLOBAL_EQUITY_PACE的SATELLITE_BUILD_D143 009826建倉腿，TWD）用正安全integer張數，units=null；僅 SHORT_TERM_D173/BOND_SHORT_TERM_D185 與SATELLITE_BUILD_D234 VT建倉腿用units股數且lots=null。BLOCKED/NOT_EVALUATED只能0或null。"
     },
     "units": {
       "type": [
         "string",
         "null"
       ],
-      "description": "僅 SHORT_TERM_D173/BOND_SHORT_TERM_D185 台股短線ACTIONABLE可用正安全整數字串股數（<=9007199254740991），lots=null、currency=TWD、broker/subaccount有值；amount=limitPrice*units。另GLOBAL_EQUITY_PACE的SATELLITE_BUILD_D234 VT建倉腿（美股、currency=USD、國泰證券/CORE_D234）ACTIONABLE用正安全整數字串股數，amount=limitPrice×units（USD），fees為USD 3。其他台股（含SATELLITE_BUILD_D143 009826）仍用lots。BLOCKED/NOT_EVALUATED只能0或null。",
-      "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+      "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+      "description": "僅 SHORT_TERM_D173/BOND_SHORT_TERM_D185 台股短線ACTIONABLE可用正安全整數字串股數（<=9007199254740991），lots=null、currency=TWD、broker/subaccount有值；amount=limitPrice*units。另GLOBAL_EQUITY_PACE的SATELLITE_BUILD_D234 VT建倉腿（美股、currency=USD、國泰證券/CORE_D234）ACTIONABLE用正安全整數字串股數，amount=limitPrice×units（USD），fees為USD 3。其他台股（含SATELLITE_BUILD_D143 009826）仍用lots。BLOCKED/NOT_EVALUATED只能0或null。"
     },
     "limitPrice": {
       "type": [
         "string",
         "null"
       ],
-      "description": "凍結來源計算限價；僅ACTIONABLE_FOR_REPORT正數，其餘null；消費端仍須依D175驗最後使用時效；未知或不適用為 null。",
-      "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+      "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+      "description": "凍結來源計算限價；僅ACTIONABLE_FOR_REPORT正數，其餘null；消費端仍須依D175驗最後使用時效；未知或不適用為 null。"
     },
     "amount": {
       "type": [
         "string",
         "null"
       ],
-      "description": "本 leg 凍結幣別金額；僅ACTIONABLE_FOR_REPORT正數，其餘null；未知或不適用為 null。",
-      "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+      "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+      "description": "本 leg 凍結幣別金額；僅ACTIONABLE_FOR_REPORT正數，其餘null；未知或不適用為 null。"
     },
     "currency": {
       "type": "string",
@@ -10811,16 +10813,16 @@ GET只讀背景已發布不可變包，零DB/Redis/觀察帳寫入、producer觸
         "string",
         "null"
       ],
-      "description": "同幣別預估全部交易成本；可報建議時必為非負已知值；未知或不適用為 null。",
-      "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+      "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+      "description": "同幣別預估全部交易成本；可報建議時必為非負已知值；未知或不適用為 null。"
     },
     "netProfitSpace": {
       "type": [
         "string",
         "null"
       ],
-      "description": "策略成本後淨空間；不適用購債可null，不代表獲利保證；未知或不適用為 null。",
-      "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$"
+      "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$",
+      "description": "策略成本後淨空間；不適用購債可null，不代表獲利保證；未知或不適用為 null。"
     },
     "rankingReason": {
       "type": [
@@ -10835,8 +10837,8 @@ GET只讀背景已發布不可變包，零DB/Redis/觀察帳寫入、producer觸
         "type": "string",
         "description": "每項是可驗證的來源識別、政策 scope 或具名原因碼。"
       },
-      "description": "BLOCKED必有具名理由；ACTIONABLE_FOR_REPORT 必須空集合。",
-      "uniqueItems": true
+      "uniqueItems": true,
+      "description": "BLOCKED必有具名理由；ACTIONABLE_FOR_REPORT 必須空集合。"
     },
     "receipts": {
       "type": "array",
@@ -10845,9 +10847,16 @@ GET只讀背景已發布不可變包，零DB/Redis/觀察帳寫入、producer觸
         "description": "逐 gate 的正式計算證據。"
       },
       "description": "STRATEGIC_BUY_GATES另允台股0050/00881的NAMED_DEEP_DRAWDOWN_D215、國泰證券/CORE_D215，正數lots為報告容量上限，必須恰具D215_NAMED_PATH/QUOTE/RADAR/STRATEGIC_PRICE/ALLOCATION/FUNDING/PENDING/RESERVATIONS/DEDUPLICATION/DEPTH/EXECUTION_ACCOUNT/THESIS/TRADABILITY/SHARED_CURRENCY_CAPACITY；除TRADABILITY唯一D144_OFFICIAL_SOURCE_UNAVAILABLE_BEST_LEVEL_LIMIT_ONLY可UNAVAILABLE並只收緊限價至賣一（數量仍依原政策及五檔既定量深度，不因清單缺漏減量）外必須全PASS，已確認禁買仍BLOCK。THESIS另refs=policy/market:台股:symbol/classifications，TRADABILITY refs=policy/market:台股:symbol/topup-state。市場gate refs=policy/market:台股:symbol；ALLOCATION refs=assets/policy/classifications/fx/market:美股:VOO/market:台股:0050/market:台股:00881；其餘資金帳戶gate refs=assets/policy/topup-state/report-reservations/classifications/market:台股:symbol。D222目標選檔依同輪原始市場方向及FX資格，不要求先有最終張數或資金授權；選檔不授權交易。D226將D223買方改精確ADD_CANDIDATE與consumer完整LLM採納，取消38元門檻、保留40萬元跨日累計，不把D223預算覆蓋獨立D215。另獨立D223買方為NAMED_CASH_BUY_D226/00881/BUY正整數lots/國泰證券/CORE_D226_BUY，恰具D226_BUY_PATH及D223_PLAN_BUDGET加前述D215除D215_NAMED_PATH外共15個gate；D226_BUY_PATH refs=policy/market:台股:00881，D223_PLAN_BUDGET refs為完整資金帳戶六源，receipt.values提供usedTwd/committedTwd/remainingTwd subject D223及planEntryDebitTwd subject FILL:id/PENDING:id/RESERVATION:id，unit TWD/quality EXACT。預算涵蓋2026-11-18起完整成交、全部掛單與正式預留，linked承諾按已驗較大扣款單筆去重；來源未知不推零。此路徑不要求D215跌幅，D215零腿不阻擋；若D215正腿已選用則僅本輪跨路徑去重，不記為成交或已用預算。另D235新增NAMED_HIGH_ZONE_EXIT_D235台股2881 SELL／CORE_D226，正式生效後同輪還原權息distributionAdjusted=true且week52Position>=0.95時優先評估，HOLD/HOLD_CAUTION/EXIT_CANDIDATE/REDUCE_CANDIDATE均可進候選；首批confirmedBatches=0禁止D152小額一次清零，保留餘量、三分之一批量、原生零股五檔，離高暫停新路徑。14gates僅以D235_HIGH_ZONE_PATH取代D226_SELL_PATH，其refs恰policy/market:台股:2881，values為EXACT d235Week52Position RATIO、d235Threshold RATIO=0.95、d235DistributionAdjusted BOOLEAN=1；D152_BATCH新增EXACT firstBatchSmallClearAllowed BOOLEAN=0。高檔選中新路徑後BLOCKED不回退；舊D226獨立路徑維持。新舊同輪至多一條SELL腿。仍保留全部可賣量、掛單去重、費稅、五檔、五完成交易日冷卻及consumer逐腿LLM採納，無交易授權。另STRATEGIC_BUY_GATES允NAMED_RADAR_ROTATION_D226的台股2881 SELL，lots=null/units為正整數字串、CORE_D226與正式持倉同帳broker；以精確EXIT_CANDIDATE/REDUCE_CANDIDATE及consumer同輪LLM時機採納取代152元及舊D174擇時。SELL必須恰具D226_SELL_PATH/QUOTE/RADAR/POSITION/PENDING/RESERVATIONS/DEDUPLICATION/CORE_RETENTION/D152_BATCH/COOLDOWN/DEPTH/EXECUTION_ACCOUNT/COSTS/TRADABILITY；除同一D144窄例外外全PASS，保留正式可賣量、固定原基準分批與已成交、5完成交易日冷卻、掛單預留與費稅，不得自動下單。SELL QUOTE/RADAR/DEPTH refs=policy/market:台股:2881；TRADABILITY refs=policy/market:台股:2881/topup-state；其他SELL refs=assets/policy/topup-state/report-reservations/classifications/market:台股:2881。最終風險採納仍由consumer同輪核對，API不宣稱已評六項風險。BOND module只允STRATEGIC_FUBON/EMERGENCY_CATHAY；DIVIDEND_TOPUP module只允同名strategy、台股BUY、國泰證券/HIGH_DIVIDEND_TOPUP帳，必須恰具QUOTE/RADAR/STRATEGIC_PRICE/TIER/STOP/REGIME/TRADABILITY/QUOTAS/PENDING/RESERVATIONS/SCHEDULED_DCA/FUNDING/DEPTH/ALLOCATION/CLASSIFICATION/EXECUTION_ACCOUNT/SHARED_CURRENCY_CAPACITY全PASS且refs=market:台股:symbol/assets/policy/ledger/topup-state/report-reservations/classifications；SHORT module只允SHORT_TERM_D173/BOND_SHORT_TERM_D185，BUY必須恰具SHORT_RECONCILE/SHORT_SIZING/SHORT_FUNDS/SHORT_PORTFOLIO/SHORT_GROUP/SHORT_PROTECTION/SHORT_DEDUP/SHORT_INTRADAY/SHORT_QUOTE/SHORT_BOOK/SHORT_ACCOUNT/SHARED_CURRENCY_CAPACITY，SELL恰具SHORT_RECONCILE/SHORT_EXIT/SHORT_FLOORS/SHORT_DEDUP/SHORT_QUOTE/SHORT_BOOK/SHORT_ACCOUNT，全PASS且refs=assets/policy/short-sleeve/market:台股:symbol。所有ACTIONABLE BUY另需SHARED_CURRENCY_CAPACITY全PASS且僅refs=assets/report-reservations/topup-state/policy；其他策略gate的refs依上述集合。狹義Task488既有BOND optional INTRADAY=NOT_EVALUATED+SHORT_ONLY/HORIZON_NOT_APPLICABLE，TRADABILITY/BEAR_WINDOW=UNAVAILABLE依原價位/gate規則保留數量；不可套用其他策略或解除required gate。D-215（Task625，bundle含usd_asset_fx_preference_d215時）：BOND四腿與VT建倉腿逐腿恰一筆D215_FX，refs=fx/policy/market:<market>:<symbol>；PASS只限D215_NO_FX_PREFERENCE_VETO/D215_FX_PREFERENCE_EXCEPTION_REVIEW（ACTIONABLE必PASS，所引用來源須VERIFIED，否則UNAVAILABLE/SOURCE_NOT_VERIFIED:<ref>）；D215_FX_WAIT_PREFERRED(BLOCK)/D215_FX_EVIDENCE_UNKNOWN或D215_FX_POLICY_UNAVAILABLE(UNAVAILABLE)時原ACTIONABLE腿改BLOCKED、數量0、價格/金額null，原上限只在d215WaitCeilingLots(LOTS)/d215WaitCeilingUnits(SHARES)/d215WaitCeilingAmount(TWD或USD)；values名稱fxSpotSelling/fxRangeLow/fxRangeHigh(TWD)、fxRangePosition(RATIO，僅顯示)、fxAbsoluteHigh/fxHigh/cheapAssetException(BOOLEAN)、assetHigh52w(TWD或VT為USD)、assetDrawdown52w(PERCENT)；不是交易授權，不改status enum與facts。GLOBAL_EQUITY_PACE只允SATELLITE_BUILD_D143（009826、台股、TWD、lots、富邦證券/CORE_D143）與SATELLITE_BUILD_D234（VT、美股、USD、units、國泰證券/CORE_D234）兩條BUY建倉上限腿（不是委託）；ACTIONABLE時009826恰具SATELLITE_BUILD/SHARED_CURRENCY_CAPACITY，VT恰具SATELLITE_BUILD/FX_CONVERSION/SHARED_CURRENCY_CAPACITY且全PASS；SATELLITE_BUILD refs必含policy/assets/satellite-build-fills/market:台股:009826（VT為policy/assets/fx/satellite-build-fills/market:美股:VT），usd-twd-month-mids（009826另含fx）只在其sourceVector為VERIFIED時列入，values含fxStatusVerified；FX_CONVERSION refs=fx/policy且twdAmount=units×limitPrice×spotSellingRate、twdFee=3×spotSellingRate。0量腿BLOCKED並保留計算器原順序blockingReasons；收盤後初始化包（publication-context mode=AFTER_CLOSE_INITIALIZATION）兩腿一律BLOCKED，blockingReasons首項為AFTER_CLOSE_INITIALIZATION_NON_EXECUTABLE，腿內SATELLITE_BUILD收據BLOCK；正數但引用來源未VERIFIED時為SOURCE_NOT_VERIFIED:ref。"
+    },
+    "planId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "D236退出計畫的真實不可變識別；僅D236必要，BLOCKED缺正式plan允null，ACTIONABLE必非空且綁原owner/market/broker/account；舊strategy不藉此欄授權。"
     }
   },
-  "description": "凍結日報建議 leg；只有 eligible verified gate 全通過可產生正數，固定不執行交易。"
+  "description": "凍結日報建議 leg；只有 eligible verified gate 全通過可產生正數，固定不執行交易。 D236新增全部明示零目標STOCK庫存（含ETF/債券ETF）的ZERO_TARGET_HIGH_ZONE_EXIT_D236：台股、美股依原生session/五檔/費稅及immutable plan帳戶驗證。D236 leg必要planId，blocked缺真plan可null，positive必真plan；15 gates含D236_TARGET_ZERO與D236_HIGH_ZONE_PATH，還原權息52週>=95%、四radar action、首批禁小額全清、離高暫停。來源缺口逐腿保留，CORE_RETENTION須原日期股票floor及跨腿shared room，2330/D212與00882>16不解除；LLM仍逐腿採納，無下單。"
 }
 ```
 
@@ -10870,6 +10879,7 @@ GET只讀背景已發布不可變包，零DB/Redis/觀察帳寫入、producer觸
 | `rankingReason` | 是 | `string | null` | 是 |  | 服務端凍結排序理由或不適用；未知或不適用為 null。 |
 | `blockingReasons` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 每項是可驗證的來源識別、政策 scope 或具名原因碼。 | BLOCKED必有具名理由；ACTIONABLE_FOR_REPORT 必須空集合。 |
 | `receipts` | 是 | `array of SrppReportReceipt` | 否 | items: SrppReportReceipt<br>items 說明: 逐 gate 的正式計算證據。 | STRATEGIC_BUY_GATES另允台股0050/00881的NAMED_DEEP_DRAWDOWN_D215、國泰證券/CORE_D215，正數lots為報告容量上限，必須恰具D215_NAMED_PATH/QUOTE/RADAR/STRATEGIC_PRICE/ALLOCATION/FUNDING/PENDING/RESERVATIONS/DEDUPLICATION/DEPTH/EXECUTION_ACCOUNT/THESIS/TRADABILITY/SHARED_CURRENCY_CAPACITY；除TRADABILITY唯一D144_OFFICIAL_SOURCE_UNAVAILABLE_BEST_LEVEL_LIMIT_ONLY可UNAVAILABLE並只收緊限價至賣一（數量仍依原政策及五檔既定量深度，不因清單缺漏減量）外必須全PASS，已確認禁買仍BLOCK。THESIS另refs=policy/market:台股:symbol/classifications，TRADABILITY refs=policy/market:台股:symbol/topup-state。市場gate refs=policy/market:台股:symbol；ALLOCATION refs=assets/policy/classifications/fx/market:美股:VOO/market:台股:0050/market:台股:00881；其餘資金帳戶gate refs=assets/policy/topup-state/report-reservations/classifications/market:台股:symbol。D222目標選檔依同輪原始市場方向及FX資格，不要求先有最終張數或資金授權；選檔不授權交易。D226將D223買方改精確ADD_CANDIDATE與consumer完整LLM採納，取消38元門檻、保留40萬元跨日累計，不把D223預算覆蓋獨立D215。另獨立D223買方為NAMED_CASH_BUY_D226/00881/BUY正整數lots/國泰證券/CORE_D226_BUY，恰具D226_BUY_PATH及D223_PLAN_BUDGET加前述D215除D215_NAMED_PATH外共15個gate；D226_BUY_PATH refs=policy/market:台股:00881，D223_PLAN_BUDGET refs為完整資金帳戶六源，receipt.values提供usedTwd/committedTwd/remainingTwd subject D223及planEntryDebitTwd subject FILL:id/PENDING:id/RESERVATION:id，unit TWD/quality EXACT。預算涵蓋2026-11-18起完整成交、全部掛單與正式預留，linked承諾按已驗較大扣款單筆去重；來源未知不推零。此路徑不要求D215跌幅，D215零腿不阻擋；若D215正腿已選用則僅本輪跨路徑去重，不記為成交或已用預算。另D235新增NAMED_HIGH_ZONE_EXIT_D235台股2881 SELL／CORE_D226，正式生效後同輪還原權息distributionAdjusted=true且week52Position>=0.95時優先評估，HOLD/HOLD_CAUTION/EXIT_CANDIDATE/REDUCE_CANDIDATE均可進候選；首批confirmedBatches=0禁止D152小額一次清零，保留餘量、三分之一批量、原生零股五檔，離高暫停新路徑。14gates僅以D235_HIGH_ZONE_PATH取代D226_SELL_PATH，其refs恰policy/market:台股:2881，values為EXACT d235Week52Position RATIO、d235Threshold RATIO=0.95、d235DistributionAdjusted BOOLEAN=1；D152_BATCH新增EXACT firstBatchSmallClearAllowed BOOLEAN=0。高檔選中新路徑後BLOCKED不回退；舊D226獨立路徑維持。新舊同輪至多一條SELL腿。仍保留全部可賣量、掛單去重、費稅、五檔、五完成交易日冷卻及consumer逐腿LLM採納，無交易授權。另STRATEGIC_BUY_GATES允NAMED_RADAR_ROTATION_D226的台股2881 SELL，lots=null/units為正整數字串、CORE_D226與正式持倉同帳broker；以精確EXIT_CANDIDATE/REDUCE_CANDIDATE及consumer同輪LLM時機採納取代152元及舊D174擇時。SELL必須恰具D226_SELL_PATH/QUOTE/RADAR/POSITION/PENDING/RESERVATIONS/DEDUPLICATION/CORE_RETENTION/D152_BATCH/COOLDOWN/DEPTH/EXECUTION_ACCOUNT/COSTS/TRADABILITY；除同一D144窄例外外全PASS，保留正式可賣量、固定原基準分批與已成交、5完成交易日冷卻、掛單預留與費稅，不得自動下單。SELL QUOTE/RADAR/DEPTH refs=policy/market:台股:2881；TRADABILITY refs=policy/market:台股:2881/topup-state；其他SELL refs=assets/policy/topup-state/report-reservations/classifications/market:台股:2881。最終風險採納仍由consumer同輪核對，API不宣稱已評六項風險。BOND module只允STRATEGIC_FUBON/EMERGENCY_CATHAY；DIVIDEND_TOPUP module只允同名strategy、台股BUY、國泰證券/HIGH_DIVIDEND_TOPUP帳，必須恰具QUOTE/RADAR/STRATEGIC_PRICE/TIER/STOP/REGIME/TRADABILITY/QUOTAS/PENDING/RESERVATIONS/SCHEDULED_DCA/FUNDING/DEPTH/ALLOCATION/CLASSIFICATION/EXECUTION_ACCOUNT/SHARED_CURRENCY_CAPACITY全PASS且refs=market:台股:symbol/assets/policy/ledger/topup-state/report-reservations/classifications；SHORT module只允SHORT_TERM_D173/BOND_SHORT_TERM_D185，BUY必須恰具SHORT_RECONCILE/SHORT_SIZING/SHORT_FUNDS/SHORT_PORTFOLIO/SHORT_GROUP/SHORT_PROTECTION/SHORT_DEDUP/SHORT_INTRADAY/SHORT_QUOTE/SHORT_BOOK/SHORT_ACCOUNT/SHARED_CURRENCY_CAPACITY，SELL恰具SHORT_RECONCILE/SHORT_EXIT/SHORT_FLOORS/SHORT_DEDUP/SHORT_QUOTE/SHORT_BOOK/SHORT_ACCOUNT，全PASS且refs=assets/policy/short-sleeve/market:台股:symbol。所有ACTIONABLE BUY另需SHARED_CURRENCY_CAPACITY全PASS且僅refs=assets/report-reservations/topup-state/policy；其他策略gate的refs依上述集合。狹義Task488既有BOND optional INTRADAY=NOT_EVALUATED+SHORT_ONLY/HORIZON_NOT_APPLICABLE，TRADABILITY/BEAR_WINDOW=UNAVAILABLE依原價位/gate規則保留數量；不可套用其他策略或解除required gate。D-215（Task625，bundle含usd_asset_fx_preference_d215時）：BOND四腿與VT建倉腿逐腿恰一筆D215_FX，refs=fx/policy/market:<market>:<symbol>；PASS只限D215_NO_FX_PREFERENCE_VETO/D215_FX_PREFERENCE_EXCEPTION_REVIEW（ACTIONABLE必PASS，所引用來源須VERIFIED，否則UNAVAILABLE/SOURCE_NOT_VERIFIED:<ref>）；D215_FX_WAIT_PREFERRED(BLOCK)/D215_FX_EVIDENCE_UNKNOWN或D215_FX_POLICY_UNAVAILABLE(UNAVAILABLE)時原ACTIONABLE腿改BLOCKED、數量0、價格/金額null，原上限只在d215WaitCeilingLots(LOTS)/d215WaitCeilingUnits(SHARES)/d215WaitCeilingAmount(TWD或USD)；values名稱fxSpotSelling/fxRangeLow/fxRangeHigh(TWD)、fxRangePosition(RATIO，僅顯示)、fxAbsoluteHigh/fxHigh/cheapAssetException(BOOLEAN)、assetHigh52w(TWD或VT為USD)、assetDrawdown52w(PERCENT)；不是交易授權，不改status enum與facts。GLOBAL_EQUITY_PACE只允SATELLITE_BUILD_D143（009826、台股、TWD、lots、富邦證券/CORE_D143）與SATELLITE_BUILD_D234（VT、美股、USD、units、國泰證券/CORE_D234）兩條BUY建倉上限腿（不是委託）；ACTIONABLE時009826恰具SATELLITE_BUILD/SHARED_CURRENCY_CAPACITY，VT恰具SATELLITE_BUILD/FX_CONVERSION/SHARED_CURRENCY_CAPACITY且全PASS；SATELLITE_BUILD refs必含policy/assets/satellite-build-fills/market:台股:009826（VT為policy/assets/fx/satellite-build-fills/market:美股:VT），usd-twd-month-mids（009826另含fx）只在其sourceVector為VERIFIED時列入，values含fxStatusVerified；FX_CONVERSION refs=fx/policy且twdAmount=units×limitPrice×spotSellingRate、twdFee=3×spotSellingRate。0量腿BLOCKED並保留計算器原順序blockingReasons；收盤後初始化包（publication-context mode=AFTER_CLOSE_INITIALIZATION）兩腿一律BLOCKED，blockingReasons首項為AFTER_CLOSE_INITIALIZATION_NON_EXECUTABLE，腿內SATELLITE_BUILD收據BLOCK；正數但引用來源未VERIFIED時為SOURCE_NOT_VERIFIED:ref。 |
+| `planId` | 否 | `string | null` | 是 |  | D236退出計畫的真實不可變識別；僅D236必要，BLOCKED缺正式plan允null，ACTIONABLE必非空且綁原owner/market/broker/account；舊strategy不藉此欄授權。 |
 
 ### `SrppReportFactAssetReconciliation`
 
@@ -34763,7 +34773,7 @@ Task497 A2 sealed symbol-rule-facts response；不讀 current market source。
 
 ### `SrppUsSourceMap`
 
-固定八種已發布來源，caller不能提供任何source或任意覆寫數字。
+歷史政策沿八種已發布來源；當前D236另含逐腿退出state、預留、分類及匯率四來源。caller不能任意覆寫來源。
 
 完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
 
@@ -34771,7 +34781,7 @@ Task497 A2 sealed symbol-rule-facts response；不讀 current market source。
 {
   "type": "object",
   "additionalProperties": false,
-  "description": "固定八種已發布來源，caller不能提供任何source或任意覆寫數字。",
+  "description": "歷史政策沿八種已發布來源；當前D236另含逐腿退出state、預留、分類及匯率四來源。caller不能任意覆寫來源。",
   "required": [
     "assets",
     "policy",
@@ -34825,6 +34835,22 @@ Task497 A2 sealed symbol-rule-facts response；不讀 current market source。
     "core-state": {
       "$ref": "#/components/schemas/SrppUsStateSource",
       "description": "正式DB獨立帳號／consumer觀察狀態。"
+    },
+    "zero-target-exit-state": {
+      "$ref": "#/components/schemas/SrppUsFrozenValue",
+      "description": "D236不可變退出計畫、帳戶、分帳、正式可賣量、成交及全券商冷卻證據；缺正式producer保留UNAVAILABLE。"
+    },
+    "report-reservations": {
+      "$ref": "#/components/schemas/SrppUsFrozenValue",
+      "description": "同owner當輪預留列，ACTIVE SELL與正式掛單exact linked去重，不能把未知當零。"
+    },
+    "classifications": {
+      "$ref": "#/components/schemas/SrppUsFrozenValue",
+      "description": "同L0股票及基金分類，供zero-target資格與股票floor重演。"
+    },
+    "fx": {
+      "$ref": "#/components/schemas/SrppUsFrozenValue",
+      "description": "正式USD/TWD LiveRate雙向匯率及時效證據，US股票floor必要；債券腿不借此依賴。"
     }
   }
 }
@@ -34840,6 +34866,10 @@ Task497 A2 sealed symbol-rule-facts response；不讀 current market source。
 | `market` | 是 | `SrppUsMarket` | 否 |  | 同輪市場證據與已保存歷史；USD是來源契約投影，不代表feed獨立。 |
 | `us-tactical` | 是 | `SrppUsFrozenValue` | 否 |  | 正式來源機械候選與原始八種source receipts；無目標／成本／資金／帳本來源保留缺口。 |
 | `core-state` | 是 | `SrppUsStateSource` | 否 |  | 正式DB獨立帳號／consumer觀察狀態。 |
+| `zero-target-exit-state` | 否 | `SrppUsFrozenValue` | 否 |  | D236不可變退出計畫、帳戶、分帳、正式可賣量、成交及全券商冷卻證據；缺正式producer保留UNAVAILABLE。 |
+| `report-reservations` | 否 | `SrppUsFrozenValue` | 否 |  | 同owner當輪預留列，ACTIVE SELL與正式掛單exact linked去重，不能把未知當零。 |
+| `classifications` | 否 | `SrppUsFrozenValue` | 否 |  | 同L0股票及基金分類，供zero-target資格與股票floor重演。 |
+| `fx` | 否 | `SrppUsFrozenValue` | 否 |  | 正式USD/TWD LiveRate雙向匯率及時效證據，US股票floor必要；債券腿不借此依賴。 |
 
 ### `SrppUsSourceReceipt`
 
@@ -35119,13 +35149,13 @@ Task497 A2 sealed symbol-rule-facts response；不讀 current market source。
 
 ### `SrppUsModule`
 
-兩個固定美股scope的閉合結果union，data按moduleId有明確型別。
+美股scope的閉合結果union，data按moduleId有明確型別；當版D236為三模組，真舊immutable policy identity保留原兩模組。
 
 完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
 
 ```json
 {
-  "description": "兩個固定美股scope的閉合結果union，data按moduleId有明確型別。",
+  "description": "美股scope的閉合結果union，data按moduleId有明確型別；當版D236為三模組，真舊immutable policy identity保留原兩模組。",
   "oneOf": [
     {
       "$ref": "#/components/schemas/SrppUsModuleCore",
@@ -35134,6 +35164,10 @@ Task497 A2 sealed symbol-rule-facts response；不讀 current market source。
     {
       "$ref": "#/components/schemas/SrppUsModuleTactical",
       "description": "個股戰術模組。"
+    },
+    {
+      "$ref": "#/components/schemas/SrppUsModuleZeroTargetExit",
+      "description": "D236 ZERO_TARGET_EXIT：美股明示零目標庫存的逐腿高檔退出評估，來源缺口不連坐原兩模組。"
     }
   ]
 }
@@ -35143,7 +35177,7 @@ Task497 A2 sealed symbol-rule-facts response；不讀 current market source。
 
 ### `SrppUsReportCalculations`
 
-已發布的不可變美股報告計算包；GET零副作用，缺資料null加原因，不以旗標虛構COMPLETE。
+已發布的不可變美股報告計算包；GET零副作用，缺資料null加原因，不以旗標虛構COMPLETE。 當前D236政策新增ZERO_TARGET_EXIT作第三模組，與原CORE_SELL_GUARD/US_TACTICAL逐模組隔離；只有真舊immutable policy identity維持原兩模組，不得刪cfg或module降版。
 
 完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
 
@@ -35151,7 +35185,7 @@ Task497 A2 sealed symbol-rule-facts response；不讀 current market source。
 {
   "type": "object",
   "additionalProperties": false,
-  "description": "已發布的不可變美股報告計算包；GET零副作用，缺資料null加原因，不以旗標虛構COMPLETE。",
+  "description": "已發布的不可變美股報告計算包；GET零副作用，缺資料null加原因，不以旗標虛構COMPLETE。 當前D236政策新增ZERO_TARGET_EXIT作第三模組，與原CORE_SELL_GUARD/US_TACTICAL逐模組隔離；只有真舊immutable policy identity維持原兩模組，不得刪cfg或module降版。",
   "required": [
     "schemaVersion",
     "apiScope",
@@ -35239,13 +35273,13 @@ Task497 A2 sealed symbol-rule-facts response；不讀 current market source。
     },
     "modules": {
       "type": "array",
-      "description": "固定兩個美股模組，不複製台股十二模組。",
+      "description": "當版D236固定三個美股模組，真舊immutable policy identity保留原兩模組；不複製台股十二模組。",
       "items": {
         "$ref": "#/components/schemas/SrppUsModule",
-        "description": "CORE_SELL_GUARD與US_TACTICAL逐scope結果。"
+        "description": "CORE_SELL_GUARD、US_TACTICAL與當版D236的ZERO_TARGET_EXIT逐scope結果；真舊immutable policy identity僅原兩模組。"
       },
       "minItems": 2,
-      "maxItems": 2
+      "maxItems": 3
     },
     "tradeAuthorization": {
       "const": false,
@@ -35281,7 +35315,7 @@ Task497 A2 sealed symbol-rule-facts response；不讀 current market source。
 | `inputBundle` | 是 | `SrppUsInputBundle` | 否 |  | 凍結輸入的明確身分與全部來源。 |
 | `sourceVector` | 是 | `SrppUsSourceVector` | 否 |  | 來源收據與內容hash一對一驗證。 |
 | `inputSnapshotSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。 |
-| `modules` | 是 | `array of SrppUsModule` | 否 | minItems: 2<br>maxItems: 2<br>items: SrppUsModule<br>items 說明: CORE_SELL_GUARD與US_TACTICAL逐scope結果。 | 固定兩個美股模組，不複製台股十二模組。 |
+| `modules` | 是 | `array of SrppUsModule` | 否 | minItems: 2<br>maxItems: 3<br>items: SrppUsModule<br>items 說明: CORE_SELL_GUARD、US_TACTICAL與當版D236的ZERO_TARGET_EXIT逐scope結果；真舊immutable policy identity僅原兩模組。 | 當版D236固定三個美股模組，真舊immutable policy identity保留原兩模組；不複製台股十二模組。 |
 | `tradeAuthorization` | 是 | `boolean` | 否 |  | 只供報告核對，不授權交易。 固定 false。 |
 | `placesOrders` | 是 | `boolean` | 否 |  | 本API從不下單。 固定 false。 |
 | `contentSha256` | 是 | `string` | 否 | pattern: ^[0-9a-f]{64}$ | 完整UTF-8 SHA-256小寫hex，對準來源原文或canonical內容。 |
@@ -37241,6 +37275,10 @@ Task497 A2 sealed symbol-rule-facts response；不讀 current market source。
         "$ref": "#/components/schemas/SrppUsPriceHistoryRow",
         "description": "一個真實DB完成日的代號／市場／日期／OHLC與來源，不以旗標代替原始記錄。"
       }
+    },
+    "book": {
+      "$ref": "#/components/schemas/SrppUsFrozenValue",
+      "description": "同輪美股原生REGULAR五檔來源；volumeUnit必SHARES、價與量及來源時間依原生市場驗證，缺證不以台股張數或quote推造。"
     }
   }
 }
@@ -37255,6 +37293,7 @@ Task497 A2 sealed symbol-rule-facts response；不讀 current market source。
 | `historyTrusted` | 是 | `boolean` | 否 |  | 已保存完成日與除息來源的可信度，不等於擇時通過。 |
 | `reasonCodes` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 具名原因或來源識別；不以空字串代替缺資料。 | 唯一具名識別清單。 |
 | `priceHistory` | 是 | `array of SrppUsPriceHistoryRow` | 否 | items: SrppUsPriceHistoryRow<br>items 說明: 一個真實DB完成日的代號／市場／日期／OHLC與來源，不以旗標代替原始記錄。 | 與同quote.chart.series.daily.dates逐日完整對齊的canonical DB來源；每筆日期嚴格早於sessionDate，不補當日live或缺列，缺來源保留空陣列。 |
+| `book` | 否 | `SrppUsFrozenValue` | 否 |  | 同輪美股原生REGULAR五檔來源；volumeUnit必SHARES、價與量及來源時間依原生市場驗證，缺證不以台股張數或quote推造。 |
 
 ### `SrppUsMarket`
 
@@ -37412,6 +37451,156 @@ Task497 A2 sealed symbol-rule-facts response；不讀 current market source。
 | `low` | 是 | `string | null` | 是 |  | DB原始OHLC價格，canonical decimal string；未保存為null，不填零。 |
 | `close` | 是 | `string | null` | 是 |  | DB原始OHLC價格，canonical decimal string；未保存為null，不填零。 |
 | `closeSource` | 是 | `string | null` | 是 |  | DB持久化收盤來源；null或空白均不可驗真，不由historyTrusted旗標補足。 |
+
+### `SrppUsZeroTargetExitData`
+
+D236美股零目標高檔退出的同輪純計算資料；legs逐腿15gate、來源/plan/account/native SHARES/USD/floor驗證。缺來源可UNAVAILABLE，既有US兩模組能力不連坐；module-level facts/receipts可空，不代表全部腿授權。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "coverage",
+    "reasonCodes",
+    "legs",
+    "facts",
+    "receipts",
+    "missing"
+  ],
+  "properties": {
+    "coverage": {
+      "type": "string",
+      "description": "完整資料、部分可用或來源不可用，與有效條件未成立分開。 值：COMPLETE、PARTIAL、UNAVAILABLE。",
+      "enum": [
+        "COMPLETE",
+        "PARTIAL",
+        "UNAVAILABLE"
+      ]
+    },
+    "reasonCodes": {
+      "type": "array",
+      "description": "唯一具名識別清單。",
+      "items": {
+        "type": "string",
+        "description": "具名原因或來源識別；不以空字串代替缺資料。"
+      },
+      "uniqueItems": true
+    },
+    "legs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/components/schemas/SrppReportLeg",
+        "description": "每個持有零目標及不可變計畫的退出評估，正量或BLOCKED均保留，不以PASS代表採納。 單筆來源項目。"
+      },
+      "description": "每個持有零目標及不可變計畫的退出評估，正量或BLOCKED均保留，不以PASS代表採納。"
+    },
+    "facts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/components/schemas/SrppReportFact",
+        "description": "模組層事實；可空，必要金融證據仍在每腿typed facts及receipts。 單筆來源項目。"
+      },
+      "description": "模組層事實；可空，必要金融證據仍在每腿typed facts及receipts。"
+    },
+    "receipts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/components/schemas/SrppReportReceipt",
+        "description": "模組層收據；可空，不替代每腿15個具名gate。 單筆來源項目。"
+      },
+      "description": "模組層收據；可空，不替代每腿15個具名gate。"
+    },
+    "missing": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "description": "此模組缺證的具名原因集合，逐腿隔離。 單筆來源項目。"
+      },
+      "description": "此模組缺證的具名原因集合，逐腿隔離。"
+    }
+  },
+  "description": "D236美股零目標高檔退出的同輪純計算資料；legs逐腿15gate、來源/plan/account/native SHARES/USD/floor驗證。缺來源可UNAVAILABLE，既有US兩模組能力不連坐；module-level facts/receipts可空，不代表全部腿授權。"
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `coverage` | 是 | `string` | 否 | enum: `COMPLETE`, `PARTIAL`, `UNAVAILABLE` | 完整資料、部分可用或來源不可用，與有效條件未成立分開。 值：COMPLETE、PARTIAL、UNAVAILABLE。 |
+| `reasonCodes` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 具名原因或來源識別；不以空字串代替缺資料。 | 唯一具名識別清單。 |
+| `legs` | 是 | `array of SrppReportLeg` | 否 | items: SrppReportLeg<br>items 說明: 每個持有零目標及不可變計畫的退出評估，正量或BLOCKED均保留，不以PASS代表採納。 單筆來源項目。 | 每個持有零目標及不可變計畫的退出評估，正量或BLOCKED均保留，不以PASS代表採納。 |
+| `facts` | 是 | `array of SrppReportFact` | 否 | items: SrppReportFact<br>items 說明: 模組層事實；可空，必要金融證據仍在每腿typed facts及receipts。 單筆來源項目。 | 模組層事實；可空，必要金融證據仍在每腿typed facts及receipts。 |
+| `receipts` | 是 | `array of SrppReportReceipt` | 否 | items: SrppReportReceipt<br>items 說明: 模組層收據；可空，不替代每腿15個具名gate。 單筆來源項目。 | 模組層收據；可空，不替代每腿15個具名gate。 |
+| `missing` | 是 | `array of string` | 否 | items: string<br>items 說明: 此模組缺證的具名原因集合，逐腿隔離。 單筆來源項目。 | 此模組缺證的具名原因集合，逐腿隔離。 |
+
+### `SrppUsModuleZeroTargetExit`
+
+美股 ZERO_TARGET_EXIT 模組：正量與BLOCKED評估均保留，依當版D236及immutable plan/source receipts驗證。
+
+完整 schema（含閉合、required、oneOf／條件與巢狀限制）：
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "美股 ZERO_TARGET_EXIT 模組：正量與BLOCKED評估均保留，依當版D236及immutable plan/source receipts驗證。",
+  "required": [
+    "moduleId",
+    "coverage",
+    "data",
+    "reasonCodes",
+    "inputRefs"
+  ],
+  "properties": {
+    "moduleId": {
+      "const": "ZERO_TARGET_EXIT",
+      "type": "string",
+      "description": "固定ZERO_TARGET_EXIT，表示D236跨市場共用退出的美股模組。"
+    },
+    "coverage": {
+      "type": "string",
+      "description": "完整資料、部分可用或來源不可用，與有效條件未成立分開。 值：COMPLETE、PARTIAL、UNAVAILABLE。",
+      "enum": [
+        "COMPLETE",
+        "PARTIAL",
+        "UNAVAILABLE"
+      ]
+    },
+    "data": {
+      "$ref": "#/components/schemas/SrppUsZeroTargetExitData",
+      "description": "同輪零目標退出完整計算資料與缺證，不含交易授權。"
+    },
+    "reasonCodes": {
+      "type": "array",
+      "description": "唯一具名識別清單。",
+      "items": {
+        "type": "string",
+        "description": "具名原因或來源識別；不以空字串代替缺資料。"
+      },
+      "uniqueItems": true
+    },
+    "inputRefs": {
+      "type": "array",
+      "description": "唯一具名識別清單。",
+      "items": {
+        "type": "string",
+        "description": "具名原因或來源識別；不以空字串代替缺資料。"
+      },
+      "uniqueItems": true
+    }
+  }
+}
+```
+
+| 欄位 | 必填 | 型別 | Nullable | Enum／限制 | 說明 |
+| --- | --- | --- | --- | --- | --- |
+| `moduleId` | 是 | `string` | 否 | enum: `ZERO_TARGET_EXIT` | 固定ZERO_TARGET_EXIT，表示D236跨市場共用退出的美股模組。 |
+| `coverage` | 是 | `string` | 否 | enum: `COMPLETE`, `PARTIAL`, `UNAVAILABLE` | 完整資料、部分可用或來源不可用，與有效條件未成立分開。 值：COMPLETE、PARTIAL、UNAVAILABLE。 |
+| `data` | 是 | `SrppUsZeroTargetExitData` | 否 |  | 同輪零目標退出完整計算資料與缺證，不含交易授權。 |
+| `reasonCodes` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 具名原因或來源識別；不以空字串代替缺資料。 | 唯一具名識別清單。 |
+| `inputRefs` | 是 | `array of string` | 否 | uniqueItems: true<br>items: string<br>items 說明: 具名原因或來源識別；不以空字串代替缺資料。 | 唯一具名識別清單。 |
 
 ### `AiFlowOperation`
 

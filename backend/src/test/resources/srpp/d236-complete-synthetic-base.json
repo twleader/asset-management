@@ -1,0 +1,846 @@
+{
+  "assets": {
+    "generatedAt": "2026-11-26T04:25:00Z",
+    "liveAssets": {
+      "exchangeRate": "32",
+      "liveStockValue": "432000",
+      "liveTotalAssets": "10432000",
+      "snapshotDate": "2026-11-26",
+      "snapshotId": 1,
+      "stocks": [
+        {
+          "currentPrice": "144",
+          "holdingId": 1,
+          "liveValue": "432000",
+          "market": "台股",
+          "quoteStatus": "LIVE",
+          "shares": "3000",
+          "source": "SYNTHETIC_TEST_ONLY",
+          "stockCode": "2881",
+          "targetTradingDate": "2026-11-26",
+          "tradingDate": "2026-11-26",
+          "updatedAt": "2026-11-26T04:25:00Z",
+          "valuationSource": "TARGET_SESSION_PRICE"
+        }
+      ],
+      "totalDeposit": "10000000",
+      "totalFundValue": "0"
+    },
+    "snapshot": {
+      "deposits": [
+        {
+          "amount": "10000000",
+          "annualInterestRate": "0",
+          "bankDisplayName": "SYNTHETIC_BANK",
+          "bankId": 1,
+          "currency": "TWD",
+          "depositDisplayName": "SYNTHETIC_DEPOSIT",
+          "depositType": "SAVINGS",
+          "estimatedAnnualInterest": "0",
+          "id": 1,
+          "notes": "SYNTHETIC_TEST_ONLY",
+          "originalAmount": "10000000"
+        }
+      ],
+      "funds": [],
+      "id": 1,
+      "snapshotDate": "2026-11-26",
+      "stocks": [
+        {
+          "brokerDisplayName": "富邦證券",
+          "brokerId": 3,
+          "currency": "TWD",
+          "currentValue": "432000",
+          "id": 1,
+          "market": "台股",
+          "shares": "3000",
+          "stockCode": "2881"
+        }
+      ],
+      "totalAssets": "10432000",
+      "totalDeposit": "10000000",
+      "totalFundValue": "0",
+      "totalStockValue": "432000"
+    },
+    "targetPriceComplete": true
+  },
+  "bear-window": {
+    "status": "UNAVAILABLE"
+  },
+  "book:00697B": {
+    "status": "UNAVAILABLE"
+  },
+  "book:00719B": {
+    "status": "UNAVAILABLE"
+  },
+  "book:00865B": {
+    "status": "UNAVAILABLE"
+  },
+  "calendar": {
+    "tw": true
+  },
+  "classifications": {
+    "resolvedStockClasses": {
+      "2881:台股": "STOCK"
+    }
+  },
+  "core-state": {
+    "consumer": "Codex",
+    "ownerUserId": 7,
+    "reason": "CONSUMER_STATE_SOURCE_UNAVAILABLE",
+    "reportSlot": "12:00",
+    "stateBefore": null,
+    "status": "UNAVAILABLE",
+    "tradingDate": "2026-11-26"
+  },
+  "daily:00697B": {
+    "status": "UNAVAILABLE"
+  },
+  "daily:00719B": {
+    "status": "UNAVAILABLE"
+  },
+  "daily:00865B": {
+    "status": "UNAVAILABLE"
+  },
+  "dca-identity": {
+    "status": "UNAVAILABLE"
+  },
+  "dividends:00697B": {
+    "status": "UNAVAILABLE"
+  },
+  "dividends:00719B": {
+    "status": "UNAVAILABLE"
+  },
+  "dividends:00865B": {
+    "status": "UNAVAILABLE"
+  },
+  "fx": {
+    "status": "UNAVAILABLE"
+  },
+  "global-pace": {
+    "status": "UNAVAILABLE"
+  },
+  "ledger": [],
+  "market:台股:0050": {
+    "market": "台股",
+    "status": "UNAVAILABLE",
+    "symbol": "0050"
+  },
+  "market:台股:0056": {
+    "market": "台股",
+    "status": "UNAVAILABLE",
+    "symbol": "0056"
+  },
+  "market:台股:00679B": {
+    "market": "台股",
+    "status": "UNAVAILABLE",
+    "symbol": "00679B"
+  },
+  "market:台股:00697B": {
+    "market": "台股",
+    "status": "UNAVAILABLE",
+    "symbol": "00697B",
+    "usdFxPurchase": {
+      "data": {
+        "currentAsOf": "2026-10-08T01:05:00Z",
+        "currentRate": "31",
+        "currentSource": "BANK_OF_TAIWAN",
+        "history": {
+          "available": true,
+          "basis": "BANK_SPOT_SELLING",
+          "completedAsOfDate": "2026-10-14",
+          "excludedLegacyRows": 0,
+          "high": "33",
+          "low": "30",
+          "source": "test-verified-range",
+          "unavailableReason": null,
+          "windowEnd": "2026-10-15",
+          "windowStart": "2024-10-15"
+        },
+        "quality": "LIVE",
+        "unavailableReason": null
+      },
+      "evaluated": true,
+      "instrumentKind": "BOND_ETF",
+      "market": "台股",
+      "quoteCurrency": "TWD",
+      "stockCode": "00697B",
+      "typeVerified": true
+    }
+  },
+  "market:台股:00713": {
+    "market": "台股",
+    "status": "UNAVAILABLE",
+    "symbol": "00713"
+  },
+  "market:台股:00719B": {
+    "market": "台股",
+    "status": "UNAVAILABLE",
+    "symbol": "00719B",
+    "usdFxPurchase": {
+      "data": {
+        "currentAsOf": "2026-10-08T01:05:00Z",
+        "currentRate": "31",
+        "currentSource": "BANK_OF_TAIWAN",
+        "history": {
+          "available": true,
+          "basis": "BANK_SPOT_SELLING",
+          "completedAsOfDate": "2026-10-14",
+          "excludedLegacyRows": 0,
+          "high": "33",
+          "low": "30",
+          "source": "test-verified-range",
+          "unavailableReason": null,
+          "windowEnd": "2026-10-15",
+          "windowStart": "2024-10-15"
+        },
+        "quality": "LIVE",
+        "unavailableReason": null
+      },
+      "evaluated": true,
+      "instrumentKind": "BOND_ETF",
+      "market": "台股",
+      "quoteCurrency": "TWD",
+      "stockCode": "00719B",
+      "typeVerified": true
+    }
+  },
+  "market:台股:00751B": {
+    "market": "台股",
+    "status": "UNAVAILABLE",
+    "symbol": "00751B"
+  },
+  "market:台股:00850": {
+    "market": "台股",
+    "status": "UNAVAILABLE",
+    "symbol": "00850"
+  },
+  "market:台股:00865B": {
+    "market": "台股",
+    "status": "UNAVAILABLE",
+    "symbol": "00865B",
+    "usdFxPurchase": {
+      "data": {
+        "currentAsOf": "2026-10-08T01:05:00Z",
+        "currentRate": "31",
+        "currentSource": "BANK_OF_TAIWAN",
+        "history": {
+          "available": true,
+          "basis": "BANK_SPOT_SELLING",
+          "completedAsOfDate": "2026-10-14",
+          "excludedLegacyRows": 0,
+          "high": "33",
+          "low": "30",
+          "source": "test-verified-range",
+          "unavailableReason": null,
+          "windowEnd": "2026-10-15",
+          "windowStart": "2024-10-15"
+        },
+        "quality": "LIVE",
+        "unavailableReason": null
+      },
+      "evaluated": true,
+      "instrumentKind": "BOND_ETF",
+      "market": "台股",
+      "quoteCurrency": "TWD",
+      "stockCode": "00865B",
+      "typeVerified": true
+    }
+  },
+  "market:台股:00878": {
+    "market": "台股",
+    "status": "UNAVAILABLE",
+    "symbol": "00878"
+  },
+  "market:台股:00881": {
+    "market": "台股",
+    "status": "UNAVAILABLE",
+    "symbol": "00881"
+  },
+  "market:台股:00919": {
+    "market": "台股",
+    "status": "UNAVAILABLE",
+    "symbol": "00919"
+  },
+  "market:台股:009826": {
+    "market": "台股",
+    "status": "UNAVAILABLE",
+    "symbol": "009826"
+  },
+  "market:台股:2881": {
+    "book": {
+      "available": true,
+      "fetchedAt": "2026-11-26T04:25:00Z",
+      "levels": [
+        {
+          "askPrice": "145.0",
+          "askVolumeLots": 1,
+          "bidPrice": "144.0",
+          "bidVolumeLots": 1
+        },
+        {
+          "askPrice": "145.5",
+          "askVolumeLots": 1,
+          "bidPrice": "143.5",
+          "bidVolumeLots": 1
+        },
+        {
+          "askPrice": "146.0",
+          "askVolumeLots": 1,
+          "bidPrice": "143.0",
+          "bidVolumeLots": 1
+        },
+        {
+          "askPrice": "146.5",
+          "askVolumeLots": 1,
+          "bidPrice": "142.5",
+          "bidVolumeLots": 1
+        },
+        {
+          "askPrice": "147.0",
+          "askVolumeLots": 1,
+          "bidPrice": "142.0",
+          "bidVolumeLots": 1
+        }
+      ],
+      "market": "台股",
+      "marketStatus": "OPEN",
+      "source": "FUBON_BOOKS",
+      "sourceTime": "2026-11-26T04:25:00Z",
+      "stockCode": "2881"
+    },
+    "calendarVerified": true,
+    "completedSessions": [
+      "2026-09-07",
+      "2026-09-08",
+      "2026-09-09",
+      "2026-09-10",
+      "2026-09-11",
+      "2026-09-14",
+      "2026-09-15",
+      "2026-09-16",
+      "2026-09-17",
+      "2026-09-18",
+      "2026-09-21",
+      "2026-09-22",
+      "2026-09-23",
+      "2026-09-24",
+      "2026-09-25",
+      "2026-09-28",
+      "2026-09-29",
+      "2026-09-30",
+      "2026-10-01",
+      "2026-10-02",
+      "2026-10-05",
+      "2026-10-06",
+      "2026-10-07",
+      "2026-10-08",
+      "2026-10-09",
+      "2026-10-12",
+      "2026-10-13",
+      "2026-10-14",
+      "2026-10-15",
+      "2026-10-16",
+      "2026-10-19",
+      "2026-10-20",
+      "2026-10-21",
+      "2026-10-22",
+      "2026-10-23",
+      "2026-10-26",
+      "2026-10-27",
+      "2026-10-28",
+      "2026-10-29",
+      "2026-10-30",
+      "2026-11-02",
+      "2026-11-03",
+      "2026-11-04",
+      "2026-11-05",
+      "2026-11-06",
+      "2026-11-09",
+      "2026-11-10",
+      "2026-11-11",
+      "2026-11-12",
+      "2026-11-13",
+      "2026-11-16",
+      "2026-11-17",
+      "2026-11-18",
+      "2026-11-19",
+      "2026-11-20",
+      "2026-11-23",
+      "2026-11-24",
+      "2026-11-25"
+    ],
+    "market": "台股",
+    "quote": {
+      "closed": false,
+      "market": "台股",
+      "previousClose": "145",
+      "price": "144",
+      "quoteStatus": "LIVE",
+      "source": "SYNTHETIC_TEST_ONLY",
+      "stockCode": "2881",
+      "tradingDate": "2026-11-26",
+      "updatedAt": "2026-11-26T04:25:00Z",
+      "volume": "2000000"
+    },
+    "radar": {
+      "actionPolicyVersion": "EVIDENCE_GATE_V1",
+      "generatedAt": "2026-11-26T04:25:00Z",
+      "ruleVersion": "TW_RULES_V28",
+      "stock": {
+        "action": "HOLD_CAUTION",
+        "asOfDate": "2026-11-26",
+        "dValue": "30",
+        "dataComplete": true,
+        "distributionAdjusted": true,
+        "kValue": "10",
+        "market": "台股",
+        "monthlyConfirmation": "BELOW",
+        "price": "144",
+        "quoteStatus": "LIVE",
+        "stockCode": "2881",
+        "week52Position": "0.97"
+      }
+    },
+    "symbol": "2881",
+    "volumeUnit": "SHARES"
+  },
+  "market:美股:GOOGL": {
+    "market": "美股",
+    "status": "UNAVAILABLE",
+    "symbol": "GOOGL"
+  },
+  "market:美股:SGOV": {
+    "market": "美股",
+    "status": "UNAVAILABLE",
+    "symbol": "SGOV"
+  },
+  "market:美股:VOO": {
+    "market": "美股",
+    "status": "UNAVAILABLE",
+    "symbol": "VOO"
+  },
+  "market:美股:VT": {
+    "market": "美股",
+    "status": "UNAVAILABLE",
+    "symbol": "VT",
+    "usdFxPurchase": {
+      "data": {
+        "currentAsOf": "2026-10-08T01:05:00Z",
+        "currentRate": "31",
+        "currentSource": "BANK_OF_TAIWAN",
+        "history": {
+          "available": true,
+          "basis": "BANK_SPOT_SELLING",
+          "completedAsOfDate": "2026-10-14",
+          "excludedLegacyRows": 0,
+          "high": "33",
+          "low": "30",
+          "source": "test-verified-range",
+          "unavailableReason": null,
+          "windowEnd": "2026-10-15",
+          "windowStart": "2024-10-15"
+        },
+        "quality": "LIVE",
+        "unavailableReason": null
+      },
+      "evaluated": true,
+      "instrumentKind": "EQUITY_ETF",
+      "market": "美股",
+      "quoteCurrency": "USD",
+      "stockCode": "VT",
+      "typeVerified": true
+    }
+  },
+  "minute:00697B": {
+    "status": "UNAVAILABLE"
+  },
+  "minute:00719B": {
+    "status": "UNAVAILABLE"
+  },
+  "minute:00865B": {
+    "status": "UNAVAILABLE"
+  },
+  "payroll": {
+    "status": "UNAVAILABLE"
+  },
+  "pending:00697B": {
+    "status": "UNAVAILABLE"
+  },
+  "pending:00719B": {
+    "status": "UNAVAILABLE"
+  },
+  "pending:00865B": {
+    "status": "UNAVAILABLE"
+  },
+  "quote:00697B": {
+    "status": "UNAVAILABLE"
+  },
+  "quote:00719B": {
+    "status": "UNAVAILABLE"
+  },
+  "quote:00865B": {
+    "status": "UNAVAILABLE"
+  },
+  "radar:00697B": {
+    "status": "UNAVAILABLE"
+  },
+  "radar:00719B": {
+    "status": "UNAVAILABLE"
+  },
+  "radar:00865B": {
+    "status": "UNAVAILABLE"
+  },
+  "regime": {
+    "status": "UNAVAILABLE"
+  },
+  "report-reservations": {
+    "coverage": "COMPLETE",
+    "ownerUserId": 7,
+    "policyBundleSha256": "eb8222053002afe54a1f42d0daa8832e320a2eb57f3ee1b9edd857e250401c21",
+    "rows": [],
+    "status": "VERIFIED",
+    "tradingDate": "2026-11-26",
+    "verified": true
+  },
+  "reservations": [],
+  "satellite-build-fills": {
+    "coverage": "COMPLETE",
+    "ownerUserId": 7,
+    "policyBundleSha256": "eb8222053002afe54a1f42d0daa8832e320a2eb57f3ee1b9edd857e250401c21",
+    "records": [],
+    "selection": {
+      "end": "2026-10-15",
+      "mode": "DATE_RANGE",
+      "start": "2026-10-08",
+      "year": null
+    },
+    "status": "VERIFIED",
+    "tradingDate": "2026-10-15",
+    "verified": true
+  },
+  "short-sleeve": {
+    "status": "UNAVAILABLE"
+  },
+  "subaccounts": {
+    "status": "UNAVAILABLE"
+  },
+  "swagger": {
+    "sha256": "ecc3fa55751c01a1583480f0c5b257ded94444689db2f305a5851b35eb38c6bf"
+  },
+  "symbols": {
+    "台股:0050": {
+      "market": "台股",
+      "status": "UNAVAILABLE",
+      "symbol": "0050"
+    },
+    "台股:0056": {
+      "market": "台股",
+      "status": "UNAVAILABLE",
+      "symbol": "0056"
+    },
+    "台股:00679B": {
+      "market": "台股",
+      "status": "UNAVAILABLE",
+      "symbol": "00679B"
+    },
+    "台股:00697B": {
+      "market": "台股",
+      "status": "UNAVAILABLE",
+      "symbol": "00697B",
+      "usdFxPurchase": {
+        "data": {
+          "currentAsOf": "2026-10-08T01:05:00Z",
+          "currentRate": "31",
+          "currentSource": "BANK_OF_TAIWAN",
+          "history": {
+            "available": true,
+            "basis": "BANK_SPOT_SELLING",
+            "completedAsOfDate": "2026-10-14",
+            "excludedLegacyRows": 0,
+            "high": "33",
+            "low": "30",
+            "source": "test-verified-range",
+            "unavailableReason": null,
+            "windowEnd": "2026-10-15",
+            "windowStart": "2024-10-15"
+          },
+          "quality": "LIVE",
+          "unavailableReason": null
+        },
+        "evaluated": true,
+        "instrumentKind": "BOND_ETF",
+        "market": "台股",
+        "quoteCurrency": "TWD",
+        "stockCode": "00697B",
+        "typeVerified": true
+      }
+    },
+    "台股:00713": {
+      "market": "台股",
+      "status": "UNAVAILABLE",
+      "symbol": "00713"
+    },
+    "台股:00719B": {
+      "market": "台股",
+      "status": "UNAVAILABLE",
+      "symbol": "00719B",
+      "usdFxPurchase": {
+        "data": {
+          "currentAsOf": "2026-10-08T01:05:00Z",
+          "currentRate": "31",
+          "currentSource": "BANK_OF_TAIWAN",
+          "history": {
+            "available": true,
+            "basis": "BANK_SPOT_SELLING",
+            "completedAsOfDate": "2026-10-14",
+            "excludedLegacyRows": 0,
+            "high": "33",
+            "low": "30",
+            "source": "test-verified-range",
+            "unavailableReason": null,
+            "windowEnd": "2026-10-15",
+            "windowStart": "2024-10-15"
+          },
+          "quality": "LIVE",
+          "unavailableReason": null
+        },
+        "evaluated": true,
+        "instrumentKind": "BOND_ETF",
+        "market": "台股",
+        "quoteCurrency": "TWD",
+        "stockCode": "00719B",
+        "typeVerified": true
+      }
+    },
+    "台股:00751B": {
+      "market": "台股",
+      "status": "UNAVAILABLE",
+      "symbol": "00751B"
+    },
+    "台股:00850": {
+      "market": "台股",
+      "status": "UNAVAILABLE",
+      "symbol": "00850"
+    },
+    "台股:00865B": {
+      "market": "台股",
+      "status": "UNAVAILABLE",
+      "symbol": "00865B",
+      "usdFxPurchase": {
+        "data": {
+          "currentAsOf": "2026-10-08T01:05:00Z",
+          "currentRate": "31",
+          "currentSource": "BANK_OF_TAIWAN",
+          "history": {
+            "available": true,
+            "basis": "BANK_SPOT_SELLING",
+            "completedAsOfDate": "2026-10-14",
+            "excludedLegacyRows": 0,
+            "high": "33",
+            "low": "30",
+            "source": "test-verified-range",
+            "unavailableReason": null,
+            "windowEnd": "2026-10-15",
+            "windowStart": "2024-10-15"
+          },
+          "quality": "LIVE",
+          "unavailableReason": null
+        },
+        "evaluated": true,
+        "instrumentKind": "BOND_ETF",
+        "market": "台股",
+        "quoteCurrency": "TWD",
+        "stockCode": "00865B",
+        "typeVerified": true
+      }
+    },
+    "台股:00878": {
+      "market": "台股",
+      "status": "UNAVAILABLE",
+      "symbol": "00878"
+    },
+    "台股:00881": {
+      "market": "台股",
+      "status": "UNAVAILABLE",
+      "symbol": "00881"
+    },
+    "台股:00919": {
+      "market": "台股",
+      "status": "UNAVAILABLE",
+      "symbol": "00919"
+    },
+    "台股:009826": {
+      "market": "台股",
+      "status": "UNAVAILABLE",
+      "symbol": "009826"
+    },
+    "台股:2881": {
+      "market": "台股",
+      "status": "UNAVAILABLE",
+      "symbol": "2881"
+    },
+    "美股:GOOGL": {
+      "market": "美股",
+      "status": "UNAVAILABLE",
+      "symbol": "GOOGL"
+    },
+    "美股:SGOV": {
+      "market": "美股",
+      "status": "UNAVAILABLE",
+      "symbol": "SGOV"
+    },
+    "美股:VOO": {
+      "market": "美股",
+      "status": "UNAVAILABLE",
+      "symbol": "VOO"
+    },
+    "美股:VT": {
+      "market": "美股",
+      "status": "UNAVAILABLE",
+      "symbol": "VT",
+      "usdFxPurchase": {
+        "data": {
+          "currentAsOf": "2026-10-08T01:05:00Z",
+          "currentRate": "31",
+          "currentSource": "BANK_OF_TAIWAN",
+          "history": {
+            "available": true,
+            "basis": "BANK_SPOT_SELLING",
+            "completedAsOfDate": "2026-10-14",
+            "excludedLegacyRows": 0,
+            "high": "33",
+            "low": "30",
+            "source": "test-verified-range",
+            "unavailableReason": null,
+            "windowEnd": "2026-10-15",
+            "windowStart": "2024-10-15"
+          },
+          "quality": "LIVE",
+          "unavailableReason": null
+        },
+        "evaluated": true,
+        "instrumentKind": "EQUITY_ETF",
+        "market": "美股",
+        "quoteCurrency": "USD",
+        "stockCode": "VT",
+        "typeVerified": true
+      }
+    }
+  },
+  "tax": {
+    "status": "UNAVAILABLE"
+  },
+  "topup-state": {
+    "coverage": "COMPLETE",
+    "executionAccounts": {
+      "CORE_D226": {
+        "accountFingerprint": "D226_SYNTHETIC_ACCOUNT",
+        "broker": "富邦證券",
+        "brokerId": 3,
+        "costs": {
+          "brokerageRate": "0.001425",
+          "minimumFeeTwd": "20",
+          "sellTaxRate": "0.003",
+          "source_ref": "SYNTHETIC_VERIFIED_COST_SCHEDULE_ONLY",
+          "verified": true
+        },
+        "ownerUserId": 7,
+        "subaccount": "CORE_D226",
+        "verified": true
+      }
+    },
+    "ownerUserId": 7,
+    "pending": {
+      "coverage": "COMPLETE",
+      "orders": [],
+      "verified": true
+    },
+    "policyBundleSha256": "eb8222053002afe54a1f42d0daa8832e320a2eb57f3ee1b9edd857e250401c21",
+    "rotationCooldown": {
+      "2881": {
+        "coverage": "COMPLETE",
+        "coverageEnd": "2026-11-26",
+        "coverageStart": "2026-11-19",
+        "market": "台股",
+        "rows": [],
+        "scope": "OWNER_ALL_BROKERS_SAME_SYMBOL_DIRECTION",
+        "side": "SELL",
+        "source_ref": "SYNTHETIC_ALL_BROKER_CONFIRMED_SELLS_ONLY",
+        "symbol": "2881",
+        "verified": true
+      }
+    },
+    "rotationExit": {
+      "2881": {
+        "baselineSnapshot": {
+          "id": 17,
+          "snapshotDate": "2026-10-08",
+          "stocks": [
+            {
+              "brokerDisplayName": "富邦證券",
+              "brokerId": 3,
+              "currentValue": "450000",
+              "id": 101,
+              "market": "台股",
+              "shares": "3000",
+              "stockCode": "2881"
+            }
+          ]
+        },
+        "fills": {
+          "coverage": "COMPLETE",
+          "rows": [],
+          "verified": true
+        },
+        "planId": "D223_00881_CASH_2881_EXIT_20261118",
+        "source_ref": "SYNTHETIC_FROZEN_PLAN_ONLY",
+        "verified": true
+      }
+    },
+    "sellablePositions": {
+      "coverage": "COMPLETE",
+      "rows": [
+        {
+          "accountFingerprint": "D226_SYNTHETIC_ACCOUNT",
+          "brokerId": 3,
+          "holdingId": 1,
+          "market": "台股",
+          "sellableShares": "3000",
+          "settledShares": "3000",
+          "source_ref": "SYNTHETIC_OFFICIAL_POSITION_ONLY",
+          "symbol": "2881"
+        }
+      ],
+      "verified": true
+    },
+    "status": "VERIFIED",
+    "tradability": {
+      "2881": {
+        "status": "PASS",
+        "verified": true
+      }
+    },
+    "tradingDate": "2026-11-26",
+    "verified": true
+  },
+  "tradability:00697B": {
+    "status": "UNAVAILABLE"
+  },
+  "tradability:00719B": {
+    "status": "UNAVAILABLE"
+  },
+  "tradability:00865B": {
+    "status": "UNAVAILABLE"
+  },
+  "us-tactical": {
+    "status": "UNAVAILABLE"
+  },
+  "usd-twd-month-mids": {
+    "end": "2026-10-15",
+    "month": "2026-10",
+    "rows": [],
+    "start": "2026-10-08",
+    "status": "VERIFIED"
+  }
+}

@@ -41,6 +41,11 @@ public class UsReportPublisher {
         if(!"COMPLETE".equals(vector.path("assets").path("coverage").asText()))addGap(core,"ASSET_MARKET_VALUATION_DATE_UNVERIFIED");
         ObjectNode tactical=UsTacticalCalculator.calculate(raw.path("us-tactical"),model,raw.path("market"));
         ArrayNode modules=J.arrayNode();modules.add(module("CORE_SELL_GUARD",core,List.of("assets","policy","swagger","calendar","universe","market","core-state")));modules.add(module("US_TACTICAL",tactical,List.of("assets","policy","swagger","calendar","universe","market","us-tactical")));
+        if(SrppZeroTargetHighZoneExitCalculator.current(model)){
+            var context=new SrppZeroTargetExitContext(model,sources,vector,scope.owner(),scope.date(),frozen.capturedAt(),"美股",calendar.displayTime(scope.date()),scope.policy());
+            ObjectNode exits=SrppZeroTargetHighZoneExitCalculator.calculate(context);
+            modules.add(module("ZERO_TARGET_EXIT",exits,List.of("assets","policy","calendar","market","classifications","zero-target-exit-state","report-reservations","fx")));
+        }
         UUID id=UUID.randomUUID();ObjectNode out=J.objectNode().put("schemaVersion",1).put("apiScope","US_REPORT_CALCULATIONS").put("status","FINAL").put("calculationRunId",id.toString());ObjectNode identity=out.putObject("identity");identity.put("ownerUserId",scope.owner()).put("consumer",scope.consumer()).put("market",scope.market()).put("sessionDate",scope.date().toString()).put("reportSlot",scope.slot()).put("policyBundleSha256",scope.policy()).put("swaggerSha256",scope.swagger());
         out.put("calculatorVersion",VERSION).put("capturedAt",frozen.capturedAt().toString()).put("publishedAt",at.toString()).put("displayReportTime",calendar.displayTime(scope.date()));out.set("session",calendar.session(scope.date()).json());out.set("inputBundle",input);out.set("sourceVector",vector);out.put("inputSnapshotSha256",SrppJcs.hash(input));out.set("modules",SrppReportModuleCalculator.normalize(modules));out.put("tradeAuthorization",false).put("placesOrders",false);out.put("contentSha256",SrppJcs.hash(out));
         String content=SrppJcs.canonicalize(out);UsReportEnvelopeValidator.validate(content);Saved saved=new Saved(id,scope,fingerprint,out.path("inputSnapshotSha256").asText(),out.path("contentSha256").asText(),content,at);repository.insert(saved);

@@ -7387,3 +7387,10 @@ SRPP 兩軌完成逐腿判斷後，需要 9090 直接算出最終張數、限價
 作為SRPP日報使用者，我需要必讀文件的明確現行bundle/policy/model宣告與已發布model/manifest一致；即使錯來源被重簽manifest或重建runtime，rules/build/check仍應拒絕，保留原STOP證據而不補造報告。守門動態涵蓋required/conditional Markdown初始current宣告，保留歷史章節，必要startup/core/shared宣告缺失fail closed；不改calendar前startup讀取範圍、投資規則、時窗或金融硬閘。
 
 本輪模型只允七個STOCK（GOOG/GOOGL/MSFT/AVGO/NVDA/AAPL/AMZN）對NAMED_DEEP_DRAWDOWN文件精確來源SHA的metadata連動；其餘leaf、D235/2.77.0/3.25.0與所有金融值不變。資產端copy精確authority bytes、既有generator產正式投影/SQL/goldens，formula與calculatorHashes及每case金融輸出保持；Swagger/BFF production bytes不變，不renderer。最後generated/spec文件全定稿後獨立本機Codex審查與gate記錄，雙repo no-ff/push後insert-only registry再只重建/recreate必要business-services，JAR/設定/9090逐證；不補報、不金融取數/草稿/寄信/交易。既存simulator舊D234 drift本輪具名保留，不擴改其runtime。
+
+
+### Task 638：全部正式零目標股票跨市場高檔分批退出（D-236）
+
+沿Requirements187／193，使用者要求全部最終清零股票（含股票庫存ETF及美股）適用還原權息後52週位置≥95%的分批退出，HOLD/HOLD_CAUTION亦評估首批且首批禁止小額一次清零。明示model零目標集合與CSV一致、缺target非0，保留2330D212及00882>16；泛化immutable plan/account與所有市場原生quote/book/sellable/費稅/冷卻及LLM逐腿採納。TW原module與US新增ZERO_TARGET_EXIT，source rawbinding及新舊scope去重完整驗證，未具來源維持UNAVAILABLE；詳t638自足契約，不新增HTTP或券商交易。
+
+Task638最終驗收延續：必要非market sourceVector須COMPLETE，market PARTIAL僅逐腿完整raw條件成立可用；原API包為LLM候選完整性的不可刪來源，WAIT/VETO保留具名決策。第三code/arch真問題修復後依三輪上限停止且如實標未複審，最後spec/gates/正式發布另留外部收據，既有L0/來源/市場/費稅/冷卻硬閘不放寬。

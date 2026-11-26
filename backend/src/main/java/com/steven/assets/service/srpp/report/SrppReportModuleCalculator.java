@@ -32,7 +32,18 @@ public final class SrppReportModuleCalculator {
         if(!policy.bundleHash().equals(registered.bundleHash()))throw new IllegalArgumentException("POLICY_IDENTITY_MISMATCH");
         JsonNode assets=frozen.input().path("sources").path("assets");ArrayNode out=F.arrayNode();
         out.add(assets(frozen,assets,policy));out.add(allocation(frozen,assets,policy,model,extra));out.add(funding(frozen,assets,policy,extra));out.add(SrppReportIncomePayrollCalculator.calculateIncome(frozen,policy,model,extra));out.add(SrppReportIncomePayrollCalculator.calculatePayroll(frozen,model,extra));
-        JsonNode projected=SrppReportMediumDipCalculator.projectedModel(frozen,model);out.add(bond(frozen,policy,model,extra));out.add(topup(frozen,policy,model,extra));out.add(strategic(frozen,policy,model,extra,out.get(2),out));out.add(pace(frozen,policy,model,extra));out.add(regime(frozen,policy,projected,extra));out.add(SrppReportShortUsCalculator.calculate(frozen,projected,extra));return out;
+        JsonNode projected=SrppReportMediumDipCalculator.projectedModel(frozen,model);out.add(bond(frozen,policy,model,extra));out.add(topup(frozen,policy,model,extra));out.add(strategic(frozen,policy,model,extra,out.get(2),out));out.add(pace(frozen,policy,model,extra));out.add(regime(frozen,policy,projected,extra));out.add(SrppReportShortUsCalculator.calculate(frozen,projected,extra));appendZeroTargetExits(frozen,policy,model,out);return out;
+    }
+    /** All ordinary SELL modules must exist before assigning the single D236 portfolio budget. */
+    static void appendZeroTargetExits(DecisionInputCapturePort.Frozen frame,Policy policy,JsonNode model,ArrayNode modules){
+        if(!SrppZeroTargetHighZoneExitCalculator.current(model))return;
+        ObjectNode target=null;ArrayNode other=F.arrayNode();
+        for(JsonNode module:modules){if("STRATEGIC_BUY_GATES".equals(module.path("moduleId").asText()))target=(ObjectNode)module;for(JsonNode leg:module.path("data").path("legs"))other.add(leg);}
+        if(target==null)throw new IllegalArgumentException("D236_STRATEGIC_MODULE_MISSING");
+        ObjectNode exits=SrppZeroTargetHighZoneExitCalculator.calculate(SrppZeroTargetExitContext.taiwan(frame,model,policy.bundleHash()),other);
+        ArrayNode legs=(ArrayNode)target.path("data").path("legs");SortedSet<String> refs=new TreeSet<>(),missing=new TreeSet<>();for(JsonNode ref:target.path("inputRefs"))refs.add(ref.asText());for(JsonNode reason:target.path("missing"))missing.add(reason.asText());
+        for(JsonNode leg:exits.path("legs")){legs.add(leg);for(JsonNode receipt:leg.path("receipts"))for(JsonNode ref:receipt.path("inputRefs"))refs.add(ref.asText());}
+        for(JsonNode reason:exits.path("missing"))missing.add(reason.asText());ArrayNode refOut=target.putArray("inputRefs"),missingOut=target.putArray("missing"),reasonOut=target.putArray("reasonCodes");refs.forEach(refOut::add);missing.forEach(missingOut::add);missing.forEach(reasonOut::add);if(!missing.isEmpty())target.put("status","PARTIAL");
     }
     /**
      * Task 626.9 isolated re-run of one original calculator over a refresh frame (only quote/book/nav replaced).

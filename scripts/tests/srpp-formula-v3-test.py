@@ -35,6 +35,8 @@ class FormulaV3Test(unittest.TestCase):
             current = json.loads((REPO / "spec/fixtures/srpp_formula_manifest_v3.json").read_text())
             declared = {name for value in current["calculations"].values()
                         for name in value.get("sourceSha256", {})}
+            declared.update("asset-management/" + name for name in GEN.ZERO_TARGET_JAVA_SOURCES)
+            declared.update("SRPP/" + name for name in GEN.ZERO_TARGET_PYTHON_SOURCES)
             for name in declared:
                 prefix, relative = name.split("/", 1)
                 destination = (root if prefix == "asset-management" else srpp) / relative
@@ -50,6 +52,8 @@ class FormulaV3Test(unittest.TestCase):
                 value = json.loads(before)
                 self.assertEqual("ASSET_MGMT_SRPP_V3", value["formulaVersion"])
                 self.assertEqual(4, len(value["calculations"]["dividendStabilization"]["sourceSha256"]))
+                self.assertEqual("ZERO_TARGET_HIGH_ZONE_EXIT_D236", value["calculations"]["zeroTargetHighZoneExit"]["calculationId"])
+                self.assertIn("SRPP/scripts/correction_dip.py", value["calculations"]["zeroTargetHighZoneExit"]["sourceSha256"])
                 python_source.write_text("# changed isolated source\n")
                 with self.assertRaisesRegex(ValueError, "FORMULA_V3_SOURCE_OR_ARTIFACT_DRIFT"):
                     GEN.generate(srpp, True)
@@ -57,7 +61,9 @@ class FormulaV3Test(unittest.TestCase):
                 self.assertNotEqual(digest, GEN.generate(srpp, False))
                 for name in (
                         "backend/src/main/java/com/steven/assets/service/srpp/report/SrppReportMediumDipCalculator.java",
-                        "backend/src/main/java/com/steven/assets/service/srpp/report/SrppNamedRadarSellCalculator.java"):
+                        "backend/src/main/java/com/steven/assets/service/srpp/report/SrppNamedRadarSellCalculator.java",
+                        GEN.ZERO_TARGET_JAVA_SOURCES[0],
+                        "bff/src/main/java/com/steven/assets/bff/publicsrpp/SrppCompletionReserveAllocation.java"):
                     source = root / name
                     source.write_text("// changed independent strategy source\n")
                     with self.assertRaisesRegex(ValueError, "FORMULA_V3_SOURCE_OR_ARTIFACT_DRIFT"):

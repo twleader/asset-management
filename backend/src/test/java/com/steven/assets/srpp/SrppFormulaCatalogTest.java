@@ -69,4 +69,18 @@ class SrppFormulaCatalogTest {
                 .isEqualTo("0f3d9b67dcb7d519f8ef5e9ee378d86eaf26228409199bc487036732e0186e86");
         assertThat(SrppFormulaCatalog.formulaSetSha256()).isEqualTo(GOLDEN_FORMULA_SET_SHA256);
     }
+    @Test
+    void zeroTargetExitFormulaBindsBothMarketsAndIndependentFinancialDependencies() {
+        var scope=SrppFormulaCatalog.manifest(SrppFormulaCatalog.CURRENT_FORMULA_VERSION)
+                .path("calculations").path("zeroTargetHighZoneExit");
+        assertThat(scope.path("calculationId").asText()).isEqualTo("ZERO_TARGET_HIGH_ZONE_EXIT_D236");
+        for(String path:java.util.List.of(
+                "asset-management/backend/src/main/java/com/steven/assets/service/srpp/report/SrppZeroTargetHighZoneExitCalculator.java",
+                "asset-management/backend/src/main/java/com/steven/assets/service/srpp/report/SrppZeroTargetPortfolioFloor.java",
+                "asset-management/backend/src/main/java/com/steven/assets/service/srpp/us/UsReportPublisher.java",
+                "asset-management/bff/src/main/java/com/steven/assets/bff/publicsrpp/SrppCompletionReserveAllocation.java",
+                "SRPP/scripts/zero_target_high_zone_exit.py", "SRPP/scripts/correction_dip.py"))
+            assertThat(scope.path("sourceSha256").path(path).asText()).matches("[0-9a-f]{64}");
+    }
+
 }

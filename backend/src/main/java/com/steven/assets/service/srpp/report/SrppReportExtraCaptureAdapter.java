@@ -96,9 +96,15 @@ public final class SrppReportExtraCaptureAdapter implements SrppReportExtraCaptu
                 }catch(Exception fxUnavailable){body.putObject("usdFxPurchase").put("evaluated",false).put("reason","D215_FX_CONTEXT_UNAVAILABLE");}
             }
             ArrayNode sessions=body.putArray("completedSessions");calendarSessions.get(m).forEach(d->sessions.add(d.toString()));body.put("calendarVerified",calendarQuality.get(m));body.put("lookbackComplete",calendarComplete.get(m));if(calendarStart.get(m)==null)body.putNull("calendarCoverageStart");else body.put("calendarCoverageStart",calendarStart.get(m).toString());body.put("calendarCoverageEnd",date.minusDays(1).toString());if(calendarUnknown.get(m)==null)body.putNull("calendarUnknownDate");else body.put("calendarUnknownDate",calendarUnknown.get(m).toString());
+            if(SrppZeroTargetHighZoneExitCalculator.current(model)&&m.equals("台股")&&body.path("book").isObject()){
+                ObjectNode regular=(ObjectNode)body.path("book");if(!regular.has("volumeUnit"))regular.put("volumeUnit","LOTS");if(!regular.has("bookType"))regular.put("bookType","REGULAR");
+            }
             String sourceId="market:"+key;sources.set(sourceId,body);SourceQuality quality=assess(body,date,Instant.now());source(vector,sourceId,body,at,quality.coverage(),quality.validation());
         }
         for(String id:List.of("payroll","tax","core-state","global-pace","regime","short-sleeve","us-tactical","dca-identity","topup-state","report-reservations")){if(frozenSources.has(id))continue;ObjectNode unavailable=sources.putObject(id);unavailable.put("status","UNAVAILABLE");unavailable.put("reason",id.toUpperCase(Locale.ROOT).replace('-','_')+"_CANONICAL_SOURCE_UNAVAILABLE");source(vector,id,unavailable,at,"NONE","UNAVAILABLE");}
+        if(SrppZeroTargetHighZoneExitCalculator.current(model)&&!frozenSources.has(SrppZeroTargetHighZoneExitCalculator.STATE)){
+            ObjectNode unavailable=JsonNodeFactory.instance.objectNode().put("verified",false).put("coverage","NONE").put("status","UNAVAILABLE").put("ownerUserId",ownerId).put("tradingDate",date.toString()).put("policyBundleSha256",frozenSources.path("policy").path("bundleHash").asText()).put("source_ref","CANONICAL_SOURCE_UNAVAILABLE").put("reason","D236_ZERO_TARGET_EXIT_STATE_CANONICAL_SOURCE_UNAVAILABLE");sources.set(SrppZeroTargetHighZoneExitCalculator.STATE,unavailable);source(vector,SrppZeroTargetHighZoneExitCalculator.STATE,unavailable,at,"NONE","UNAVAILABLE");
+        }
         Instant completedAt=Instant.now();vector.forEach(v->((ObjectNode)v).put("capturedAt",completedAt.toString()));return new ExtraCapture(sources,vector);
     }
     private static final Set<String> D215_FX_CODES=Set.of("VT","00865B","00719B","00697B"),D215_PRICE_ONLY_BONDS=Set.of("00865B","00719B","00697B");

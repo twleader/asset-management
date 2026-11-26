@@ -116,7 +116,8 @@ final class SrppReportResponseValidator {
             if(!text(source,"sha256").equals(SrppJcs.sha256Hex(SrppJcs.canonicalize(sources.get(id))))) fail();
             if("VERIFIED".equals(text(source,"validation"))) verifiedSources.add(id);
         });
-        JsonNode modules=root.get("modules");array(modules,12);if(modules.size()!=12)fail();
+        JsonNode modules=root.get("modules");
+        SrppZeroTargetExitValidator.routes(modules,new SrppZeroTargetExitValidator.Context(model,sources,vector,owner,q.tradingDate(),q.policyBundleSha256(),captured,false,q.reportSlot()));array(modules,12);if(modules.size()!=12)fail();
         Set<String> seen=new HashSet<>();int[] counts=new int[4];
         for(JsonNode module:modules){
             fields(module,"moduleId","status","formulaVersion","scope","data","missing","reasonCodes","inputRefs","receipts");
@@ -160,7 +161,7 @@ final class SrppReportResponseValidator {
                 if(!bondLegs.equals(Set.of("00697B:STRATEGIC_FUBON","00719B:STRATEGIC_FUBON","00865B:STRATEGIC_FUBON","00865B:EMERGENCY_CATHAY")))fail();
             }
             int namedExitCount=0;for(JsonNode candidate:data.get("legs"))if(Set.of("NAMED_RADAR_ROTATION_D226","NAMED_HIGH_ZONE_EXIT_D235").contains(candidate.path("strategy").asText())&&++namedExitCount>1)fail();
-            for(JsonNode leg:data.get("legs")){leg(id,leg,sourceIds,verifiedSources,model,sources,q.tradingDate());if(index>=2 && "ACTIONABLE_FOR_REPORT".equals(text(leg,"status")))fail();}
+            for(JsonNode leg:data.get("legs")){if(!SrppZeroTargetExitValidator.STRATEGY.equals(leg.path("strategy").asText()))leg(id,leg,sourceIds,verifiedSources,model,sources,q.tradingDate());if(index>=2 && "ACTIONABLE_FOR_REPORT".equals(text(leg,"status")))fail();}
         }
         JsonNode coverage=root.get("coverage");fields(coverage,"requestedCount","completeCount","partialCount","unavailableCount","notEvaluatedCount");
         if(integer(coverage,"requestedCount")!=12 || integer(coverage,"completeCount")!=counts[0]

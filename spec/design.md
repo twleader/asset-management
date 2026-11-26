@@ -14399,3 +14399,10 @@ SRPP 台股與美股事件反彈退潮提示只供日報風險說明，原交易
 本輪模型只允七個STOCK（GOOG/GOOGL/MSFT/AVGO/NVDA/AAPL/AMZN）對NAMED_DEEP_DRAWDOWN文件精確來源SHA的metadata連動；其餘leaf、D235/2.77.0/3.25.0與所有金融值不變。資產端copy精確authority bytes、既有generator產正式投影/SQL/goldens，formula與calculatorHashes及每case金融輸出保持；Swagger/BFF production bytes不變，不renderer。最後generated/spec文件全定稿後獨立本機Codex審查與gate記錄，雙repo no-ff/push後insert-only registry再只重建/recreate必要business-services，JAR/設定/9090逐證；不補報、不金融取數/草稿/寄信/交易。既存simulator舊D234 drift本輪具名保留，不擴改其runtime。
 
 設計以來源字面current-declaration semantic guard補既有hash驗證的盲點：只讀固定本機required/conditional已公布來源，不新增API/DB/外部I/O；資產端維持原calculator/registry schema，僅透過正式authority bytes與同輸入golden驗metadata發布一致性。原始STOP與修後離線PASS是不同證據，不能相互替換。
+
+
+### Task 638：D236跨市場零目標退出架構
+
+新pure共用calculator以TW／US明示context adapter消費同輪immutable sources，15typed gates和planId綁定dynamic symbol/market/broker/account；zero-target-exit-state提供canonical attribution／baseline／fills／sellable／pending／allbroker cooldown，不挪用D223。TW沿STRATEGIC_BUY_GATES.data.legs，US沿既有endpoint新增ZERO_TARGET_EXIT module，BFF與SRPP兩consumer均驗raw來源、modeltarget與策略選路，多leg依identity去重且不能降標洗BLOCKED。市場calendar/session/units/tick/costcurrency獨立，源缺失具名UNAVAILABLE。OpenAPI、Swaggeridentity、formula新Java/Python來源列表、goldens與registryinsert-only SQL同步；不新增broker或HTTP路由。完整DTO、保護例外與驗證矩陣以t638為本輪自足來源。
+
+Task638 CORE_RETENTION另以同owner單一portfolio budget重演原日期floor、canonical L0股票/基金分類、全broker掛單/linked預留及所有positive SELL prefix；USD先native max再保守FX，D236排序逐腿消耗，bond獨立。中間期raw completion用原D222 independent selector/project及00865B canonical分帳重演，不信derived bool；完整DTO/rounding/source及anti-downgrade封口見t638相應專節。
