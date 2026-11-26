@@ -1803,7 +1803,7 @@
         "market": "美股",
         "quote_currency": "USD",
         "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
-        "source_sha256": "772aa3b0b792a591a3710d1570be6dc6926fe58afa3ae2502835ccb889da96f7",
+        "source_sha256": "f03fdd8fb38ed75518c0a0505b3cdd4ccdfb156081b01beb6884952f4bd80925",
         "stock_code": "GOOG"
       },
       {
@@ -1811,7 +1811,7 @@
         "market": "美股",
         "quote_currency": "USD",
         "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
-        "source_sha256": "772aa3b0b792a591a3710d1570be6dc6926fe58afa3ae2502835ccb889da96f7",
+        "source_sha256": "f03fdd8fb38ed75518c0a0505b3cdd4ccdfb156081b01beb6884952f4bd80925",
         "stock_code": "GOOGL"
       },
       {
@@ -1819,7 +1819,7 @@
         "market": "美股",
         "quote_currency": "USD",
         "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
-        "source_sha256": "772aa3b0b792a591a3710d1570be6dc6926fe58afa3ae2502835ccb889da96f7",
+        "source_sha256": "f03fdd8fb38ed75518c0a0505b3cdd4ccdfb156081b01beb6884952f4bd80925",
         "stock_code": "MSFT"
       },
       {
@@ -1827,7 +1827,7 @@
         "market": "美股",
         "quote_currency": "USD",
         "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
-        "source_sha256": "772aa3b0b792a591a3710d1570be6dc6926fe58afa3ae2502835ccb889da96f7",
+        "source_sha256": "f03fdd8fb38ed75518c0a0505b3cdd4ccdfb156081b01beb6884952f4bd80925",
         "stock_code": "AVGO"
       },
       {
@@ -1835,7 +1835,7 @@
         "market": "美股",
         "quote_currency": "USD",
         "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
-        "source_sha256": "772aa3b0b792a591a3710d1570be6dc6926fe58afa3ae2502835ccb889da96f7",
+        "source_sha256": "f03fdd8fb38ed75518c0a0505b3cdd4ccdfb156081b01beb6884952f4bd80925",
         "stock_code": "NVDA"
       },
       {
@@ -1843,7 +1843,7 @@
         "market": "美股",
         "quote_currency": "USD",
         "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
-        "source_sha256": "772aa3b0b792a591a3710d1570be6dc6926fe58afa3ae2502835ccb889da96f7",
+        "source_sha256": "f03fdd8fb38ed75518c0a0505b3cdd4ccdfb156081b01beb6884952f4bd80925",
         "stock_code": "AAPL"
       },
       {
@@ -1851,7 +1851,7 @@
         "market": "美股",
         "quote_currency": "USD",
         "source_document": "docs/NAMED_DEEP_DRAWDOWN.md",
-        "source_sha256": "772aa3b0b792a591a3710d1570be6dc6926fe58afa3ae2502835ccb889da96f7",
+        "source_sha256": "f03fdd8fb38ed75518c0a0505b3cdd4ccdfb156081b01beb6884952f4bd80925",
         "stock_code": "AMZN"
       }
     ],

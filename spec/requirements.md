@@ -7380,3 +7380,10 @@ SRPP 兩軌完成逐腿判斷後，需要 9090 直接算出最終張數、限價
 5. 保留同輪報價與最終直接quote、五檔深度、正式可賣/交割量、同帳持股、掛單及linked預留去重、股票費稅、D144窄限價例外、所有券商同方向已成交後五個完成交易日冷卻；未知不當零，不本地resize或解BLOCKED。LLM逐腿採納/等待/否決，永不下單。
 6. SRPP、BFF封閉response validator同步strategy、14gate精確refs及values；完整publisher正腿/零腿、缺失重複receipt、錯身分/refs、門檻或首批清零竄改均測試。OpenAPI同步D235描述，renderer/identity/consumer schema/runtime/manifest/bundle、formula V3 mirrors/goldens/authority/insert-only SQL完整發布鏈依最後同一身分驗證；乾淨main重建/recreate business-services及bff，JAR位元組比對與SRPP host 9090驗收。正式日報採用另按合法時窗/完整required reads/L0驗證，不由維護測試宣稱。
 7. 10/27、11/13、11/16留存raw只讀且保留hash/consumer/slot/原日期，以明示離線反事實評估回放；高檔與離高資格分開於完整交易可用性，缺可賣量/帳本/費稅等維持UNAVAILABLE，不補造PASS。測試門檻邊界、還原標記、四action、首批/尾量、冷卻、深度、去重、費稅與單腿優先/不回退。
+
+
+### Task 637：日報現行來源宣告守門與metadata authority發布（延伸Requirements187／193）
+
+作為SRPP日報使用者，我需要必讀文件的明確現行bundle/policy/model宣告與已發布model/manifest一致；即使錯來源被重簽manifest或重建runtime，rules/build/check仍應拒絕，保留原STOP證據而不補造報告。守門動態涵蓋required/conditional Markdown初始current宣告，保留歷史章節，必要startup/core/shared宣告缺失fail closed；不改calendar前startup讀取範圍、投資規則、時窗或金融硬閘。
+
+本輪模型只允七個STOCK（GOOG/GOOGL/MSFT/AVGO/NVDA/AAPL/AMZN）對NAMED_DEEP_DRAWDOWN文件精確來源SHA的metadata連動；其餘leaf、D235/2.77.0/3.25.0與所有金融值不變。資產端copy精確authority bytes、既有generator產正式投影/SQL/goldens，formula與calculatorHashes及每case金融輸出保持；Swagger/BFF production bytes不變，不renderer。最後generated/spec文件全定稿後獨立本機Codex審查與gate記錄，雙repo no-ff/push後insert-only registry再只重建/recreate必要business-services，JAR/設定/9090逐證；不補報、不金融取數/草稿/寄信/交易。既存simulator舊D234 drift本輪具名保留，不擴改其runtime。
