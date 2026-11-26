@@ -109,7 +109,9 @@
           "minimum_d_inclusive": 80,
           "reuse_low_point_policy": "low_point_sell_protection_d208",
           "reuse_high_zone_policy": "high_zone_reversal_d209"
-        }
+        },
+        "kd_overbought_k_greater_than": 90,
+        "kd_overbought_d_greater_than": 80
       },
       "us_megacap_tactical_policy_d133": {
         "decision": "D-181",
@@ -118,11 +120,11 @@
           "primary_path": "Any ticker appearing on the current round's fresh, verifiable, non-stale US-stock trading radar list (one successful GET /api/public/trading-radar/stock call per candidate with matching stockCode and market=美股) is eligible for evaluation. D-181 removes the prior requirement that a radar-listed candidate also be in the global top-10 market cap, be a US tech giant, or show a 12-month auditable positive return; those three conditions no longer gate a radar-listed name.",
           "fallback_path": "A ticker NOT on the current round's radar list may still be evaluated only if it satisfies all three of: (a) global top-10 market cap by verifiable diluted shares outstanding and a qualified price, cross-checked against at least one independent source, with the existing D-139 10th/11th-place boundary exception (both candidates evaluated and MARKET_CAP_BOUNDARY_10_11 disclosed when ranking is disputed only at that boundary; unverifiable rank or a dispute beyond 10th/11th stays MARKET_CAP_RANK_UNVERIFIED, no trade); (b) US tech giant (US-registered, primarily US-operated, core business in semiconductors, hardware/software, cloud, internet platforms, or AI infrastructure/applications; merely being US-listed, or having tech as an incidental business, does not qualify); (c) a 12-month base/pessimistic/optimistic scenario showing a positive base-case net return after commissions, spread, FX and applicable tax, with estimated upside at least twice the downside risk.",
           "not_a_permanent_whitelist": "This is a dynamic tactical universe, not a permanent core addition. An unheld eligible name's strategic target remains 0%; only one open, compliant US_TACTICAL_TRADE_ID per name may be held temporarily.",
-          "other_gates_unchanged": "Sections 2-6 of portfolio/US_MEGACAP_TACTICAL_PLAN.md (same-direction radar requirement, bull-drawdown entry conditions, position/funding/cost caps, exit and one-year time limit, report disclosure) apply unchanged regardless of which path qualified the candidate. A FALLBACK candidate absent from the list must first pass all three fallback qualifications, then obtain exactly one successful current-read detail using the Swagger-documented stockCode/market selector; verify identity, version, session and BUY/ADD direction against this round. The current-read endpoint only returns an existing current result and may return 404; unavailable detail means WATCH_ONLY/US_RADAR_REQUIRED_FAIL, never refresh, fabricate a route or substitute JSON. Both paths must satisfy D-185 net profit space of at least 15%."
+          "other_gates_unchanged": "Sections 2-6 of portfolio/US_MEGACAP_TACTICAL_PLAN.md (same-direction radar requirement, bull-drawdown entry conditions, position/funding/cost caps, exit and one-year time limit, report disclosure) apply unchanged regardless of which path qualified the candidate. A FALLBACK candidate absent from the list must first pass all three fallback qualifications, then obtain exactly one successful current-read detail using the Swagger-documented stockCode/market selector; verify identity, version, session and BUY/ADD direction against this round. The current-read endpoint only returns an existing current result and may return 404; unavailable detail means WATCH_ONLY/US_RADAR_REQUIRED_FAIL, never refresh, fabricate a route or substitute JSON. Both paths must satisfy D-185 net profit space of at least 15%. D-215 is the narrow named-deep-drawdown timing exception specified in execution_policy.named_deep_drawdown_accumulation_d215; it does not relax qualification, funding, costs or caps."
         },
         "buy_limit_price_basis": {
           "problem": "Prior US-stock reports were observed proposing buy limit prices far below the live executable price (fillable only on a severe same-day crash), apparently because an oversold/pullback entry SIGNAL level (KD, RSI5, BIAS10, W%R9, a support level, or a moving average) was reused as the LIMIT PRICE itself.",
-          "rule": "The entry signal (radar turning BUY_CANDIDATE/ADD_CANDIDATE, bull-drawdown stabilization evidence, and any KD/RSI/BIAS/W%R oversold reading per kd_role) decides ONLY whether a trade is authorized this round. It must never be reused as, or to derive, the limit price. The limit price is computed separately from live data so the order is realistically fillable the same session.",
+          "rule": "The entry signal (radar turning BUY_CANDIDATE/ADD_CANDIDATE, bull-drawdown stabilization evidence, and any KD/RSI/BIAS/W%R oversold reading per kd_role) decides ONLY whether a trade is authorized this round. It must never be reused as, or to derive, the limit price. The limit price is computed separately from live data so the order is realistically fillable the same session. D-215 named MEDIUM entry does not require bull-drawdown stabilization. Its threshold P is quote.last, never the separately computed bid/ask limit reference.",
           "price_basis": "Use this round's successfully retrieved live US quote: the most recent trade price, or the bid/ask midpoint when both sides are available. Round to the security's normal minimum US tick (typically US$0.01). A small buffer toward the executable side is permitted to raise fill probability; the limit must not be set materially below the live quote merely to wait for a lower fill.",
           "no_fresh_quote": "If no fresh, verifiable live quote (trade price or bid/ask) is available this round, the candidate is US_RADAR_REQUIRED_FAIL / no executable order today; never derive a limit price from a stale price, a prior session's close, or an estimate.",
           "note": "kd_role already states this intent (\"KD only adjusts the timing, priority, tranches, and limit price of an already-authorized trade\") but no prior policy text spelled out a concrete US price basis; D-181 supplies one because etf_premium_discount_policy_d124's best-five-depth formula is TW-only (market=台股) and D-108 explicitly does not require US best-five depth."
@@ -141,7 +143,7 @@
           "company_cap": 0.0075,
           "tactical_total_cap": 0.02,
           "fallback_min_upside_to_downside": 2.0,
-          "rule": "D-186 (2026-09-26): before any D-133 US tactical buy may show a share count, USD limit price or amount, the report must run scripts/us_tactical_order_check.py on this round's saved candidate evidence (qualification path, radar detail, live quote, proposed limit, target price with basis, cost rates, proposed TWD notional and open tactical positions). The calculator enforces D-181's candidate path and same-direction radar, D-181's live-quote limit basis (reference = bid/ask midpoint, else last trade, same US session, quoteStatus LIVE; the limit must sit within 0.5% below to 0.5% above that reference and on the Rule 612 tick), D-185's 15% net entry-to-target space after commission, spread, FX spread and tax, and section 4's 0.25% batch / 0.75% company / 2% sleeve caps. Any reason code means NO_EXECUTABLE_ORDER for that name today; PASS_FOR_REPORT_REVIEW is necessary but not sufficient, because section 3 bull-drawdown, fundamentals, funding floors and CATHAY_TWD_US_TACTICAL checks still apply. The 0.5% tolerance is the numeric reading of D-181's 'not materially below the live quote'. The calculator never fetches data or places orders."
+          "rule": "D-186 (2026-09-26): before any D-133 US tactical buy may show a share count, USD limit price or amount, the report must run scripts/us_tactical_order_check.py on this round's saved candidate evidence (qualification path, radar detail, live quote, proposed limit, target price with basis, cost rates, proposed TWD notional and open tactical positions). The calculator enforces D-181's candidate path and same-direction radar, D-181's live-quote limit basis (reference = bid/ask midpoint, else last trade, same US session, quoteStatus LIVE; the limit must sit within 0.5% below to 0.5% above that reference and on the Rule 612 tick), D-185's 15% net entry-to-target space after commission, spread, FX spread and tax, and section 4's 0.25% batch / 0.75% company / 2% sleeve caps. Any reason code means NO_EXECUTABLE_ORDER for that name today; PASS_FOR_REPORT_REVIEW is necessary but not sufficient, because section 3 bull-drawdown, fundamentals, funding floors and CATHAY_TWD_US_TACTICAL checks still apply. The 0.5% tolerance is the numeric reading of D-181's 'not materially below the live quote'. The calculator never fetches data or places orders. D-215 replaces bull-drawdown timing only for its verified named MEDIUM path; all remaining checks and BLOCKED preservation still apply."
         },
         "dip_research_review_d206": {
           "decision": "D-206",
@@ -181,7 +183,7 @@
           "changes_primary_or_fallback_qualification": false,
           "changes_analysis_universe": false,
           "missing_evidence": "UNKNOWN for the affected dimension; WATCH_ONLY when an existing necessary D-133 entry condition cannot be verified. Do not create a global veto for secondary-source gaps.",
-          "execution_boundary": "Research labels never override exact US-market RISK_OFF, radar BUY/ADD, bull-drawdown stabilization, D-185 net 15%, D-186, funding floors, 0.25% batch / 0.75% company / 2% sleeve caps or exit rules. Preserve BLOCKED; no shares, USD limit or amount until all original conditions pass.",
+          "execution_boundary": "Research labels never override exact US-market RISK_OFF, radar BUY/ADD, bull-drawdown stabilization, D-185 net 15%, D-186, funding floors, 0.25% batch / 0.75% company / 2% sleeve caps or exit rules. Preserve BLOCKED; no shares, USD limit or amount until all original conditions pass. D-215 separately authorizes the narrow named MEDIUM deep-drawdown timing exception to RISK_OFF and stabilization; research labels themselves never grant it.",
           "company_names_and_dated_numbers_are_policy": false,
           "trade_authorization": false
         }
@@ -575,7 +577,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -615,7 +617,7 @@
               "evidence_sha256": "0f117a6d6e957bb0c9b15d6574b9216b80d1714c6cc48210fa304dcd4a5a7f18",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -678,7 +680,7 @@
           "evidence_sha256": "0f117a6d6e957bb0c9b15d6574b9216b80d1714c6cc48210fa304dcd4a5a7f18",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -1071,7 +1073,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -1111,7 +1113,7 @@
               "evidence_sha256": "62295150bfc2d57f5058716bceb712a0186ae816389ae2be722c6bac4f6e6aa6",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -1173,7 +1175,7 @@
           "evidence_sha256": "62295150bfc2d57f5058716bceb712a0186ae816389ae2be722c6bac4f6e6aa6",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -2448,7 +2450,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -2488,7 +2490,7 @@
               "evidence_sha256": "bf3322827cfac2f3210a45d092988b6c1274a6186d084af99e1f513dd862f9e0",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -2550,7 +2552,7 @@
           "evidence_sha256": "bf3322827cfac2f3210a45d092988b6c1274a6186d084af99e1f513dd862f9e0",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -2943,7 +2945,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -2983,7 +2985,7 @@
               "evidence_sha256": "f446d498bd48c09fcc5cd916f3d68ac17f50b0c6f4114981054e9ee3e96c4f15",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -3045,7 +3047,7 @@
           "evidence_sha256": "f446d498bd48c09fcc5cd916f3d68ac17f50b0c6f4114981054e9ee3e96c4f15",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -3438,7 +3440,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -3478,7 +3480,7 @@
               "evidence_sha256": "1d024753cd9faa11bc5de68e3f1e228b2e12aa17c4baedcb402f28313e0c15b1",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -3540,7 +3542,7 @@
           "evidence_sha256": "1d024753cd9faa11bc5de68e3f1e228b2e12aa17c4baedcb402f28313e0c15b1",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -3933,7 +3935,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -3973,7 +3975,7 @@
               "evidence_sha256": "adf3cdc00480cc62bd63d5ae118af986408d6a6d4c04e5d90e2a6b7578754ed3",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -4035,7 +4037,7 @@
           "evidence_sha256": "adf3cdc00480cc62bd63d5ae118af986408d6a6d4c04e5d90e2a6b7578754ed3",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -4428,7 +4430,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -4468,7 +4470,7 @@
               "evidence_sha256": "56633896e60b381b38abb3ccb3c319c62255e9de7334eed81a7761aac5925fcd",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -4513,7 +4515,7 @@
           "evidence_sha256": "56633896e60b381b38abb3ccb3c319c62255e9de7334eed81a7761aac5925fcd",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -4910,7 +4912,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -4950,7 +4952,7 @@
               "evidence_sha256": "3c69f525a1af0832e7a5a899d272bc1a1850101e93d21cf1281187bc038599ae",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -4988,7 +4990,7 @@
           "evidence_sha256": "3c69f525a1af0832e7a5a899d272bc1a1850101e93d21cf1281187bc038599ae",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -5385,7 +5387,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-22",
@@ -5425,7 +5427,7 @@
               "evidence_sha256": "63fb7114ffaa749e709a3b1e840b3bfe0d85659f51d1d7512c42b6eba50bd99c",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -5497,7 +5499,7 @@
           "evidence_sha256": "63fb7114ffaa749e709a3b1e840b3bfe0d85659f51d1d7512c42b6eba50bd99c",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -6332,7 +6334,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -6366,7 +6368,7 @@
             "next_state": {
               "stock_code": "GOOGL",
               "market": "美股",
-              "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+              "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
               "armed_date": "2026-10-01",
               "high_date": "2026-10-01",
               "basis_date": "2026-10-26",
@@ -6391,7 +6393,7 @@
         "GOOGL": {
           "stock_code": "GOOGL",
           "market": "美股",
-          "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+          "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
           "armed_date": "2026-10-01",
           "high_date": "2026-10-01",
           "basis_date": "2026-10-26",
@@ -6785,7 +6787,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -6819,7 +6821,7 @@
             "next_state": {
               "stock_code": "GOOGL",
               "market": "美股",
-              "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+              "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
               "armed_date": "2026-10-01",
               "high_date": "2026-10-01",
               "basis_date": "2026-10-26",
@@ -6834,7 +6836,7 @@
         "GOOGL": {
           "stock_code": "GOOGL",
           "market": "美股",
-          "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+          "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
           "armed_date": "2026-10-01",
           "high_date": "2026-10-01",
           "basis_date": "2026-10-26",
@@ -7207,7 +7209,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -7247,7 +7249,7 @@
               "evidence_sha256": "b7fa6eacfbad0f88c0eb4401a4df2bd4af29cac5089bd80daf91ca6598691c8e",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -7285,7 +7287,7 @@
           "evidence_sha256": "b7fa6eacfbad0f88c0eb4401a4df2bd4af29cac5089bd80daf91ca6598691c8e",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -7661,7 +7663,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -7701,7 +7703,7 @@
               "evidence_sha256": "d163c3b4b32bf2e5f724ce8e8fa924e0281821d3d19db2dae6cdcb5bd597023c",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -7739,7 +7741,7 @@
           "evidence_sha256": "d163c3b4b32bf2e5f724ce8e8fa924e0281821d3d19db2dae6cdcb5bd597023c",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -8132,7 +8134,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -8172,7 +8174,7 @@
               "evidence_sha256": "6bd8552bd4a2e429e5dce871c24900dbf626f6c90dec861de466f3bd874c2a43",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -8234,7 +8236,7 @@
           "evidence_sha256": "6bd8552bd4a2e429e5dce871c24900dbf626f6c90dec861de466f3bd874c2a43",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -8755,7 +8757,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-11-27",
@@ -8795,7 +8797,7 @@
               "evidence_sha256": "92fb9bad077dc624cff6dff34098de9fc9ef060e58f1e5aa0759fd468c9f3c60",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -8857,7 +8859,7 @@
           "evidence_sha256": "92fb9bad077dc624cff6dff34098de9fc9ef060e58f1e5aa0759fd468c9f3c60",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -9378,7 +9380,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-11-27",
@@ -9412,7 +9414,7 @@
             "next_state": {
               "stock_code": "GOOGL",
               "market": "美股",
-              "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+              "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
               "armed_date": "2026-10-01",
               "high_date": "2026-10-01",
               "basis_date": "2026-11-27",
@@ -9427,7 +9429,7 @@
         "GOOGL": {
           "stock_code": "GOOGL",
           "market": "美股",
-          "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+          "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
           "armed_date": "2026-10-01",
           "high_date": "2026-10-01",
           "basis_date": "2026-11-27",
@@ -9821,7 +9823,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -9861,7 +9863,7 @@
               "evidence_sha256": "f15f1f0d54daa5732902a1a54a0b1ccefbbc142475ec76d9460128c9f952bd3d",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -9923,7 +9925,7 @@
           "evidence_sha256": "f15f1f0d54daa5732902a1a54a0b1ccefbbc142475ec76d9460128c9f952bd3d",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -10316,7 +10318,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -10356,7 +10358,7 @@
               "evidence_sha256": "1ef62cd5c6523801035751f4d958af4b55e860cb1e356fe31434d062fbdaffd6",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -10418,7 +10420,7 @@
           "evidence_sha256": "1ef62cd5c6523801035751f4d958af4b55e860cb1e356fe31434d062fbdaffd6",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -10811,7 +10813,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -10851,7 +10853,7 @@
               "evidence_sha256": "028c4b0c81c956c25c57413eda9ea03c910ba23a042ff7437ed86e592d9d11ec",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -10914,7 +10916,7 @@
           "evidence_sha256": "028c4b0c81c956c25c57413eda9ea03c910ba23a042ff7437ed86e592d9d11ec",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -11307,7 +11309,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -11347,7 +11349,7 @@
               "evidence_sha256": "9a5ceffab7329a6e942c9ba297463a8fb81dacd0aff934623e4728765f1af6e1",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -11409,7 +11411,7 @@
           "evidence_sha256": "9a5ceffab7329a6e942c9ba297463a8fb81dacd0aff934623e4728765f1af6e1",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -11802,7 +11804,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -11842,7 +11844,7 @@
               "evidence_sha256": "d244a11d660e339a139b7205c8398eaf8f72d6d55345bc9509f90cb74e5f6006",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -11904,7 +11906,7 @@
           "evidence_sha256": "d244a11d660e339a139b7205c8398eaf8f72d6d55345bc9509f90cb74e5f6006",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -12297,7 +12299,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -12337,7 +12339,7 @@
               "evidence_sha256": "d5b863b9ee4b8db8152acf34d436f3dc9497ff8b2702a8a1b1d2a87307d06379",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -12399,7 +12401,7 @@
           "evidence_sha256": "d5b863b9ee4b8db8152acf34d436f3dc9497ff8b2702a8a1b1d2a87307d06379",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -12792,7 +12794,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -12832,7 +12834,7 @@
               "evidence_sha256": "9ce8adca4691d33920589b7a3eb321334e8c235533516234681d1ccdcd538c86",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -12894,7 +12896,7 @@
           "evidence_sha256": "9ce8adca4691d33920589b7a3eb321334e8c235533516234681d1ccdcd538c86",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -13287,7 +13289,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -13327,7 +13329,7 @@
               "evidence_sha256": "70cbf04e58aff49ccb8976bfed22de76c9966a28394743f029b0efe5a60a45a1",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -13389,7 +13391,7 @@
           "evidence_sha256": "70cbf04e58aff49ccb8976bfed22de76c9966a28394743f029b0efe5a60a45a1",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -13782,7 +13784,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -13822,7 +13824,7 @@
               "evidence_sha256": "2da46b368610dda42234cbd9215d824fdef009839e97c0dff048bdec39756ace",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -13885,7 +13887,7 @@
           "evidence_sha256": "2da46b368610dda42234cbd9215d824fdef009839e97c0dff048bdec39756ace",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -14278,7 +14280,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -14318,7 +14320,7 @@
               "evidence_sha256": "830c1910040c582dcb9755b5fae74a1ec420ae92227187df2b5072eef7a09d11",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -14380,7 +14382,7 @@
           "evidence_sha256": "830c1910040c582dcb9755b5fae74a1ec420ae92227187df2b5072eef7a09d11",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -14773,7 +14775,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -14813,7 +14815,7 @@
               "evidence_sha256": "09a485019fe9b8389d4358ce433e3414f91968a7de7db0f6a39dce64625b97a1",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -14875,7 +14877,7 @@
           "evidence_sha256": "09a485019fe9b8389d4358ce433e3414f91968a7de7db0f6a39dce64625b97a1",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -15268,7 +15270,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -15308,7 +15310,7 @@
               "evidence_sha256": "74f3a36592e8ed7f052eddec1bad1a62dc4e4a3acbdcce424ca24a53fa2a2ad5",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -15370,7 +15372,7 @@
           "evidence_sha256": "74f3a36592e8ed7f052eddec1bad1a62dc4e4a3acbdcce424ca24a53fa2a2ad5",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -15763,7 +15765,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -15803,7 +15805,7 @@
               "evidence_sha256": "416b223602ff7d47fba61f3d483944097b40f456cfe563d6d12e7bda456ab336",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -15865,7 +15867,7 @@
           "evidence_sha256": "416b223602ff7d47fba61f3d483944097b40f456cfe563d6d12e7bda456ab336",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -16258,7 +16260,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -16298,7 +16300,7 @@
               "evidence_sha256": "fc622318b39de1bc370ec68fc89df8aee6f2090198939b3f2a79621e1a5d6ebb",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -16361,7 +16363,7 @@
           "evidence_sha256": "fc622318b39de1bc370ec68fc89df8aee6f2090198939b3f2a79621e1a5d6ebb",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -16754,7 +16756,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -16794,7 +16796,7 @@
               "evidence_sha256": "a116eda7a2006baacbdcb61444b79ef94fcfe3c3c8b7f1bb782e227106ecf007",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -16857,7 +16859,7 @@
           "evidence_sha256": "a116eda7a2006baacbdcb61444b79ef94fcfe3c3c8b7f1bb782e227106ecf007",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -17250,7 +17252,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -17290,7 +17292,7 @@
               "evidence_sha256": "bec6a70b0274b673947e3458f181d864b68c026cbddde621a717afc670f99649",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -17352,7 +17354,7 @@
           "evidence_sha256": "bec6a70b0274b673947e3458f181d864b68c026cbddde621a717afc670f99649",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -17745,7 +17747,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -17785,7 +17787,7 @@
               "evidence_sha256": "2b44c20eaeaf29d17760f7cfb1353577600c2acb55ba1ed651010ee608f3486d",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -17848,7 +17850,7 @@
           "evidence_sha256": "2b44c20eaeaf29d17760f7cfb1353577600c2acb55ba1ed651010ee608f3486d",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -18241,7 +18243,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -18281,7 +18283,7 @@
               "evidence_sha256": "d16f7b212aee5e844eddbe41b0567028bb2b00627dc8ffd04030a293e60a33e5",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -18344,7 +18346,7 @@
           "evidence_sha256": "d16f7b212aee5e844eddbe41b0567028bb2b00627dc8ffd04030a293e60a33e5",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -18737,7 +18739,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -18777,7 +18779,7 @@
               "evidence_sha256": "c08e9b3bbfdd9dbc2c81348071ea3b3d5493cb1cb9c8aadc3b55895da171a4dd",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -18839,7 +18841,7 @@
           "evidence_sha256": "c08e9b3bbfdd9dbc2c81348071ea3b3d5493cb1cb9c8aadc3b55895da171a4dd",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -19232,7 +19234,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -19272,7 +19274,7 @@
               "evidence_sha256": "ec5383ef36eafa2f03934de6dbc05a9015d4fdd96c90e4326977a92eca1ad873",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -19334,7 +19336,7 @@
           "evidence_sha256": "ec5383ef36eafa2f03934de6dbc05a9015d4fdd96c90e4326977a92eca1ad873",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -19727,7 +19729,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -19767,7 +19769,7 @@
               "evidence_sha256": "12a4bcfbddc7d59e77f2eea35b8ba22f4943855a50367e1e10965e19e4821856",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -19829,7 +19831,7 @@
           "evidence_sha256": "12a4bcfbddc7d59e77f2eea35b8ba22f4943855a50367e1e10965e19e4821856",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -20222,7 +20224,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -20262,7 +20264,7 @@
               "evidence_sha256": "2c91685378836651bdda4411a5f5777d60583a50933e3875c70ac87f573669b5",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -20324,7 +20326,7 @@
           "evidence_sha256": "2c91685378836651bdda4411a5f5777d60583a50933e3875c70ac87f573669b5",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -20718,7 +20720,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -20758,7 +20760,7 @@
               "evidence_sha256": "affea07ac6d36adc7c1b3212dbd45bee3a5279e939546c104204b3b0d60353f9",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -20820,7 +20822,7 @@
           "evidence_sha256": "affea07ac6d36adc7c1b3212dbd45bee3a5279e939546c104204b3b0d60353f9",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -21216,7 +21218,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -21256,7 +21258,7 @@
               "evidence_sha256": "160fcd1f6da9006b992c59875266b5f5f7f685628df8be00986dc26509cec67e",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -21318,7 +21320,7 @@
           "evidence_sha256": "160fcd1f6da9006b992c59875266b5f5f7f685628df8be00986dc26509cec67e",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -21712,7 +21714,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -21752,7 +21754,7 @@
               "evidence_sha256": "c12a08983ad5aa57694eaaaaa9310902a7683874f46e7c57a23428a5f5e1e9e3",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -21814,7 +21816,7 @@
           "evidence_sha256": "c12a08983ad5aa57694eaaaaa9310902a7683874f46e7c57a23428a5f5e1e9e3",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -22206,7 +22208,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -22246,7 +22248,7 @@
               "evidence_sha256": "864d86e9eb5fc94e34ba332fab75965e3241172da20622c20da25321d176f3f7",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -22284,7 +22286,7 @@
           "evidence_sha256": "864d86e9eb5fc94e34ba332fab75965e3241172da20622c20da25321d176f3f7",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -22676,7 +22678,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -22716,7 +22718,7 @@
               "evidence_sha256": "d60ba7586544192b76a4a091c5db49dac0cb322ca611813aebb1d224bd5da1af",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -22754,7 +22756,7 @@
           "evidence_sha256": "d60ba7586544192b76a4a091c5db49dac0cb322ca611813aebb1d224bd5da1af",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -23146,7 +23148,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -23186,7 +23188,7 @@
               "evidence_sha256": "431401b036d6c8d7f66baccd83dbba7e9e8dd268d128f12f8f4079799abbc99f",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -23224,7 +23226,7 @@
           "evidence_sha256": "431401b036d6c8d7f66baccd83dbba7e9e8dd268d128f12f8f4079799abbc99f",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -23616,7 +23618,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -23656,7 +23658,7 @@
               "evidence_sha256": "95776900024577f88fb6539b39d3c1764d6ce2ad40ccdc59bbd9f775529ff91f",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -23694,7 +23696,7 @@
           "evidence_sha256": "95776900024577f88fb6539b39d3c1764d6ce2ad40ccdc59bbd9f775529ff91f",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -24086,7 +24088,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -24126,7 +24128,7 @@
               "evidence_sha256": "3f496ba125a899386e02dd3dbdd9ba60ffc2237605a77efce2a2f918d6138eb4",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -24164,7 +24166,7 @@
           "evidence_sha256": "3f496ba125a899386e02dd3dbdd9ba60ffc2237605a77efce2a2f918d6138eb4",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -24556,7 +24558,7 @@
           "GOOGL": {
             "stock_code": "GOOGL",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -24596,7 +24598,7 @@
               "evidence_sha256": "468f38caf789e443e33b96ec07d689f99f5e22e047a64f3cccd7b778514e64dd",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -24634,7 +24636,7 @@
           "evidence_sha256": "468f38caf789e443e33b96ec07d689f99f5e22e047a64f3cccd7b778514e64dd",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -25027,7 +25029,7 @@
           "SGOV": {
             "stock_code": "SGOV",
             "market": "美股",
-            "policy_sha256": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "policy_sha256": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "armed_date": "2026-10-01",
             "high_date": "2026-10-01",
             "basis_date": "2026-10-26",
@@ -25067,7 +25069,7 @@
               "evidence_sha256": "e6da6a9ec34bd6d7dd633edfd85152014a2df53d7c10ddf657004a1381539e4f",
               "policy_migration": {
                 "decision": "D-205",
-                "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+                "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
                 "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
                 "original_evidence_sha256": "prior-verified-evidence",
                 "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"
@@ -25130,7 +25132,7 @@
           "evidence_sha256": "e6da6a9ec34bd6d7dd633edfd85152014a2df53d7c10ddf657004a1381539e4f",
           "policy_migration": {
             "decision": "D-205",
-            "from": "04e2200fbe05bb00b73090ca16fc482a6ecf1769873239cc02ae95c3332abcce",
+            "from": "052de907aaeb5100868e063bee2ff5346458d208f7d9f515919b1b6b8e3fc4dc",
             "to": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
             "original_evidence_sha256": "prior-verified-evidence",
             "scope": "OBSERVATION_ONLY_NO_TRADE_AUTHORIZATION"

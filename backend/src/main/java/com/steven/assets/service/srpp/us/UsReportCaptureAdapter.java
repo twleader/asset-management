@@ -90,6 +90,8 @@ public class UsReportCaptureAdapter implements UsReportCapturePort {
                 candidate.set("radar",detail.has("stock")?detail.get("stock"):NullNode.instance);for(String field:List.of("target_price","target_price_basis","proposed_notional_twd","existing_company_cost_twd","open_tactical_total_twd","fallback_evidence"))candidate.putNull(field);ObjectNode costs=candidate.putObject("costs");for(String field:List.of("commission_each_side_pct","spread_each_side_pct","fx_spread_each_side_pct","tax_on_gain_pct"))costs.putNull(field);candidate.putObject("formalSources");
             }
         }
+        boolean d236=SrppZeroTargetHighZoneExitCalculator.current(model);
+        if(d236)for(JsonNode row:symbols)if(!row.has("book"))((ObjectNode)row).putObject("book").put("available",false).put("reason","D236_US_NATIVE_BOOK_CANONICAL_SOURCE_UNAVAILABLE");
         Instant at=clock.instant();tactical.put("asof",at.toString());
         if(asset!=null&&!freshAssets(asset,at)){
             asset=null;rawAssets=NullNode.instance;held.clear();gaps.add("ASSETS_CURRENT_ROUND_STALE");universe.clear();universe.addAll(listed);universe.addAll(watched);array(universeSource,"holdingSymbols",held);array(universeSource,"symbols",universe);tactical.putNull("total_assets_twd");
@@ -105,6 +107,10 @@ public class UsReportCaptureAdapter implements UsReportCapturePort {
         source(sources,vector,"policy",authored,at,"COMPLETE","VERIFIED");source(sources,vector,"swagger",J.objectNode().put("sha256",swagger.sha256().orElseThrow(()->new UsReportProblem("CONTEXT_NOT_READY"))),at,"COMPLETE","VERIFIED");
         source(sources,vector,"calendar",calendarSource,at,days.isEmpty()?"NONE":"COMPLETE",days.isEmpty()?"UNAVAILABLE":"VERIFIED");
         source(sources,vector,"universe",universeSource,at,gaps.isEmpty()?"COMPLETE":"PARTIAL",gaps.isEmpty()?"VERIFIED":"UNAVAILABLE");source(sources,vector,"market",market,at,"PARTIAL","VERIFIED");source(sources,vector,"us-tactical",tactical,at,candidates.isEmpty()&&gaps.isEmpty()?"COMPLETE":"PARTIAL",candidates.isEmpty()&&gaps.isEmpty()?"VERIFIED":"UNAVAILABLE");
+        if(d236)for(String id:List.of("zero-target-exit-state","report-reservations","classifications","fx")){
+            ObjectNode unavailable=J.objectNode().put("verified",false).put("coverage","NONE").put("status","UNAVAILABLE").put("ownerUserId",owner).put("tradingDate",date.toString()).put("policyBundleSha256",authority.decision().policy().bundleHash()).put("source_ref","CANONICAL_SOURCE_UNAVAILABLE").put("reason","D236_"+id.toUpperCase(Locale.ROOT).replace('-','_')+"_CANONICAL_SOURCE_UNAVAILABLE");
+            source(sources,vector,id,unavailable,at,"NONE","UNAVAILABLE");
+        }
         return new Frozen(sources,vector,at);
     }
     private static final class AssetsStale extends RuntimeException {}

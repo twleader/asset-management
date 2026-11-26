@@ -242,7 +242,7 @@ end
 document = YAML.safe_load(File.read(OPENAPI), aliases: false)
 compose = YAML.safe_load(File.read(COMPOSE), aliases: false)
 assert!(document.fetch('openapi').to_s.match?(/\A3\./), 'OpenAPI 版本必須是 3.x')
-assert!(document.dig('info', 'version') == '1.30.0', 'Task 629 後 OpenAPI info.version 必須為 1.30.0')
+assert!(document.dig('info', 'version') == '1.31.0', 'Task 638 後 OpenAPI info.version 必須為 1.31.0')
 assert!(document['security'] == [], 'OpenAPI global security 必須明確為空陣列')
 
 server_urls = document.fetch('servers').map { |server| server.fetch('url') }
@@ -1101,8 +1101,8 @@ assert!(facts_example.fetch('contentSha256') == Digest::SHA256.hexdigest(task497
         'Task497 A2 example 的 contentSha256 必須由 sealed body 的 JCS 實際重算')
 
 reachable_schemas = reachable_schema_names(document)
-assert!(reachable_schemas.length == 268,
-        "全量 strict audit 預期 268 個 reachable component schema，實際為 #{reachable_schemas.length}")
+assert!(reachable_schemas.length == 270,
+        "全量 strict audit 預期 270 個 reachable component schema，實際為 #{reachable_schemas.length}")
 reachable_schemas.each do |name|
   assert_schema_descriptions!(schemas.fetch(name), "components.schemas.#{name}")
 end
@@ -1319,7 +1319,7 @@ assert!(observer_op.dig('security') == [{'AiFlowToken' => []}], '專用觀測tok
 assert!(observation.dig('components','securitySchemes','AiFlowToken','name') == 'X-AI-Flow-Token', 'exact觀測header')
 assert!(frontend_nginx_app.include?('location = /api/srpp/ai-flow/events { return 404; }'), 'frontend exact deny AI ingress')
 assert!(bff_security.include?('"/api/srpp/ai-flow/events"') && bff_security.include?('"/api/bff/ai-flow/**"'), 'BFF producer及ADMIN頁路徑授權')
-assert!(document.dig('info', 'version') == '1.30.0', 'Task629 金融 YAML 必須升為1.30.0')
+assert!(document.dig('info', 'version') == '1.31.0', 'Task638 跨市場退出契約必須升為1.31.0')
 unified_markdown = File.read(swagger_copies.first)
 assert!(unified_markdown.include?('| 對外路徑 | 28 條：23 個 `GET`、5 個 `POST` |'), '統一 Swagger 完整28pairs')
 assert!(unified_markdown.include?('`GET /api/public/srpp/order-plan`') && unified_markdown.include?('`GET /api/public/srpp/symbol-rule-facts`'), '統一 Swagger 包含 Task497 兩支唯讀路徑')
@@ -1343,3 +1343,9 @@ report_description = report_read.fetch('description')
 assert!(report_description.include?('當前同owner的DB完整靜態snapshot全文') && report_description.include?('snapshot ID相同不代表內容相同'), 'Task629 latest compares the complete same-owner static snapshot, not ID alone')
 assert!(report_description.include?('指定calculationRunId時僅讀該歷史immutable包') && report_description.include?('不與當前已變動snapshot比較'), 'Task629 explicit run readback preserves immutable history and scope validation')
 assert!(report_read.dig('responses', '503', 'description').include?('CONTEXT_NOT_READY包含') && report_read.dig('responses', '503', 'description').include?('DB完整靜態snapshot不符'), 'Task629 current-static mismatch is a transient context-not-ready response')
+
+# Task638: current US adds a generic third module while immutable legacy remains two.
+assert!(schemas.fetch('SrppUsReportCalculations').dig('properties','modules','maxItems') == 3, 'D236美股模組上限必須為3')
+assert!(schemas.fetch('SrppUsModule').fetch('oneOf').any? { |x| x['$ref'] == '#/components/schemas/SrppUsModuleZeroTargetExit' }, 'US union缺D236退出模組')
+assert!(schemas.fetch('SrppReportLeg').fetch('description').include?('ZERO_TARGET_HIGH_ZONE_EXIT_D236'), 'leg缺D236策略與獨立驗證邊界說明')
+assert!(schemas.fetch('SrppReportLeg').dig('properties','planId'), 'D236缺真planId欄位')

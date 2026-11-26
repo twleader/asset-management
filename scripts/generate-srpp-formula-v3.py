@@ -17,6 +17,24 @@ JAVA_SOURCES = (
     "backend/src/main/java/com/steven/assets/service/srpp/report/SrppReportModuleCalculator.java",
     "backend/src/main/java/com/steven/assets/service/srpp/report/SrppReportTopupSizing.java",
 )
+ZERO_TARGET_JAVA_SOURCES = (
+    "backend/src/main/java/com/steven/assets/service/srpp/report/SrppZeroTargetExitContext.java",
+    "backend/src/main/java/com/steven/assets/service/srpp/report/SrppZeroTargetHighZoneExitCalculator.java",
+    "backend/src/main/java/com/steven/assets/service/srpp/report/SrppZeroTargetPortfolioFloor.java",
+    "backend/src/main/java/com/steven/assets/service/srpp/report/SrppZeroTargetProtection.java",
+    "backend/src/main/java/com/steven/assets/service/srpp/report/SrppReportModuleCalculator.java",
+    "backend/src/main/java/com/steven/assets/service/srpp/report/SrppNamedRadarSellCalculator.java",
+    "backend/src/main/java/com/steven/assets/service/srpp/report/SrppReportExtraCaptureAdapter.java",
+    "backend/src/main/java/com/steven/assets/service/srpp/us/UsReportPublisher.java",
+    "backend/src/main/java/com/steven/assets/service/srpp/us/UsReportCalendar.java",
+    "backend/src/main/java/com/steven/assets/service/srpp/us/UsReportCaptureAdapter.java",
+    "backend/src/main/java/com/steven/assets/service/srpp/us/UsCoreSellCalculator.java",
+    "backend/src/main/java/com/steven/assets/srpp/SrppReserveAllocation.java",
+    "bff/src/main/java/com/steven/assets/bff/publicsrpp/SrppZeroTargetExitValidator.java",
+    "bff/src/main/java/com/steven/assets/bff/publicsrpp/SrppCompletionReserveAllocation.java",
+)
+ZERO_TARGET_PYTHON_SOURCES = ("scripts/zero_target_high_zone_exit.py", "scripts/correction_dip.py",
+                              "scripts/execution_policy.py", "scripts/reserve_allocation.py")
 PYTHON_SOURCE = "scripts/dividend_stabilization.py"
 FIXTURE = ROOT / "spec/fixtures/srpp_formula_manifest_v3.json"
 CATALOG = ROOT / "backend/src/main/java/com/steven/assets/srpp/SrppFormulaCatalog.java"
@@ -78,6 +96,12 @@ def expected(srpp_root: Path) -> str:
     satellite_hashes = {"asset-management/" + p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest() for p in satellite_java}
     satellite_hashes["SRPP/scripts/execution_policy.py"] = hashlib.sha256((srpp_root / "scripts/execution_policy.py").read_bytes()).hexdigest()
     legacy["calculations"]["satelliteBuild"] = {"calculationId": "GLOBAL_EQUITY_SATELLITE_BUILD_D143_D234", "sourceSha256": satellite_hashes}
+    # Task 638: generic TW/US zero-target exit; every financial dependency is byte-bound.
+    zero_hashes = {"asset-management/" + p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest() for p in ZERO_TARGET_JAVA_SOURCES}
+    for source in ZERO_TARGET_PYTHON_SOURCES:
+        zero_hashes["SRPP/" + source] = hashlib.sha256((srpp_root / source).read_bytes()).hexdigest()
+    legacy["calculations"]["zeroTargetHighZoneExit"] = {
+        "calculationId": "ZERO_TARGET_HIGH_ZONE_EXIT_D236", "sourceSha256": zero_hashes}
     return canonical(legacy)
 
 

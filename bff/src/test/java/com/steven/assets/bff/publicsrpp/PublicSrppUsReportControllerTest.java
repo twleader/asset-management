@@ -40,14 +40,16 @@ class PublicSrppUsReportControllerTest {
  }
  @Test void verifiedSuccessfulPackageRelaysExactBytesAndRejectsWrongTenant() throws Exception {
   var users=mock(BusinessUserClient.class);when(users.configuredAdmin()).thenReturn(Mono.just(new BffUser(7L,null,null,null,"ADMIN","ACTIVE",true)));
-  byte[] bytes=getClass().getResourceAsStream("/srpp/us-report-package.json").readAllBytes();
+  var packet=SrppUsReportResponseValidatorTest.fixture();
+  byte[] bytes=SrppJcs.canonicalize(packet).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+  String coherentUri=URI.replace("a".repeat(64),packet.path("identity").path("policyBundleSha256").asText());
   var business=WebClient.builder().exchangeFunction(r->Mono.just(ClientResponse.create(HttpStatus.OK)
    .header("Content-Type","application/json").body(new String(bytes,java.nio.charset.StandardCharsets.UTF_8)).build())).build();
-  var result=client(users,business).get().uri(URI).exchange().expectStatus().isOk()
+  var result=client(users,business).get().uri(coherentUri).exchange().expectStatus().isOk()
    .expectHeader().valueEquals("Cache-Control","private, no-store").expectBody().returnResult();
   assertThat(result.getResponseBody()).isEqualTo(bytes);
   when(users.configuredAdmin()).thenReturn(Mono.just(new BffUser(2L,null,null,null,"ADMIN","ACTIVE",true)));
-  client(users,business).get().uri(URI).exchange().expectStatus().isEqualTo(502).expectBody().jsonPath("$.code").isEqualTo("UPSTREAM_INVALID");
+  client(users,business).get().uri(coherentUri).exchange().expectStatus().isEqualTo(502).expectBody().jsonPath("$.code").isEqualTo("UPSTREAM_INVALID");
  }
  @Test void configuredAndSelectedOwnerTimeoutIsFiveSecondsWithoutBusinessRead(){
   var users=mock(BusinessUserClient.class);when(users.configuredAdmin()).thenReturn(Mono.never());when(users.byEmail("selected@example.invalid")).thenReturn(Mono.never());

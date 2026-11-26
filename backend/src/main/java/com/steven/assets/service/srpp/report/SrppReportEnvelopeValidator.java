@@ -67,10 +67,19 @@ public final class SrppReportEnvelopeValidator {
     }
     private static void references(JsonNode values,JsonNode vector){require(values.isArray());for(JsonNode v:values){require(v.isTextual());if(!vector.has(v.textValue()))throw new IllegalArgumentException("Missing report source reference: "+v.textValue());}}
     private static void validateFacts(JsonNode facts){require(facts.isArray());Set<String> identities=new HashSet<>();for(JsonNode fact:facts){keys(fact,Set.of("name","subject","value","unit","quality","reason"));require(!text(fact,"name").isBlank()&&!text(fact,"unit").isBlank()&&(fact.path("subject").isNull()||fact.path("subject").isTextual())&&identities.add(fact.path("name").asText()+"\u0000"+fact.path("subject").toString()));boolean unknown="UNAVAILABLE".equals(text(fact,"quality"));require(unknown==fact.path("value").isNull());if(unknown)require(fact.path("reason").isTextual());else require("EXACT".equals(fact.path("quality").asText())&&fact.path("value").isTextual()&&SrppDecimal.isCanonical(fact.path("value").asText()));}}
-    private static void walkRefs(JsonNode n,JsonNode vector){if(n.isObject()){
-        if(n.has("ruleId")){keys(n,Set.of("ruleId","calculatorVersion","inputRefs","status","reason","values","scope"));require(!text(n,"ruleId").isBlank()&&!text(n,"calculatorVersion").isBlank()&&n.path("reason").isTextual()&&Set.of("PASS","BLOCK","UNAVAILABLE","NOT_EVALUATED").contains(text(n,"status")));require("INTRADAY".equals(n.path("ruleId").asText())?"SHORT_ONLY".equals(n.path("scope").asText()):n.path("scope").isNull());validateFacts(n.path("values"));}
-        n.fields().forEachRemaining(e->{if("inputRefs".equals(e.getKey()))references(e.getValue(),vector);else walkRefs(e.getValue(),vector);});
-    }else if(n.isArray())n.forEach(v->walkRefs(v,vector));}
+    private static void walkRefs(JsonNode n,JsonNode vector){walkRefs(n,vector,null);}
+    private static void walkRefs(JsonNode n,JsonNode vector,String parentStrategy){
+        if(n.isObject()){
+            String strategy=n.has("strategy")?n.path("strategy").asText():parentStrategy;
+            if(n.has("ruleId")){
+                keys(n,Set.of("ruleId","calculatorVersion","inputRefs","status","reason","values","scope"));require(!text(n,"ruleId").isBlank()&&!text(n,"calculatorVersion").isBlank()&&n.path("reason").isTextual()&&Set.of("PASS","BLOCK","UNAVAILABLE","NOT_EVALUATED").contains(text(n,"status")));
+                String rule=n.path("ruleId").asText();if(rule.equals("INTRADAY"))require("SHORT_ONLY".equals(n.path("scope").asText()));
+                else if(rule.equals("CORE_RETENTION")&&SrppZeroTargetHighZoneExitCalculator.STRATEGY.equals(strategy))require(n.path("scope").isNull()||Set.of("STOCK_ROTATION_RESERVE","BOND_ROTATION_RESERVE").contains(n.path("scope").asText()));
+                else require(n.path("scope").isNull());validateFacts(n.path("values"));
+            }
+            for(var entry:n.properties())if(entry.getKey().equals("inputRefs"))references(entry.getValue(),vector);else walkRefs(entry.getValue(),vector,strategy);
+        }else if(n.isArray())for(JsonNode child:n)walkRefs(child,vector,parentStrategy);
+    }
     private static void walkLegs(JsonNode n){if(n.isArray()){n.forEach(SrppReportEnvelopeValidator::walkLegs);return;}if(!n.isObject())return;
         if(n.has("strategy")&&n.has("symbol")&&n.has("status")){String status=text(n,"status");require(Set.of("ACTIONABLE_FOR_REPORT","BLOCKED","NOT_EVALUATED").contains(status));require(n.has("lots")||n.has("units"));for(String k:List.of("lots","units"))if(n.has(k)&&!n.path(k).isNull()){JsonNode qty=n.path(k);require(qty.isIntegralNumber()||qty.isTextual()&&SrppDecimal.isCanonical(qty.asText()));java.math.BigDecimal d=new java.math.BigDecimal(qty.asText());require(d.signum()>=0);if(!"ACTIONABLE_FOR_REPORT".equals(status))require(d.signum()==0);}
             for(String k:List.of("limitPrice","amount"))if(n.has(k)){if(!"ACTIONABLE_FOR_REPORT".equals(status))require(n.path(k).isNull());else require(n.path(k).isTextual()&&SrppDecimal.isCanonical(n.path(k).asText())&&new java.math.BigDecimal(n.path(k).asText()).signum()>0);}

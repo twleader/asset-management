@@ -1,0 +1,880 @@
+{
+  "synthetic": true,
+  "production": false,
+  "source_kind": "SYNTHETIC_RAW_ONLY_NO_HANDCRAFTED_LEGS",
+  "capturedAt": "2026-11-30T14:45:00Z",
+  "sessionDate": "2026-11-30",
+  "ownerUserId": 7,
+  "consumer": "Codex",
+  "reportSlot": "US_OPEN_0945",
+  "sources": {
+    "assets": {
+      "generatedAt": "2026-11-30T14:45:00Z",
+      "targetPriceComplete": true,
+      "snapshot": {
+        "id": 1,
+        "snapshotDate": "2026-11-30",
+        "deposits": [
+          {
+            "id": 1,
+            "bankId": 1,
+            "bankDisplayName": "SYNTHETIC_BANK",
+            "depositType": "DEMAND",
+            "depositDisplayName": "SYNTHETIC_CASH",
+            "currency": "TWD",
+            "originalAmount": 2120000,
+            "amount": 2120000,
+            "annualInterestRate": 0,
+            "estimatedAnnualInterest": 0,
+            "notes": "SYNTHETIC_ONLY_NOT_PRODUCTION"
+          }
+        ],
+        "funds": [],
+        "stocks": [
+          {
+            "id": 1,
+            "stockCode": "GOOGL",
+            "market": "美股",
+            "brokerId": 3,
+            "brokerDisplayName": "FUBON",
+            "currency": "USD",
+            "shares": 900,
+            "currentValue": 2880000
+          },
+          {
+            "id": 2,
+            "stockCode": "0050",
+            "market": "台股",
+            "brokerId": 3,
+            "brokerDisplayName": "FUBON",
+            "currency": "TWD",
+            "shares": 50000,
+            "currentValue": 5000000
+          }
+        ],
+        "totalDeposit": 2120000,
+        "totalFundValue": 0,
+        "totalStockValue": 7880000,
+        "totalAssets": 10000000
+      },
+      "liveAssets": {
+        "snapshotId": 1,
+        "snapshotDate": "2026-11-30",
+        "exchangeRate": 32,
+        "totalDeposit": 2120000,
+        "totalFundValue": 0,
+        "liveStockValue": 7880000,
+        "liveTotalAssets": 10000000,
+        "stocks": [
+          {
+            "holdingId": 1,
+            "stockCode": "GOOGL",
+            "market": "美股",
+            "shares": 900,
+            "currentPrice": 100,
+            "liveValue": 2880000,
+            "tradingDate": "2026-11-30",
+            "targetTradingDate": "2026-11-30",
+            "updatedAt": "2026-11-30T14:45:00Z",
+            "quoteStatus": "LIVE",
+            "source": "SYNTHETIC_ONLY",
+            "valuationSource": "TARGET_SESSION_PRICE"
+          },
+          {
+            "holdingId": 2,
+            "stockCode": "0050",
+            "market": "台股",
+            "shares": 50000,
+            "currentPrice": 100,
+            "liveValue": 5000000,
+            "tradingDate": "2026-11-30",
+            "targetTradingDate": "2026-11-30",
+            "updatedAt": "2026-11-30T14:45:00Z",
+            "quoteStatus": "VERIFIED_CLOSE",
+            "source": "SYNTHETIC_ONLY",
+            "valuationSource": "TARGET_SESSION_PRICE"
+          }
+        ]
+      }
+    },
+    "calendar": {
+      "days": [
+        {
+          "date": "2026-11-01",
+          "us": false
+        },
+        {
+          "date": "2026-11-02",
+          "us": true
+        },
+        {
+          "date": "2026-11-03",
+          "us": true
+        },
+        {
+          "date": "2026-11-04",
+          "us": true
+        },
+        {
+          "date": "2026-11-05",
+          "us": true
+        },
+        {
+          "date": "2026-11-06",
+          "us": true
+        },
+        {
+          "date": "2026-11-07",
+          "us": false
+        },
+        {
+          "date": "2026-11-08",
+          "us": false
+        },
+        {
+          "date": "2026-11-09",
+          "us": true
+        },
+        {
+          "date": "2026-11-10",
+          "us": true
+        },
+        {
+          "date": "2026-11-11",
+          "us": true
+        },
+        {
+          "date": "2026-11-12",
+          "us": true
+        },
+        {
+          "date": "2026-11-13",
+          "us": true
+        },
+        {
+          "date": "2026-11-14",
+          "us": false
+        },
+        {
+          "date": "2026-11-15",
+          "us": false
+        },
+        {
+          "date": "2026-11-16",
+          "us": true
+        },
+        {
+          "date": "2026-11-17",
+          "us": true
+        },
+        {
+          "date": "2026-11-18",
+          "us": true
+        },
+        {
+          "date": "2026-11-19",
+          "us": true
+        },
+        {
+          "date": "2026-11-20",
+          "us": true
+        },
+        {
+          "date": "2026-11-21",
+          "us": false
+        },
+        {
+          "date": "2026-11-22",
+          "us": false
+        },
+        {
+          "date": "2026-11-23",
+          "us": true
+        },
+        {
+          "date": "2026-11-24",
+          "us": true
+        },
+        {
+          "date": "2026-11-25",
+          "us": true
+        },
+        {
+          "date": "2026-11-26",
+          "us": false
+        },
+        {
+          "date": "2026-11-27",
+          "us": true
+        },
+        {
+          "date": "2026-11-28",
+          "us": false
+        },
+        {
+          "date": "2026-11-29",
+          "us": false
+        },
+        {
+          "date": "2026-11-30",
+          "us": true
+        }
+      ],
+      "session": {
+        "timezone": "America/New_York",
+        "open": "2026-11-30T09:30:00-05:00",
+        "close": "2026-11-30T16:00:00-05:00",
+        "calendarVersion": "NYSE_CASH_2026_2028_V1"
+      }
+    },
+    "classifications": {
+      "resolvedStockClasses": {
+        "GOOGL:美股": "STOCK",
+        "0050:台股": "STOCK"
+      },
+      "resolvedFundClasses": {},
+      "resolvedFundHoldingClasses": {}
+    },
+    "fx": {
+      "baseCurrency": "USD",
+      "buyRate": "32",
+      "date": "2026-11-30",
+      "liveUpdateStatus": "ACTIVE",
+      "pair": "USD/TWD",
+      "polledAt": "2026-11-30T14:45:00Z",
+      "quoteCurrency": "TWD",
+      "quoteStatus": "LIVE",
+      "sellRate": "32",
+      "source": "SYNTHETIC_ONLY",
+      "sourceUpdatedAt": "2026-11-30T14:45:00Z"
+    },
+    "market": {
+      "symbols": [
+        {
+          "book": {
+            "available": true,
+            "bookType": "REGULAR",
+            "fetchedAt": "2026-11-30T14:45:00Z",
+            "levels": [
+              {
+                "bidPrice": "100",
+                "bidVolumeShares": 500
+              },
+              {
+                "bidPrice": "99",
+                "bidVolumeShares": 500
+              },
+              {
+                "bidPrice": "98",
+                "bidVolumeShares": 500
+              },
+              {
+                "bidPrice": "97",
+                "bidVolumeShares": 500
+              },
+              {
+                "bidPrice": "96",
+                "bidVolumeShares": 500
+              }
+            ],
+            "market": "美股",
+            "marketStatus": "OPEN",
+            "source": "SYNTHETIC_ONLY",
+            "sourceTime": "2026-11-30T14:45:00Z",
+            "stockCode": "GOOGL",
+            "volumeUnit": "SHARES"
+          },
+          "quote": {
+            "closed": false,
+            "market": "美股",
+            "price": "100",
+            "quoteStatus": "LIVE",
+            "source": "SYNTHETIC_ONLY",
+            "stockCode": "GOOGL",
+            "tradingDate": "2026-11-30",
+            "updatedAt": "2026-11-30T14:45:00Z",
+            "volume": "2000000",
+            "currency": "USD",
+            "marketData": {
+              "chart": {
+                "stockCode": "GOOGL",
+                "market": "美股",
+                "requestedStart": "2026-11-12",
+                "requestedEnd": "2026-11-30",
+                "series": {
+                  "daily": {
+                    "dates": [
+                      "2026-11-12",
+                      "2026-11-13",
+                      "2026-11-16",
+                      "2026-11-17",
+                      "2026-11-18",
+                      "2026-11-19",
+                      "2026-11-20",
+                      "2026-11-23",
+                      "2026-11-24",
+                      "2026-11-25",
+                      "2026-11-27"
+                    ],
+                    "opens": [
+                      "99",
+                      "99",
+                      "99",
+                      "99",
+                      "99",
+                      "99",
+                      "99",
+                      "99",
+                      "99",
+                      "99",
+                      "99"
+                    ],
+                    "highs": [
+                      "101",
+                      "101",
+                      "101",
+                      "101",
+                      "101",
+                      "101",
+                      "101",
+                      "101",
+                      "101",
+                      "101",
+                      "101"
+                    ],
+                    "lows": [
+                      "98",
+                      "98",
+                      "98",
+                      "98",
+                      "98",
+                      "98",
+                      "98",
+                      "98",
+                      "98",
+                      "98",
+                      "98"
+                    ],
+                    "closes": [
+                      "100",
+                      "100",
+                      "100",
+                      "100",
+                      "100",
+                      "100",
+                      "100",
+                      "100",
+                      "100",
+                      "100",
+                      "100"
+                    ],
+                    "volumes": [
+                      2000000,
+                      2000000,
+                      2000000,
+                      2000000,
+                      2000000,
+                      2000000,
+                      2000000,
+                      2000000,
+                      2000000,
+                      2000000,
+                      2000000
+                    ]
+                  }
+                },
+                "source": "SYNTHETIC_DB_PRICE_ONLY"
+              },
+              "dividends": {
+                "stockCode": "GOOGL",
+                "market": "美股",
+                "events": [],
+                "source": "SYNTHETIC_DB_EMPTY_DIVIDEND_FIXTURE"
+              }
+            }
+          },
+          "radar": {
+            "actionPolicyVersion": "EVIDENCE_GATE_V1",
+            "generatedAt": "2026-11-30T14:45:00Z",
+            "ruleVersion": "TW_RULES_V28",
+            "stock": {
+              "action": "HOLD",
+              "asOfDate": "2026-11-30",
+              "dataComplete": true,
+              "distributionAdjusted": true,
+              "market": "美股",
+              "quoteStatus": "LIVE",
+              "stockCode": "GOOGL",
+              "week52Position": "0.95"
+            }
+          },
+          "stockCode": "GOOGL",
+          "coreDirection": "CORE_EXIT",
+          "historyTrusted": true,
+          "reasonCodes": [],
+          "priceHistory": [
+            {
+              "symbol": "GOOGL",
+              "market": "美股",
+              "tradingDate": "2026-11-12",
+              "open": "99",
+              "high": "101",
+              "low": "98",
+              "close": "100",
+              "closeSource": "SYNTHETIC_DB_PRICE_ONLY"
+            },
+            {
+              "symbol": "GOOGL",
+              "market": "美股",
+              "tradingDate": "2026-11-13",
+              "open": "99",
+              "high": "101",
+              "low": "98",
+              "close": "100",
+              "closeSource": "SYNTHETIC_DB_PRICE_ONLY"
+            },
+            {
+              "symbol": "GOOGL",
+              "market": "美股",
+              "tradingDate": "2026-11-16",
+              "open": "99",
+              "high": "101",
+              "low": "98",
+              "close": "100",
+              "closeSource": "SYNTHETIC_DB_PRICE_ONLY"
+            },
+            {
+              "symbol": "GOOGL",
+              "market": "美股",
+              "tradingDate": "2026-11-17",
+              "open": "99",
+              "high": "101",
+              "low": "98",
+              "close": "100",
+              "closeSource": "SYNTHETIC_DB_PRICE_ONLY"
+            },
+            {
+              "symbol": "GOOGL",
+              "market": "美股",
+              "tradingDate": "2026-11-18",
+              "open": "99",
+              "high": "101",
+              "low": "98",
+              "close": "100",
+              "closeSource": "SYNTHETIC_DB_PRICE_ONLY"
+            },
+            {
+              "symbol": "GOOGL",
+              "market": "美股",
+              "tradingDate": "2026-11-19",
+              "open": "99",
+              "high": "101",
+              "low": "98",
+              "close": "100",
+              "closeSource": "SYNTHETIC_DB_PRICE_ONLY"
+            },
+            {
+              "symbol": "GOOGL",
+              "market": "美股",
+              "tradingDate": "2026-11-20",
+              "open": "99",
+              "high": "101",
+              "low": "98",
+              "close": "100",
+              "closeSource": "SYNTHETIC_DB_PRICE_ONLY"
+            },
+            {
+              "symbol": "GOOGL",
+              "market": "美股",
+              "tradingDate": "2026-11-23",
+              "open": "99",
+              "high": "101",
+              "low": "98",
+              "close": "100",
+              "closeSource": "SYNTHETIC_DB_PRICE_ONLY"
+            },
+            {
+              "symbol": "GOOGL",
+              "market": "美股",
+              "tradingDate": "2026-11-24",
+              "open": "99",
+              "high": "101",
+              "low": "98",
+              "close": "100",
+              "closeSource": "SYNTHETIC_DB_PRICE_ONLY"
+            },
+            {
+              "symbol": "GOOGL",
+              "market": "美股",
+              "tradingDate": "2026-11-25",
+              "open": "99",
+              "high": "101",
+              "low": "98",
+              "close": "100",
+              "closeSource": "SYNTHETIC_DB_PRICE_ONLY"
+            },
+            {
+              "symbol": "GOOGL",
+              "market": "美股",
+              "tradingDate": "2026-11-27",
+              "open": "99",
+              "high": "101",
+              "low": "98",
+              "close": "100",
+              "closeSource": "SYNTHETIC_DB_PRICE_ONLY"
+            }
+          ]
+        }
+      ],
+      "radarList": {
+        "generatedAt": "2026-11-30T14:45:00Z",
+        "stocks": [
+          {
+            "action": "HOLD",
+            "asOfDate": "2026-11-30",
+            "dataComplete": true,
+            "distributionAdjusted": true,
+            "market": "美股",
+            "quoteStatus": "LIVE",
+            "stockCode": "GOOGL",
+            "week52Position": "0.95"
+          }
+        ]
+      }
+    },
+    "report-reservations": {
+      "coverage": "COMPLETE",
+      "ownerUserId": 7,
+      "policyBundleSha256": "ebbd33ee6fcaa1ebe69babbba06f5218183a6b475dee28d3a4b88946eb7530fb",
+      "rows": [],
+      "source_ref": "SYNTHETIC_ONLY",
+      "tradingDate": "2026-11-30",
+      "verified": true
+    },
+    "zero-target-exit-state": {
+      "cooldowns": [
+        {
+          "accountFingerprint": "A",
+          "brokerId": 3,
+          "coverage": "COMPLETE",
+          "coverageEnd": "2026-11-30",
+          "coverageStart": "2026-11-01",
+          "market": "美股",
+          "rows": [],
+          "scope": "OWNER_ALL_BROKERS_SAME_SYMBOL_DIRECTION",
+          "side": "SELL",
+          "source_ref": "COOLDOWN",
+          "symbol": "GOOGL",
+          "verified": true
+        }
+      ],
+      "coverage": "COMPLETE",
+      "executionAccounts": [
+        {
+          "accountFingerprint": "A",
+          "broker": "FUBON",
+          "brokerId": 3,
+          "costsByInstrument": {
+            "美股:GOOGL": {
+              "brokerageRate": "0",
+              "coverage": "COMPLETE",
+              "currency": "USD",
+              "effectiveFrom": "2026-01-01",
+              "market": "美股",
+              "maximumRegulatoryFee": null,
+              "minimumFee": "0",
+              "minimumRegulatoryFee": "0",
+              "regulatoryPerShare": "0",
+              "regulatoryRate": "0",
+              "securityType": "COMMON_STOCK",
+              "sellTaxRate": "0",
+              "source_ref": "COST",
+              "symbol": "GOOGL",
+              "validUntil": "2026-12-31",
+              "verified": true
+            }
+          },
+          "market": "美股",
+          "ownerUserId": 7,
+          "source_ref": "ACCOUNT",
+          "subaccount": "CORE",
+          "symbol": "GOOGL",
+          "verified": true
+        },
+        {
+          "accountFingerprint": "A_TW",
+          "broker": "FUBON",
+          "brokerId": 3,
+          "costsByInstrument": {},
+          "market": "台股",
+          "ownerUserId": 7,
+          "source_ref": "SYNTHETIC_ONLY_TW_CUSTODY",
+          "subaccount": "CORE_TW",
+          "symbol": "0050",
+          "verified": true
+        }
+      ],
+      "ownerUserId": 7,
+      "pending": {
+        "coverage": "COMPLETE",
+        "orders": [],
+        "verified": true
+      },
+      "plans": [
+        {
+          "accountFingerprint": "A",
+          "baselineSnapshot": {
+            "id": 99,
+            "snapshotDate": "2026-10-01",
+            "stocks": [
+              {
+                "brokerId": 3,
+                "coreShares": "900",
+                "currentValueTwd": "90000",
+                "id": 1,
+                "market": "美股",
+                "stockCode": "GOOGL"
+              }
+            ]
+          },
+          "brokerId": 3,
+          "fills": {
+            "coverage": "COMPLETE",
+            "rows": [],
+            "verified": true
+          },
+          "instrument": {
+            "minimumShareStep": 1,
+            "regularLotSize": 1,
+            "securityType": "COMMON_STOCK",
+            "source_ref": "INSTRUMENT",
+            "verified": true
+          },
+          "market": "美股",
+          "planId": "PLAN",
+          "source_ref": "PLAN",
+          "subaccount": "CORE",
+          "symbol": "GOOGL",
+          "verified": true
+        }
+      ],
+      "policyBundleSha256": "ebbd33ee6fcaa1ebe69babbba06f5218183a6b475dee28d3a4b88946eb7530fb",
+      "positionAttributions": {
+        "coverage": "COMPLETE",
+        "rows": [
+          {
+            "accountFingerprint": "A",
+            "brokerId": 3,
+            "coreShares": "900",
+            "holdingId": 1,
+            "market": "美股",
+            "protectedShares": "0",
+            "source_ref": "ATTR",
+            "subaccount": "CORE",
+            "symbol": "GOOGL"
+          },
+          {
+            "holdingId": 2,
+            "symbol": "0050",
+            "market": "台股",
+            "brokerId": 3,
+            "accountFingerprint": "A_TW",
+            "subaccount": "CORE_TW",
+            "coreShares": "0",
+            "protectedShares": "50000",
+            "source_ref": "SYNTHETIC_ONLY_NON_EXIT_POSITIVE_TARGET"
+          }
+        ],
+        "verified": true
+      },
+      "sellablePositions": {
+        "coverage": "COMPLETE",
+        "rows": [
+          {
+            "accountFingerprint": "A",
+            "brokerId": 3,
+            "holdingId": 1,
+            "market": "美股",
+            "sellableShares": "900",
+            "settledShares": "900",
+            "source_ref": "SELLABLE",
+            "symbol": "GOOGL"
+          },
+          {
+            "holdingId": 2,
+            "symbol": "0050",
+            "market": "台股",
+            "brokerId": 3,
+            "accountFingerprint": "A_TW",
+            "settledShares": "50000",
+            "sellableShares": "50000",
+            "source_ref": "SYNTHETIC_ONLY_OFFICIAL_SELLABLE"
+          }
+        ],
+        "verified": true
+      },
+      "source_ref": "SYNTHETIC_ONLY",
+      "tradability": [
+        {
+          "accountFingerprint": "A",
+          "brokerId": 3,
+          "market": "美股",
+          "source_ref": "TRADABILITY",
+          "status": "PASS",
+          "symbol": "GOOGL",
+          "verified": true
+        }
+      ],
+      "tradingDate": "2026-11-30",
+      "verified": true
+    },
+    "swagger": {
+      "sha256": "ecc3fa55751c01a1583480f0c5b257ded94444689db2f305a5851b35eb38c6bf"
+    },
+    "core-state": {
+      "ownerUserId": 7,
+      "consumer": "Codex",
+      "market": "US",
+      "status": "UNAVAILABLE",
+      "reason": "WATCH_STATE_SOURCE_UNAVAILABLE",
+      "importLedgerSha256": null,
+      "watchPolicySha256": "167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca",
+      "ledger": null,
+      "versionVector": {}
+    },
+    "us-tactical": {
+      "candidates": [],
+      "trading_date": "2026-11-30",
+      "asof": "2026-11-30T14:45:00Z",
+      "total_assets_twd": 10000000,
+      "session": {
+        "timezone": "America/New_York",
+        "open": "2026-11-30T09:30:00-05:00",
+        "close": "2026-11-30T16:00:00-05:00",
+        "calendarVersion": "NYSE_CASH_2026_2028_V1"
+      },
+      "reasonCodes": [
+        "TACTICAL_LEDGER_UNAVAILABLE"
+      ]
+    },
+    "universe": {
+      "holdingSymbols": [
+        "GOOGL"
+      ],
+      "radarSymbols": [
+        "GOOGL"
+      ],
+      "watchSymbols": [],
+      "symbols": [
+        "GOOGL"
+      ],
+      "coverage": "COMPLETE",
+      "reasonCodes": []
+    }
+  },
+  "sourceVector": {
+    "assets": {
+      "sourceId": "assets",
+      "revision": "SYNTHETIC_D236_RAW_US_V1",
+      "capturedAt": "2026-11-30T14:45:00Z",
+      "sha256": "054c53ebf8a4e683c584d363ab955a499e2d5d9c4c532a473e59092bba65bff8",
+      "coverage": "COMPLETE",
+      "validation": "VERIFIED"
+    },
+    "calendar": {
+      "sourceId": "calendar",
+      "revision": "SYNTHETIC_D236_RAW_US_V1",
+      "capturedAt": "2026-11-30T14:45:00Z",
+      "sha256": "c485bdf4b184002316281ff4b19aab15483866af1292672b24d5c096e2234e72",
+      "coverage": "COMPLETE",
+      "validation": "VERIFIED"
+    },
+    "classifications": {
+      "sourceId": "classifications",
+      "revision": "SYNTHETIC_D236_RAW_US_V1",
+      "capturedAt": "2026-11-30T14:45:00Z",
+      "sha256": "39651038e3dbf6cfd9c3ef94086aac40d74fb916fc4d5e2a607df037ce5bb0e3",
+      "coverage": "COMPLETE",
+      "validation": "VERIFIED"
+    },
+    "fx": {
+      "sourceId": "fx",
+      "revision": "SYNTHETIC_D236_RAW_US_V1",
+      "capturedAt": "2026-11-30T14:45:00Z",
+      "sha256": "49828928655733548664af7c8fa4cfed9dd54367aa4b018e914587be476a0852",
+      "coverage": "COMPLETE",
+      "validation": "VERIFIED"
+    },
+    "market": {
+      "sourceId": "market",
+      "revision": "SYNTHETIC_D236_RAW_US_V1",
+      "capturedAt": "2026-11-30T14:45:00Z",
+      "sha256": "c2a8a920e619b83f315aff3af012e119cc8e6a65b248327ce1990b593dcfc6b5",
+      "coverage": "COMPLETE",
+      "validation": "VERIFIED"
+    },
+    "policy": {
+      "sourceId": "policy",
+      "revision": "SYNTHETIC_D236_RAW_US_V1",
+      "capturedAt": "2026-11-30T14:45:00Z",
+      "sha256": "e10499fa112c2755debcf21c07e03f5054b4d63ce02ea6d766ecfe1c2168c10f",
+      "coverage": "COMPLETE",
+      "validation": "VERIFIED"
+    },
+    "report-reservations": {
+      "sourceId": "report-reservations",
+      "revision": "SYNTHETIC_D236_RAW_US_V1",
+      "capturedAt": "2026-11-30T14:45:00Z",
+      "sha256": "4c87ec70c96c48172ddcf6b38ce2e64b224fd13fa75c3eedd8fb584288418382",
+      "coverage": "COMPLETE",
+      "validation": "VERIFIED"
+    },
+    "zero-target-exit-state": {
+      "sourceId": "zero-target-exit-state",
+      "revision": "SYNTHETIC_D236_RAW_US_V1",
+      "capturedAt": "2026-11-30T14:45:00Z",
+      "sha256": "78e5d943cc6c45dae57aba245bfbb7ab323e74cc13ba07b31f254b2da76112cf",
+      "coverage": "COMPLETE",
+      "validation": "VERIFIED"
+    },
+    "swagger": {
+      "sourceId": "swagger",
+      "revision": "SYNTHETIC_D236_RAW_US_V1",
+      "capturedAt": "2026-11-30T14:45:00Z",
+      "sha256": "004dfeacb3ae56f3310e407e421e89b0a7b717e24297075e33d75c05f8c13707",
+      "coverage": "COMPLETE",
+      "validation": "VERIFIED"
+    },
+    "core-state": {
+      "sourceId": "core-state",
+      "revision": "SYNTHETIC_D236_RAW_US_V1",
+      "capturedAt": "2026-11-30T14:45:00Z",
+      "sha256": "0914053b39ce0c8b2dffa09b724c07c10360db6e4631757c16a40795561145cc",
+      "coverage": "NONE",
+      "validation": "UNAVAILABLE"
+    },
+    "us-tactical": {
+      "sourceId": "us-tactical",
+      "revision": "SYNTHETIC_D236_RAW_US_V1",
+      "capturedAt": "2026-11-30T14:45:00Z",
+      "sha256": "ee8f438057b20491ae1130bf98f700d93f9130324c928cb6c3e930df62eb0707",
+      "coverage": "COMPLETE",
+      "validation": "VERIFIED"
+    },
+    "universe": {
+      "sourceId": "universe",
+      "revision": "SYNTHETIC_D236_RAW_US_V1",
+      "capturedAt": "2026-11-30T14:45:00Z",
+      "sha256": "221919ad5982d59a457856b6df7ae4528c032ee3475eddc2ed523b98fac4f7c8",
+      "coverage": "COMPLETE",
+      "validation": "VERIFIED"
+    }
+  },
+  "unreleasedPolicyBundleSha256": "ebbd33ee6fcaa1ebe69babbba06f5218183a6b475dee28d3a4b88946eb7530fb",
+  "notes": [
+    "No output legs or result facts are authored here.",
+    "Full original watch state remains UNAVAILABLE; publisher must preserve isolation.",
+    "Policy bytes are an intermediate candidate, not a final release.",
+    "Calendar flags copied from actual retained local calendar; all prices/inventory/books are explicitly fictional."
+  ]
+}

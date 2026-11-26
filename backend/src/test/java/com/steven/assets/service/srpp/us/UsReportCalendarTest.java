@@ -92,4 +92,15 @@ class UsReportCalendarTest {
         var fixed=UsReportRequestTest.query();fixed.add("calculationRunId",saved.id().toString());when(port.byId(7L,saved.id())).thenReturn(Optional.of(saved));
         assertThat(reader(port,"2026-10-26T14:45:00Z").read(fixed)).isEqualTo(saved.content());
     }
+    @org.junit.jupiter.api.Test void d236KeepsExistingSemanticWatchEvidenceWithoutReset(){
+        var model=UsReportFixtures.AUTHORITY.model().path("execution_policy").path("core_sell_guard_d174");
+        org.assertj.core.api.Assertions.assertThat(UsCoreSellCalculator.watchPolicyFingerprint(model)).isEqualTo("167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca");
+        com.fasterxml.jackson.databind.node.ObjectNode old=UsReportFixtures.parity().path("core").get(0).path("ledger").path("states").path("GOOGL").deepCopy();old.put("policy_sha256","167dd0095d9be9e576b476102800bcd17ef266fd6d8d932ce949af94e60e85ca");
+        var normalized=UsCoreSellCalculator.normalizeWatchState(old,"GOOGL","2026-11-26",model);
+        org.assertj.core.api.Assertions.assertThat(normalized).isEqualTo(old);
+        org.assertj.core.api.Assertions.assertThat(normalized.path("high_water").asText()).isEqualTo("100");
+        org.assertj.core.api.Assertions.assertThat(normalized.path("armed_date").asText()).isEqualTo("2026-10-01");
+        org.assertj.core.api.Assertions.assertThat(normalized.path("evidence_sha256").asText()).isEqualTo("prior-verified-evidence");
+    }
+
 }
