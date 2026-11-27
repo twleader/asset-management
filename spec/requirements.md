@@ -7401,3 +7401,10 @@ Task638最終驗收延續：必要非market sourceVector須COMPLETE，market PAR
 **User Story：** 作為SRPP日報使用者，我需要正文中的現行政策版本與已發布D-236／2.78.0／3.25.0一致，避免文件header通過而正文衝突令早報STOPPED_L0。
 
 **驗收條件：** 源端修復CURRENT_PLAN獨立政策版本與DAILY_TRADING_AUTOMATION內文現行tuple，語意守門需涵蓋這兩種明確現行宣告，不將明示歷史章節視為現行；錯版本即使重建runtime/manifest亦拒絕。資產端僅同步凍結後manifest等authority metadata；model、Swagger、公式、calculator source hashes與所有golden金融expected必須保持原bytes或逐值一致。既有generator產insert-only SQL，兩repo落地及remote精確讀回後才正式登錄與main重建/recreate必要business-services；原run STOP與無草稿證據保留，本輪不補產、寄信或改交易硬閘。
+
+
+### Task 640：午報權威讀取游標的規則包配套發布（延伸 Requirements 187／193）
+
+**User Story：** 作為SRPP日報使用者，我需要LLM在剩餘時限內沿唯一下一批指令繼續完整讀取權威來源，避免沒有工具錯誤卻在17/68批自行收工；來源讀取導航與資產端發布身分必須一致。
+
+**驗收條件：** SRPP新增本機有界權威讀取游標，每次輸出一完整batch、END與唯一精確next command，下次必須顯式ACK上一批；ACK只代表LLM自述，絕不是已閱讀證明。原子狀態綁來源身分、已ACK進度、原started_at與既有deadline，錯ACK／來源漂移／重置延限拒絕，縮批新plan仍沿原started_at並從0開始。startup僅讀shared文、不提前讀downstream；core／條件包沿同工具導航，不改日曆、金融硬閘或交易授權。資產端只同步凍結manifest與必要bundle metadata，model／Swagger／formula／calculator bytes及金融golden expected保持，兩repo落地後才insert-only registry及乾淨main重建必要服務；保留原午報INCOMPLETE，不補報或寄信。

@@ -14413,3 +14413,10 @@ Task638 CORE_RETENTION另以同owner單一portfolio budget重演原日期floor�
 源端以不新增I/O的本機語意檢核補足初始preamble範圍：識別CURRENT_PLAN獨立政策／模型版本欄位及DAILY內明示現行decision/policy/model tuple，驗證完整token並保留歷史章節原文。既有L0不解除，startup仍先交易日曆；維護build不能祝福語意衝突。
 
 資產端不改production calculator、BFF、API/schema、formula或model，等待唯一SRPP feature來源凍結後copy精確manifest bytes，原generator產正式policy projection、SQL及golden。驗金融輸出與calculator hashes不變，再依Task504既有完整發布鏈同步同bundle；只重建必要business-services，JAR authority全文比對。Git/registry/deploy/9090各保留獨立收據，維護驗證不能當日報已採用。
+
+
+### Task 640：本機權威讀取游標與metadata authority發布
+
+本輪源端游標負責本機逐批導航：輸出完整batch及END後才提供唯一下一步，下一call顯式ACK上一批、原子保存來源identity與進度；ACK不能冒充LLM完整讀取證據。原started_at與deadline不可重置，source drift與錯ACK fail closed，縮批重建plan從0且沿原起跑。startup只限shared文，不在交易日曆前碰downstream來源；核心及條件包共用導航，不做API取數、金融計算或交易授權。
+
+資產端不執行游標、不新增producer/DB/API/排程，只等待唯一SRPP來源凍結後同步精確manifest，以既有generator產SQL與golden metadata。model／Swagger／正式policy projection／formula／calculator原bytes與各case金融輸出不變；本輪重新跑authority、必要golden、registry generator與backend測試，獨立spec/arch審查。兩repo feature/no-ff/push與remote readback後才merged SQL insert-only登錄、main正式設定business-services重建/recreate、JAR全文與環境/無關容器保留驗證；host9090維護檢查與正式日報採用分開。
