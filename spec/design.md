@@ -14406,3 +14406,10 @@ SRPP 台股與美股事件反彈退潮提示只供日報風險說明，原交易
 新pure共用calculator以TW／US明示context adapter消費同輪immutable sources，15typed gates和planId綁定dynamic symbol/market/broker/account；zero-target-exit-state提供canonical attribution／baseline／fills／sellable／pending／allbroker cooldown，不挪用D223。TW沿STRATEGIC_BUY_GATES.data.legs，US沿既有endpoint新增ZERO_TARGET_EXIT module，BFF與SRPP兩consumer均驗raw來源、modeltarget與策略選路，多leg依identity去重且不能降標洗BLOCKED。市場calendar/session/units/tick/costcurrency獨立，源缺失具名UNAVAILABLE。OpenAPI、Swaggeridentity、formula新Java/Python來源列表、goldens與registryinsert-only SQL同步；不新增broker或HTTP路由。完整DTO、保護例外與驗證矩陣以t638為本輪自足來源。
 
 Task638 CORE_RETENTION另以同owner單一portfolio budget重演原日期floor、canonical L0股票/基金分類、全broker掛單/linked預留及所有positive SELL prefix；USD先native max再保守FX，D236排序逐腿消耗，bond獨立。中間期raw completion用原D222 independent selector/project及00865B canonical分帳重演，不信derived bool；完整DTO/rounding/source及anti-downgrade封口見t638相應專節。
+
+
+### Task 639：正文現行版本宣告與authority metadata發布
+
+源端以不新增I/O的本機語意檢核補足初始preamble範圍：識別CURRENT_PLAN獨立政策／模型版本欄位及DAILY內明示現行decision/policy/model tuple，驗證完整token並保留歷史章節原文。既有L0不解除，startup仍先交易日曆；維護build不能祝福語意衝突。
+
+資產端不改production calculator、BFF、API/schema、formula或model，等待唯一SRPP feature來源凍結後copy精確manifest bytes，原generator產正式policy projection、SQL及golden。驗金融輸出與calculator hashes不變，再依Task504既有完整發布鏈同步同bundle；只重建必要business-services，JAR authority全文比對。Git/registry/deploy/9090各保留獨立收據，維護驗證不能當日報已採用。
