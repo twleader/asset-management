@@ -14420,3 +14420,10 @@ Task638 CORE_RETENTION另以同owner單一portfolio budget重演原日期floor�
 本輪源端游標負責本機逐批導航：輸出完整batch及END後才提供唯一下一步，下一call顯式ACK上一批、原子保存來源identity與進度；ACK不能冒充LLM完整讀取證據。原started_at與deadline不可重置，source drift與錯ACK fail closed，縮批重建plan從0且沿原起跑。startup只限shared文，不在交易日曆前碰downstream來源；核心及條件包共用導航，不做API取數、金融計算或交易授權。
 
 資產端不執行游標、不新增producer/DB/API/排程，只等待唯一SRPP來源凍結後同步精確manifest，以既有generator產SQL與golden metadata。model／Swagger／正式policy projection／formula／calculator原bytes與各case金融輸出不變；本輪重新跑authority、必要golden、registry generator與backend測試，獨立spec/arch審查。兩repo feature/no-ff/push與remote readback後才merged SQL insert-only登錄、main正式設定business-services重建/recreate、JAR全文與環境/無關容器保留驗證；host9090維護檢查與正式日報採用分開。
+
+
+### Task 641：日報階段包渲染閘與metadata authority發布
+
+源端閘門只在本機日報渲染與preflight命令列執行：讀rule_packs.json的stage包清單，核對事實檔所在目錄timing.json.packs_read的自述紀錄（游標字串或手寫物件），2026-11-30起缺包fail closed並回補讀方式，2026-11-30前不擋。閘門不讀API、不做金融計算、不證明已讀、不涵蓋條件包，也不產交易授權。
+
+資產端不執行閘門、不新增producer/DB/API/排程，只等待唯一SRPP來源凍結後同步精確manifest，以既有generator產SQL與golden metadata。model／Swagger／正式policy projection／formula／calculator原bytes與各case金融輸出不變；本輪重新跑authority、必要golden、registry generator與backend測試，獨立spec/arch審查。兩repo feature/no-ff/push與remote readback後才merged SQL insert-only登錄、main正式設定business-services重建/recreate、JAR全文與環境/無關容器保留驗證；host 9090維護檢查與正式日報採用分開。
